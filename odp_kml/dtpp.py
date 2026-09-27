@@ -80,13 +80,18 @@ def parse_metafile(source: bytes | Path) -> Metafile:
 
 
 def _takeoff_minimums_pdf(airport: ET.Element) -> str | None:
-    """The ``pdf_name`` of the airport's TAKEOFF MINIMUMS record, if it has one."""
+    """The volume ``pdf_name`` of the airport's TAKEOFF MINIMUMS record, if any.
+
+    A withdrawn entry keeps its record but points at ``DELETED_JOB.PDF``
+    rather than a volume file; such records are ignored.
+    """
     for record in airport.iter("record"):
         if (
             record.findtext("chart_code") == "MIN"
             and record.findtext("chart_name") == "TAKEOFF MINIMUMS"
+            and (pdf_name := record.findtext("pdf_name", "")).endswith(TO_PDF_SUFFIX)
         ):
-            return record.findtext("pdf_name", "")
+            return pdf_name
     return None
 
 

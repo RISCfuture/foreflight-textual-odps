@@ -54,3 +54,13 @@ class TestParseMetafile:
 
     def test_accepts_raw_bytes(self):
         assert parse_metafile(METAFILE.read_bytes()) == parse_metafile(METAFILE)
+
+
+def test_deleted_takeoff_minimums_record_is_ignored():
+    """A withdrawn entry points at DELETED_JOB.PDF, not a volume file."""
+    xml = METAFILE.read_text().replace("SW4TO.PDF", "DELETED_JOB.PDF", 1)
+
+    metafile = parse_metafile(xml.encode())
+
+    assert all(a.pdf_name.endswith("TO.PDF") for a in metafile.airports.values())
+    assert "DELETED_JOB.PDF" not in {a.pdf_name for a in metafile.airports.values()}
