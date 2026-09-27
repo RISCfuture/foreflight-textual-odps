@@ -379,6 +379,7 @@ def _climb_heading(pen: _Pen, leg: ClimbHeading, direction: Turn | None) -> None
                 _arrowhead(ctx, name, Style.ROUTE, pen.at, pen.course)
             return
         case Altitude():
+            _require_climb(pen, leg.until)
             straight = max(0.0, pen.altitude_leg_nm(leg.until.feet) - pen.along_nm)
         case _:
             _unsupported(leg)
@@ -390,6 +391,16 @@ def _climb_heading(pen: _Pen, leg: ClimbHeading, direction: Turn | None) -> None
     _arrowhead(ctx, name, Style.ROUTE, pen.at, pen.course)
     _offset_label(pen, heading_label(leg.heading), midpoint(turn_end, pen.at), side)
     ctx.label(format_altitude(leg.until, ctx.params.label_style), pen.at)
+
+
+def _require_climb(pen: _Pen, altitude: Altitude) -> None:
+    """Refuse an altitude at or below where the climb began (at least the DER
+    crossing height): the text or the data behind it is wrong."""
+    if altitude.feet <= pen.base_alt_ft:
+        raise Degenerate(
+            "altitude not above current",
+            f"{altitude.feet} ft, climb began at {pen.base_alt_ft:.0f} ft",
+        )
 
 
 def _direct(pen: _Pen, leg: Direct, direction: Turn | None) -> None:

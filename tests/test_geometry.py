@@ -349,3 +349,15 @@ def test_hold_fix_behind_is_degenerate():
         draw(hold_after_climb((1.0, 3.0)))
 
     assert raised.value.signature == "hold fix behind"
+
+
+@pytest.mark.parametrize("altitude", [4000, 5000, 5035])
+def test_climb_heading_to_an_altitude_not_above_the_climb_start_is_degenerate(
+    altitude,
+):
+    leg = ClimbHeading(magnetic(0), feet(altitude))
+
+    with pytest.raises(Degenerate) as raised:
+        draw(resolved(group(leg)))
+
+    assert raised.value.signature == "altitude not above current"

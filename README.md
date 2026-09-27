@@ -46,8 +46,9 @@ with certainty:
 - Direct-to-navaid and heading legs flown to an altitude.
 - Radial intercepts and tracking to an altitude, fix, DME distance, or
   the navaid.
-- "Proceed on course" as a short dashed stub, bent toward any published
-  turn restriction.
+- "Proceed on course" after a runway's legs as a short dashed stub, bent
+  toward any published turn restriction. A VCOA that only proceeds on
+  course draws just its circle.
 - Climb-in-hold racetracks.
 - VCOA (visual climb over airport) circles, including airports whose only
   procedure is a VCOA.
