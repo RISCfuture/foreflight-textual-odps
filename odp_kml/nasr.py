@@ -177,11 +177,12 @@ def _read_csv(zip_path: Path, member: str) -> list[dict[str, str]]:
 
 
 def _group_by_ids(
-    rows: list[dict[str, str]], id_fields: tuple[str, str]
-) -> dict[tuple[str, str], list[dict[str, str]]]:
-    groups: dict[tuple[str, str], list[dict[str, str]]] = {}
+    rows: list[dict[str, str]], id_fields: tuple[str, ...]
+) -> dict[tuple[str, ...], list[dict[str, str]]]:
+    """Rows grouped by the tuple of their values at id_fields."""
+    groups: dict[tuple[str, ...], list[dict[str, str]]] = {}
     for row in rows:
-        key = (row[id_fields[0]], row[id_fields[1]])
+        key = tuple(row[field] for field in id_fields)
         groups.setdefault(key, []).append(row)
     return groups
 
@@ -191,7 +192,7 @@ def _group_by_ids(
 
 def _load_airports(apt_zip: Path) -> dict[str, Airport]:
     base_rows = _read_csv(apt_zip, "APT_BASE.csv")
-    runway_rows = _read_csv(apt_zip, "APT_RWY.csv")
+    runways_by_airport = _group_by_ids(_read_csv(apt_zip, "APT_RWY.csv"), ("ARPT_ID",))
     ends_by_runway = _group_by_ids(
         _read_csv(apt_zip, "APT_RWY_END.csv"), ("ARPT_ID", "RWY_ID")
     )
@@ -207,8 +208,7 @@ def _load_airports(apt_zip: Path) -> dict[str, Airport]:
                 _load_runway(
                     runway_row, ends_by_runway.get((lid, runway_row["RWY_ID"]), [])
                 )
-                for runway_row in runway_rows
-                if runway_row["ARPT_ID"] == lid
+                for runway_row in runways_by_airport.get((lid,), [])
             )
             if runway is not None
         )
@@ -304,13 +304,17 @@ def _load_fixes(fix_zip: Path) -> dict[str, tuple[Fix, ...]]:
 def _load_holds(hpf_zip: Path) -> dict[str, tuple[Hold, ...]]:
     holds: dict[str, list[Hold]] = {}
     for row in _read_csv(hpf_zip, "HPF_BASE.csv"):
-        hold, key = _load_hold(row)
+        loaded = _load_hold(row)
+        if loaded is None:
+            continue
+        hold, key = loaded
         holds.setdefault(key, []).append(hold)
     return {ident: tuple(group) for ident, group in holds.items()}
 
 
-def _load_hold(row: dict[str, str]) -> tuple[Hold, str]:
-    """A Hold and the identifier it is filed under.
+def _load_hold(row: dict[str, str]) -> tuple[Hold, str] | None:
+    """A Hold and the identifier it is filed under, or None if the row names
+    neither a fix nor a navaid to key it by.
 
     A hold at a named fix (e.g. "TOBEY INT") is keyed by that fix; a hold
     flown directly at a navaid, with no separate fix, falls back to the
@@ -319,6 +323,8 @@ def _load_hold(row: dict[str, str]) -> tuple[Hold, str]:
     fix_id = row["FIX_ID"].strip()
     navaid_id = row["NAV_ID"].strip() or None
     key = fix_id or navaid_id
+    if key is None:
+        return None
     hold = Hold(
         name=row["HP_NAME"],
         fix_ident=key,

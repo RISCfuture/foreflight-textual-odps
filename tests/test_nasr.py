@@ -7,6 +7,7 @@ import pytest
 
 from odp_kml.cycle import Cycle
 from odp_kml.nasr import (
+    _load_hold,
     fetch,
     group_url,
     load,
@@ -107,6 +108,12 @@ class TestAirports:
         runway_ids = {r.id for r in nasr_data.airports["TPH"].runways}
         assert runway_ids == {"11/29", "15/33"}
 
+    def test_closed_airport_is_excluded(self, nasr_data):
+        assert "13CL" not in nasr_data.airports
+
+    def test_non_airport_site_type_is_excluded(self, nasr_data):
+        assert "26CN" not in nasr_data.airports
+
 
 class TestNavaids:
     def test_tph_navaid_is_a_vortac_with_a_station_declination(self, nasr_data):
@@ -138,6 +145,18 @@ class TestHolds:
         holds_at_tph = nasr_data.holds["TPH"]
         assert all(h.fix_ident == "TPH" for h in holds_at_tph)
         assert len(holds_at_tph) == 4
+
+    def test_hold_with_no_fix_or_navaid_identifier_is_skipped(self):
+        row = {
+            "HP_NAME": "ORPHAN HOLD",
+            "FIX_ID": "",
+            "NAV_ID": "",
+            "COURSE_INBOUND_DEG": "90",
+            "TURN_DIRECTION": "R",
+            "LEG_LENGTH_DIST": "",
+            "HOLD_DIRECTION": "",
+        }
+        assert _load_hold(row) is None
 
 
 class TestFetch:
