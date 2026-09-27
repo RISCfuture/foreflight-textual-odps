@@ -120,6 +120,18 @@ class TestRunways:
         assert excinfo.value.kind == Kind.RUNWAY_MISSING
         assert excinfo.value.signature == "runway end position missing"
 
+    def test_runway_resolves_with_an_unpadded_runway_id(self, nasr_data):
+        airport = nasr_data.airports["BAM"]
+        procedure = Procedure(
+            "BAM", None, (RunwayGroup(("4",), (Thence(),)),), None, ()
+        )
+
+        result = resolve(procedure, airport, nasr_data)
+
+        runway = result.runways["4"]
+        end_22 = airport.runway_end("22")
+        assert runway.der == end_22.position
+
     def test_short_tora_shifts_der_back_from_the_reciprocal_end(self):
         end_a = nasr.RunwayEnd("09", LatLon(40.0, -100.0), 1000.0, 90, None, 4000)
         end_b = nasr.RunwayEnd("27", LatLon(40.0, -99.9), 1000.0, 270, None, None)

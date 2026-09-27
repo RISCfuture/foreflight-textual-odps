@@ -74,6 +74,15 @@ class Airport:
                 return runway.ends[1 - ids.index(target)]
         return None
 
+    def runway_containing(self, end_id: str) -> Runway | None:
+        """The `Runway` that has an end named ``end_id`` (e.g. "15" or "4"),
+        or None if absent."""
+        target = canonical_runway_id(end_id)
+        for runway in self.runways:
+            if target in (canonical_runway_id(end.id) for end in runway.ends):
+                return runway
+        return None
+
 
 @dataclasses.dataclass(frozen=True)
 class Navaid:

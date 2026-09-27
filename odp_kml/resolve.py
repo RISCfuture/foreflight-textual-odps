@@ -143,7 +143,13 @@ def _der_position(
     """The departure end of the runway: the reciprocal end's position, pulled
     back toward `end` when the published takeoff run available is shorter
     than the full runway length."""
-    runway = _runway_containing(airport, rwy)
+    runway = airport.runway_containing(rwy)
+    if runway is None:
+        raise ResolveError(
+            Kind.RUNWAY_MISSING,
+            "runway end position missing",
+            f'runway "{rwy}" at {airport.lid}',
+        )
     if (
         runway.length_ft is None
         or end.tora_ft is None
@@ -153,13 +159,6 @@ def _der_position(
     shift_nm = (runway.length_ft - end.tora_ft) / _FEET_PER_NM
     back_bearing = initial_bearing(reciprocal.position, end.position)
     return destination(reciprocal.position, back_bearing, shift_nm)
-
-
-def _runway_containing(airport: nasr.Airport, end_id: str) -> nasr.Runway:
-    """The `Runway` that has an end named `end_id`."""
-    return next(
-        runway for runway in airport.runways if end_id in {e.id for e in runway.ends}
-    )
 
 
 # --- Magnetic variation ----------------------------------------------------

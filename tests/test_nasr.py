@@ -140,6 +140,14 @@ class TestAirports:
     def test_reciprocal_end_accepts_an_unpadded_numeric_id(self, nasr_data):
         assert nasr_data.airports["BAM"].reciprocal_end("4").id == "22"
 
+    def test_runway_containing_accepts_an_unpadded_numeric_id(self, nasr_data):
+        runway = nasr_data.airports["BAM"].runway_containing("4")
+        assert runway is not None
+        assert runway.id == "04/22"
+
+    def test_runway_containing_unknown_end_is_none(self, nasr_data):
+        assert nasr_data.airports["SQL"].runway_containing("99") is None
+
 
 class TestNavaids:
     def test_tph_navaid_is_a_vortac_with_a_station_declination(self, nasr_data):
