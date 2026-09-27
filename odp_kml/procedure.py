@@ -174,10 +174,11 @@ class ClimbInHold:
 
 @dataclasses.dataclass(frozen=True)
 class ProceedOnCourse:
-    """Continue on course before turning, e.g. "before turning left".
+    """Continue on course, e.g. "climb heading 090 to 7000 before turning left".
 
-    `turn_restriction` is the direction of that eventual turn, which must
-    wait for the leg's end condition; `None` if none is published.
+    `turn_restriction` is the direction of that eventual turn, deferred
+    until the preceding leg's altitude or fix is reached; `None` if the
+    procedure names no such turn.
     """
 
     turn_restriction: Turn | None = None

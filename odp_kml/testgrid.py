@@ -43,7 +43,7 @@ from .shapes import AirportDrawing, Label
 __all__ = ["Cell", "cells", "draw_grid"]
 
 DEFAULT_ORIGIN = LatLon(38.5, -117.5)
-DEFAULT_SPACING_DEG = 0.25
+DEFAULT_SPACING_DEG = 0.5
 DEFAULT_COLUMNS = 6
 
 RUNWAY_LENGTH_NM = 6000.0 / 6076.11549
@@ -78,10 +78,6 @@ class _Construction:
     params: DisplayParams = dataclasses.field(default_factory=DisplayParams)
 
 
-def _feet(n: int, kind: AltitudeKind, phrase: str) -> Altitude:
-    return Altitude(n, kind, phrase)
-
-
 def _group(*legs: Leg, runway: str = "09") -> RunwayGroup:
     return RunwayGroup((runway,), legs)
 
@@ -97,16 +93,16 @@ _CONSTRUCTIONS: tuple[_Construction, ...] = (
         "Climb heading then proceed on course",
         (
             _group(
-                ClimbHeading(90, _feet(7000, AltitudeKind.AT_OR_ABOVE, "7000")),
+                ClimbHeading(90, Altitude(7000, AltitudeKind.AT_OR_ABOVE, "7000")),
                 ProceedOnCourse(),
             ),
         ),
     ),
     _Construction(
-        "Climb heading then proceed on course, no left turns",
+        "Climb heading to altitude before turning left",
         (
             _group(
-                ClimbHeading(90, _feet(7000, AltitudeKind.AT_OR_ABOVE, "7000")),
+                ClimbHeading(90, Altitude(7000, AltitudeKind.AT_OR_ABOVE, "7000")),
                 ProceedOnCourse(Turn.LEFT),
             ),
         ),
@@ -149,7 +145,7 @@ _CONSTRUCTIONS: tuple[_Construction, ...] = (
                         VOR,
                         45,
                         outbound=True,
-                        until=_feet(9000, AltitudeKind.AT, "to 9000"),
+                        until=Altitude(9000, AltitudeKind.AT, "to 9000"),
                     ),
                 )
             ),
@@ -169,7 +165,7 @@ _CONSTRUCTIONS: tuple[_Construction, ...] = (
                 ClimbInHold(
                     VOR,
                     HoldSpec(Compass8.NE, Turn.RIGHT, 225),
-                    _feet(9300, AltitudeKind.AT_OR_ABOVE, "at or above 9300"),
+                    Altitude(9300, AltitudeKind.AT_OR_ABOVE, "at or above 9300"),
                 ),
             ),
         ),
@@ -183,7 +179,7 @@ _CONSTRUCTIONS: tuple[_Construction, ...] = (
                 ClimbInHold(
                     VOR,
                     HoldSpec(Compass8.SW, Turn.LEFT, 225),
-                    _feet(9300, AltitudeKind.AT_OR_ABOVE, "at or above 9300"),
+                    Altitude(9300, AltitudeKind.AT_OR_ABOVE, "at or above 9300"),
                 ),
             ),
         ),
@@ -204,14 +200,14 @@ _CONSTRUCTIONS: tuple[_Construction, ...] = (
         (
             _group(
                 ClimbHeading(
-                    90, _feet(7000, AltitudeKind.AT_OR_BELOW, "at or below 7000")
+                    90, Altitude(7000, AltitudeKind.AT_OR_BELOW, "at or below 7000")
                 )
             ),
         ),
     ),
     _Construction(
         "Climb heading at a mandatory altitude",
-        (_group(ClimbHeading(90, _feet(7000, AltitudeKind.AT, "at 7000"))),),
+        (_group(ClimbHeading(90, Altitude(7000, AltitudeKind.AT, "at 7000"))),),
     ),
     _Construction(
         "Visual climb over the airport then direct to a VOR",
@@ -229,14 +225,14 @@ _CONSTRUCTIONS: tuple[_Construction, ...] = (
             ClimbInHold(
                 VOR,
                 HoldSpec(Compass8.NE, Turn.RIGHT, 225),
-                _feet(9300, AltitudeKind.AT_OR_ABOVE, "at or above 9300"),
+                Altitude(9300, AltitudeKind.AT_OR_ABOVE, "at or above 9300"),
             ),
         ),
         vor_xy=(0.5, 12.0),
     ),
     _Construction(
         "Climb heading at a published climb gradient",
-        (_group(ClimbHeading(90, _feet(7000, AltitudeKind.AT_OR_ABOVE, "7000"))),),
+        (_group(ClimbHeading(90, Altitude(7000, AltitudeKind.AT_OR_ABOVE, "7000"))),),
         gradient_09=350.0,
     ),
     _Construction(
@@ -244,7 +240,7 @@ _CONSTRUCTIONS: tuple[_Construction, ...] = (
         (
             _group(
                 ClimbHeading(
-                    90, _feet(7000, AltitudeKind.AT_OR_BELOW, "at or below 7000")
+                    90, Altitude(7000, AltitudeKind.AT_OR_BELOW, "at or below 7000")
                 )
             ),
         ),

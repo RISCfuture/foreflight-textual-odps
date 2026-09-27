@@ -12,7 +12,7 @@ from odp_kml.testgrid import cells, draw_grid
 from tests.test_kml import ALLOWED_ELEMENTS
 
 ORIGIN = LatLon(38.5, -117.5)
-SPACING_DEG = 0.25
+SPACING_DEG = 0.5
 COLUMNS = 6
 
 
@@ -52,7 +52,7 @@ def test_draw_grid_labels_every_cell_and_uses_only_allowed_kml_elements():
 # Recorded from a known-good render of `draw_grid()`. Update deliberately
 # (and explain why in the commit) whenever a geometry change legitimately
 # alters the grid's output.
-GOLDEN_SHA256 = "f5812dbb11c70967388c441c0682576187d68ae119e02d4951e5b3a2192f0d1e"
+GOLDEN_SHA256 = "9e0b9abca967f790cc0934288eb2a735512c76d318a32ed8da24f65c15760679"
 
 
 def test_render_kml_of_grid_matches_recorded_hash():
