@@ -2,17 +2,24 @@
 
 import json
 
-from odp_kml.findings import Finding, Kind, Report, signature_key, write_report
+from odp_kml.findings import (
+    Finding,
+    Kind,
+    Report,
+    normalize_signature,
+    signature_key,
+    write_report,
+)
 
 
 def make_finding(**overrides):
     fields = {
         "kind": Kind.UNRESOLVED_REF,
-        "signature": 'unresolved fix "ABCDE" on radial R-210',
+        "signature": 'unresolved fix "ABCDE" via TPH VOR on radial R-210',
         "airport": "TPH",
         "cycle": "2026-09-03",
         "amendment": "5",
-        "verbatim_text": 'Climb via R-210 to "ABCDE" then as filed.',
+        "verbatim_text": 'Climb via TPH VOR R-210 to "ABCDE" then as filed.',
         "detail": "no such fix in NASR",
     }
     fields.update(overrides)
@@ -33,9 +40,40 @@ class TestSignatureKey:
             second.kind, second.signature
         )
 
+    def test_identical_across_airport_and_navaid_identifiers(self):
+        first = make_finding(
+            airport="TPH",
+            signature='unmatched phrase "direct TPH VORTAC on radial R-210 thence to KTNX"',
+        )
+        second = make_finding(
+            airport="ABQ",
+            signature='unmatched   phrase "direct VNY VORTAC on radial  R-045 thence to 3U3"',
+        )
+        assert signature_key(
+            first.kind, first.signature, first.airport
+        ) == signature_key(second.kind, second.signature, second.airport)
+
+    def test_allowlisted_aviation_abbreviations_survive_blurring(self):
+        text = 'unmatched phrase "direct TPH VORTAC via NDB thence"'
+        normalized = normalize_signature(text, airport="TPH")
+        assert "vortac" in normalized
+        assert "ndb" in normalized
+        assert "tph" not in normalized
+
+    def test_own_airport_is_blurred_even_outside_the_identifier_shape(self):
+        text = 'unmatched phrase "direct K9L2XY VORTAC thence"'
+        blurred = normalize_signature(text, airport="K9L2XY")
+        unblurred = normalize_signature(text)
+        assert blurred != unblurred
+        assert "k9l2xy" not in blurred
+
     def test_differs_when_the_phrase_differs(self):
-        first = make_finding(signature='unresolved fix "ABCDE" on radial R-210')
-        second = make_finding(signature='unresolved fix "FGHIJ" on radial R-210')
+        first = make_finding(
+            signature="unresolved reference on radial R-210, proceed direct"
+        )
+        second = make_finding(
+            signature="unresolved reference on radial R-210, hold as published"
+        )
         assert signature_key(first.kind, first.signature) != signature_key(
             second.kind, second.signature
         )
@@ -156,7 +194,7 @@ class TestReportMarkdown:
         markdown = report.to_markdown()
         assert report.summary_line() in markdown
         assert "unresolved_ref" in markdown
-        assert 'unresolved fix "abcde" on radial r-nnn' in markdown
+        assert 'unresolved fix "id" on radial r-nnn' in markdown
         assert 'Climb via R-210 to "ABCDE" then as filed.' in markdown
         assert "TPH" in markdown
 

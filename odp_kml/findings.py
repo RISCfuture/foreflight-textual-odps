@@ -42,9 +42,50 @@ class Finding:
     detail: str
 
 
-_QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
 _DIGITS = re.compile(r"\d+")
 _WHITESPACE = re.compile(r"\s+")
+_IDENTIFIER = re.compile(r"\b[A-Z0-9]{2,5}\b")
+
+# Aviation abbreviations that share the identifier token shape (2-5
+# uppercase letters/digits) but name a *kind* of thing rather than one
+# airport's own navaid, fix or facility, so they must survive blurring.
+_IDENTIFIER_ALLOWLIST = frozenset(
+    {
+        "VOR",
+        "VORTAC",
+        "NDB",
+        "DME",
+        "TACAN",
+        "ILS",
+        "LOC",
+        "ATC",
+        "NA",
+        "DER",
+        "NM",
+        "MSL",
+        "AGL",
+        "VCOA",
+        "RNAV",
+        "RT",
+        "LT",
+        "N",
+        "NE",
+        "E",
+        "SE",
+        "S",
+        "SW",
+        "W",
+        "NW",
+        "IFR",
+        "VFR",
+        "KIAS",
+        "CW",
+        "CCW",
+        "AMDT",
+        "ORIG",
+        "FAA",
+    }
+)
 
 
 def _collapse_whitespace(text: str) -> str:
@@ -56,34 +97,57 @@ def _blur_digits(text: str) -> str:
     return _DIGITS.sub(lambda match: "n" * len(match.group()), text)
 
 
-def normalize_signature(text: str) -> str:
+def _blur_identifier_token(match: re.Match[str]) -> str:
+    token = match.group()
+    if token.isdigit() or token in _IDENTIFIER_ALLOWLIST:
+        return token
+    return "ID"
+
+
+def _blur_identifiers(text: str, airport: str | None) -> str:
+    """Replace airport, navaid and fix identifiers with ``ID``.
+
+    A bare token of 2-5 uppercase letters and/or digits (``TPH``, ``KTNX``,
+    ``3U3``, ``MECCA``) names one specific airport, navaid or fix rather
+    than the underlying issue, so it is blurred unless it is a fixed
+    aviation abbreviation in `_IDENTIFIER_ALLOWLIST` or is made entirely of
+    digits (a bare number is blurred separately, by digit run, so distinct
+    numeric magnitudes stay distinguishable). ``airport`` - the finding's
+    own airport LID - is blurred wherever it appears, case insensitively,
+    even when it does not fit that shape.
+    """
+    if airport:
+        text = re.sub(rf"\b{re.escape(airport)}\b", "ID", text, flags=re.IGNORECASE)
+    return _IDENTIFIER.sub(_blur_identifier_token, text)
+
+
+def normalize_signature(text: str, airport: str | None = None) -> str:
     """Fold ``text`` to a form that is identical across airports and cycles.
 
     The rules, applied in order:
 
-    1. Lowercase and collapse whitespace.
-    2. Replace every run of digits with a same-length run of ``n``, since
-       runway, radial and altitude numbers vary per airport but do not
-       change the underlying issue (``R-210`` -> ``r-nnn``, ``9300`` ->
-       ``nnnn``).
-    3. Leave quoted phrases (fix names, verbatim excerpts) untouched by
-       rule 2, so two findings that genuinely differ only inside a quote
-       still produce different signatures.
+    1. Blur the finding's own airport LID (``airport``) wherever it
+       appears, case insensitively.
+    2. Blur every other bare identifier token - an airport LID, navaid or
+       fix name of 2-5 uppercase letters/digits - to ``ID``, except a
+       fixed allowlist of aviation abbreviations (``VOR``, ``NDB``,
+       ``DME``, ...) which are kept verbatim. This applies inside quoted
+       spans too, since a quoted verbatim excerpt is exactly where such
+       identifiers appear.
+    3. Lowercase and collapse whitespace.
+    4. Replace every remaining run of digits with a same-length run of
+       ``n``, since runway, radial and altitude numbers vary per airport
+       but do not change the underlying issue (``R-210`` -> ``r-nnn``,
+       ``9300`` -> ``nnnn``).
     """
+    text = _blur_identifiers(text, airport)
     text = _collapse_whitespace(text.lower())
-    pieces = []
-    position = 0
-    for match in _QUOTED.finditer(text):
-        pieces.append(_blur_digits(text[position : match.start()]))
-        pieces.append(match.group())
-        position = match.end()
-    pieces.append(_blur_digits(text[position:]))
-    return "".join(pieces)
+    return _blur_digits(text)
 
 
-def signature_key(kind: Kind, signature: str) -> str:
+def signature_key(kind: Kind, signature: str, airport: str | None = None) -> str:
     """A stable id for ``kind`` and ``signature``, identical across airports and cycles."""
-    normalized = normalize_signature(signature)
+    normalized = normalize_signature(signature, airport)
     return hashlib.sha1(f"{kind}:{normalized}".encode()).hexdigest()
 
 
@@ -105,7 +169,7 @@ class Report:
         """Findings grouped by `signature_key`, each group sorted by airport."""
         groups: dict[str, list[Finding]] = {}
         for finding in self.findings:
-            key = signature_key(finding.kind, finding.signature)
+            key = signature_key(finding.kind, finding.signature, finding.airport)
             groups.setdefault(key, []).append(finding)
         for group in groups.values():
             group.sort(key=lambda finding: finding.airport)
@@ -167,7 +231,8 @@ class Report:
 
     def _signature_section(self, findings: list[Finding]) -> list[str]:
         first = findings[0]
-        heading = f"### {first.kind}: {normalize_signature(first.signature)} ({len(findings)} airports)"
+        signature = normalize_signature(first.signature, first.airport)
+        heading = f"### {first.kind}: {signature} ({len(findings)} airports)"
         lines = [heading, ""]
         for finding in findings:
             lines += [
