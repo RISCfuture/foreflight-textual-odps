@@ -134,15 +134,13 @@ jobs:
 
             python generate_odp_kml.py --cycle "$cycle" \
               --out "$dir/Textual ODPs.zip" --report "$dir/report.json" -v
-            python generate_odp_kml.py --test-grid --out "$dir/ODP Test Grid.zip"
 
             # GitHub rewrites spaces in release-asset filenames to dots;
             # rename up front so the name announced in the release notes
             # matches the name GitHub actually serves.
             mv -- "$dir/Textual ODPs.zip" "$dir/Textual.ODPs.zip"
-            mv -- "$dir/ODP Test Grid.zip" "$dir/ODP.Test.Grid.zip"
 
-            local pack_asset="Textual.ODPs.zip" grid_asset="ODP.Test.Grid.zip"
+            local pack_asset="Textual.ODPs.zip"
             local url_base
             if [ "$kind" = "latest" ]; then
               url_base="https://github.com/${REPO}/releases/latest/download"
@@ -150,10 +148,8 @@ jobs:
               url_base="https://github.com/${REPO}/releases/download/${cycle}"
             fi
             local pack_url="${url_base}/${pack_asset}"
-            local grid_url="${url_base}/${grid_asset}"
-            local pack_install grid_install
+            local pack_install
             pack_install="https://foreflight.com/content?downloadURL=$(printf %s "$pack_url" | jq -sRr @uri)"
-            grid_install="https://foreflight.com/content?downloadURL=$(printf %s "$grid_url" | jq -sRr @uri)"
 
             # A cycle covers 28 days starting on its effective date, so its
             # last valid day is effective date + 27.
@@ -169,12 +165,9 @@ jobs:
               echo
               echo "[Install the ODP layer](${pack_install})"
               echo
-              echo "[Install the construction test grid](${grid_install})"
-              echo
               echo "## Direct download"
               echo
               echo "${pack_url}"
-              echo "${grid_url}"
             } > "$dir/release-notes.md"
 
             local flag
@@ -192,7 +185,7 @@ jobs:
               --title "Textual ODPs - NASR ${cycle}" \
               --notes-file "$dir/release-notes.md" \
               "$flag" \
-              "$dir/$pack_asset" "$dir/$grid_asset" "$dir/report.json" "$dir/report.md"
+              "$dir/$pack_asset" "$dir/report.json" "$dir/report.md"
           }
 
           publish_cycle "$CURRENT" latest

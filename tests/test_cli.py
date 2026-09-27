@@ -1,4 +1,4 @@
-"""The command line: cycle printing, the test-grid pack and the ODP build."""
+"""The command line: cycle printing and the ODP build."""
 
 import json
 import zipfile
@@ -26,18 +26,6 @@ def test_print_cycles_reports_whether_the_next_cycle_is_posted(capsys):
     assert capsys.readouterr().out == (
         "current=2026-09-03 next=2026-10-01 next_available=true\n"
     )
-
-
-def test_test_grid_pack_has_a_manifest_and_one_layer(tmp_path):
-    out = tmp_path / "grid.zip"
-
-    assert main(["--test-grid", "--cycle", "2026-09-03", "--out", str(out)]) == 0
-
-    names = zipfile.ZipFile(out).namelist()
-    assert "ODP Test Grid/manifest.json" in names
-    assert [name for name in names if "/layers/" in name] == [
-        "ODP Test Grid/layers/ODP Test Grid.kml"
-    ]
 
 
 def test_kml_only_build_of_one_airport(tmp_path, capsys):

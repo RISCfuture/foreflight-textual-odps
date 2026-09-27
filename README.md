@@ -24,18 +24,7 @@ pack as expired (every 28 days), just tap it again. A daily CI job polls
 the FAA and publishes a new release within a day of each cycle's effective
 date.
 
-[install]: https://foreflight.com/content?downloadURL=https%3A%2F%2Fgithub.com%2FRISCfuture%2Fodp%2Freleases%2Flatest%2Fdownload%2FTextual.ODPs.zip
-
-### Test Grid
-
-A separate pack, `ODP Test Grid`, draws one synthetic procedure per
-construction (turns, radial intercepts, holds, VCOA, and so on) so a
-change to the drawing code can be checked visually in ForeFlight without a
-real airport. It is not part of the ODP data pack.
-
-**[Install the construction test grid][install-test-grid]**
-
-[install-test-grid]: https://foreflight.com/content?downloadURL=https%3A%2F%2Fgithub.com%2FRISCfuture%2Fodp%2Freleases%2Flatest%2Fdownload%2FODP.Test.Grid.zip
+[install]: https://foreflight.com/content?downloadURL=https%3A%2F%2Fgithub.com%2FRISCfuture%2Fforeflight-textual-odps%2Freleases%2Flatest%2Fdownload%2FTextual.ODPs.zip
 
 ## What is drawn
 
@@ -130,9 +119,6 @@ python generate_odp_kml.py --airports TPH,ALB --kml-only
 
 # Full nationwide build (writes "Textual ODPs.zip" and report.json/.md)
 python generate_odp_kml.py -v
-
-# The construction test-grid pack
-python generate_odp_kml.py --test-grid
 
 # Also dump each airport's normalized sections (input to draft_golden.py)
 python generate_odp_kml.py --dump-sections sections.json

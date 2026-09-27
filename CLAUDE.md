@@ -9,7 +9,6 @@ ForeFlight content pack that draws FAA textual obstacle departure procedures
   failure, unresolved reference, or degenerate geometry becomes a `Finding`
   and is reported (and filed as a GitHub issue by CI); it is never drawn.
 - The grammar has no "skip unknown words" rule.
-- Every geometry construction has a cell in the test grid (`testgrid.py`).
 - No machine learning in the runtime pipeline. `tools/draft_golden.py` is an
   offline aid for drafting test fixtures that a human reviews.
 

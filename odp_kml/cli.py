@@ -12,7 +12,7 @@ import tempfile
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from . import availability, config, pipeline, testgrid
+from . import availability, config, pipeline
 from .cycle import Cycle
 from .findings import write_report
 from .geometry import DisplayParams
@@ -33,11 +33,6 @@ class _Layer:
 
 
 ODP_LAYER = _Layer(config.PACK_NAME, config.PACK_ABBREV, config.KML_FILENAME)
-TEST_GRID_LAYER = _Layer(
-    config.TEST_GRID_PACK_NAME,
-    config.TEST_GRID_PACK_ABBREV,
-    config.TEST_GRID_KML_FILENAME,
-)
 
 
 def main(
@@ -60,11 +55,6 @@ def main(
 
     if args.print_cycles:
         print(_cycles_line(cycle, is_available(cycle.next)))
-        return 0
-    if args.test_grid:
-        out = _output_path(args, TEST_GRID_LAYER)
-        _write_layer(testgrid.draw_grid(), out, TEST_GRID_LAYER, cycle, args.kml_only)
-        print(f"wrote {out}")
         return 0
 
     try:
@@ -133,11 +123,6 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Also write each airport's normalized sections as JSON "
         "(the input of tools/draft_golden.py).",
-    )
-    ap.add_argument(
-        "--test-grid",
-        action="store_true",
-        help="Build the synthetic construction test-grid pack instead.",
     )
     ap.add_argument("-v", "--verbose", action="store_true")
     return ap
