@@ -155,7 +155,7 @@ class TokenStream:
 
     def _unmatched(self) -> ParseError:
         if self._at_end():
-            last = self._tokens[-1].lower if self._tokens else ""
+            last = phrase_signature(self._tokens[-1].text) if self._tokens else ""
             return ParseError(
                 f'unexpected end after "{last}"', self._text[-40:], len(self._text)
             )

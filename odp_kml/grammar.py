@@ -185,7 +185,7 @@ class _Parser(LegParser):
 
     def _shared_tail(self, groups: list[RunwayGroup]) -> tuple[Leg, ...]:
         """shared-tail := ("..." | "All aircraft") legs"""
-        if self._peek("...") and not (groups and _ends_with_thence(groups[-1].legs)):
+        if self._peek("...") and not _all_flown_end_with_thence(groups):
             raise self._error('"..." without a preceding "thence"')
         if not self._accept("..."):
             self._expect("all", "aircraft")
@@ -291,6 +291,12 @@ class _Parser(LegParser):
         """notify-atc := "When executing VCOA, notify ATC prior to departure." """
         if self._accept("when", "executing", "vcoa", ","):
             self._expect("notify", "atc", "prior", "to", "departure", ".")
+
+
+def _all_flown_end_with_thence(groups: list[RunwayGroup]) -> bool:
+    """Every runway group that flies legs (not an NA group) ends in "thence"."""
+    flown = [group for group in groups if group.legs]
+    return bool(flown) and all(_ends_with_thence(group.legs) for group in flown)
 
 
 def _ends_with_thence(legs: tuple[Leg, ...]) -> bool:

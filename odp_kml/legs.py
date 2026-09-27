@@ -38,6 +38,7 @@ from .procedure import (
 from .tokens import NUMBER, ParseError, TokenStream, is_ident_word, phrase_signature
 
 _MAX_IDENT_LENGTH = 4
+_MAX_DME_IDENT_LENGTH = 3
 FIX_LENGTH = 5
 
 _COMPASS_WORDS = {
@@ -79,10 +80,14 @@ class LegParser(TokenStream):
     # --- Leg sequences -----------------------------------------------------
 
     def _legs(self, legs: list[Leg]) -> tuple[Leg, ...]:
-        """legs := leg ((separator leg) | before | speed)* ("." | thence)"""
+        """legs := leg ((separator leg) | before | speed)* ("." | thence)
+
+        Tracks the fix each leg ends at, for a hold that names none.
+        """
+        self._last_fix = _end_fix(legs[-1]) if legs else None
         while True:
             if self._peek("before"):
-                legs.append(self._before())
+                self._append(legs, self._before())
             elif self._accept("."):
                 return tuple(legs)
             elif self._thence():
@@ -93,7 +98,11 @@ class LegParser(TokenStream):
                 self._reject_inline_vcoa()
                 self._reject_airway_routing()
                 self._leg_separator(required=bool(legs))
-                legs.append(self._leg())
+                self._append(legs, self._leg())
+
+    def _append(self, legs: list[Leg], leg: Leg) -> None:
+        legs.append(leg)
+        self._last_fix = _end_fix(leg)
 
     def _thence(self) -> bool:
         """thence := [","] "thence" "..." """
@@ -167,17 +176,31 @@ class LegParser(TokenStream):
         )
 
     def _speed_restriction(self) -> SpeedRestriction:
-        """speed := [","] "do not exceed" n "KIAS until" phrase"""
+        """speed := [","] "do not exceed" n "KIAS until" speed-until"""
         self._accept(",")
         self._expect("do", "not", "exceed")
         kias = self._integer()
         self._expect("kias", "until")
-        start, first = self._position(), self._index
-        while not (self._at_end() or self._peek(".") or self._peek(",")):
-            self._index += 1
-        if self._index == first:
-            raise self._unmatched()
+        start = self._position()
+        self._speed_until()
         return SpeedRestriction(kias, self._slice_from(start))
+
+    def _speed_until(self) -> None:
+        """speed-until := "established on course" | "reaching" nnnn ["MSL"]
+        | nn.n "DME" | ["crossing"] target"""
+        if self._accept("established", "on", "course"):
+            return
+        if self._accept("reaching"):
+            self._integer()
+            self._accept("msl")
+            return
+        token = self._token()
+        if token is not None and NUMBER.fullmatch(token.text):
+            self._number()
+            self._expect("dme")
+            return
+        self._accept("crossing")
+        self._target()
 
     def _with_speed(self, leg: Leg, speed: SpeedRestriction) -> Leg:
         if isinstance(leg, ClimbingTurn):
@@ -271,11 +294,7 @@ class LegParser(TokenStream):
     def _direct(self) -> Direct:
         """direct := "direct" target"""
         self._expect("direct")
-        return Direct(self._arrive_at(self._target()))
-
-    def _arrive_at(self, target: NavaidRef | FixRef) -> NavaidRef | FixRef:
-        self._last_fix = target
-        return target
+        return Direct(self._target())
 
     # --- Headings and radials ----------------------------------------------
 
@@ -332,11 +351,11 @@ class LegParser(TokenStream):
     def _outbound(
         self, direction: bool | None, navaid: NavaidRef, until: Until | None
     ) -> bool:
-        """A radial flown to its own navaid is inbound; to another fix, outbound."""
+        """A radial flown to its own navaid is inbound; any other needs the word."""
         if direction is not None:
             return direction
-        if isinstance(until, AtFix):
-            return not _same_facility(until.target, navaid)
+        if isinstance(until, AtFix) and _same_facility(until.target, navaid):
+            return False
         raise self._error('radial without "inbound" or "outbound"')
 
     # --- Leg terminators ---------------------------------------------------
@@ -355,7 +374,7 @@ class LegParser(TokenStream):
         if self._peek_dme():
             return self._dme()
         self._expect("to")
-        return AtFix(self._arrive_at(self._target()))
+        return AtFix(self._target())
 
     def _to_altitude(self) -> Altitude:
         """to-altitude := "to" nnnn"""
@@ -380,8 +399,10 @@ class LegParser(TokenStream):
         )
 
     def _dme(self) -> Dme:
-        """dme := "to" ident nn.n "DME" """
+        """dme := "to" navaid-ident nn.n "DME" """
         self._expect("to")
+        if len(self._token().text) > _MAX_DME_IDENT_LENGTH:
+            raise self._error("DME from a fix")
         navaid = NavaidRef(self._next().text)
         nm = self._number()
         self._expect("dme")
@@ -542,9 +563,21 @@ class LegParser(TokenStream):
         known = self._known_navaids.get(name)
         if known is None or known.type != navaid_type:
             phrase = f"{name} {navaid_type.value}"
-            raise ParseError(f'navaid without ident "{phrase}"', phrase, start)
+            raise ParseError("navaid without ident", phrase, start)
         return known
 
 
 def _same_facility(target: NavaidRef | FixRef, navaid: NavaidRef | FixRef) -> bool:
     return target.ident == navaid.ident
+
+
+def _end_fix(leg: Leg) -> NavaidRef | FixRef | None:
+    """The fix a leg ends at, or ``None`` when it ends anywhere else."""
+    if isinstance(leg, ClimbingTurn):
+        return _end_fix(leg.then)
+    if isinstance(leg, Direct):
+        return leg.target
+    if isinstance(leg, ClimbInHold):
+        return leg.fix
+    until = getattr(leg, "until", None)
+    return until.target if isinstance(until, AtFix) else None

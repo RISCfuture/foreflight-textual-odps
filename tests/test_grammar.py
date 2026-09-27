@@ -13,7 +13,6 @@ from odp_kml.grammar import (
 from odp_kml.procedure import (
     Altitude,
     AltitudeKind,
-    AtFix,
     ClimbHeading,
     ClimbingTurn,
     ClimbInHold,
@@ -30,7 +29,6 @@ from odp_kml.procedure import (
     ProceedOnCourse,
     RunwayGroup,
     SpeedRestriction,
-    Thence,
     Turn,
     VcoaGroup,
 )
@@ -81,30 +79,6 @@ def test_parses_fixture_procedures(name):
     ("text", "groups", "shared_tail"),
     [
         pytest.param(
-            "Rwy 17, climbing left turn heading 100° to intercept TRM VORTAC R-136 "
-            "to MECCA, thence... ...climb on course.",
-            [
-                RunwayGroup(
-                    ("17",),
-                    (
-                        ClimbingTurn(
-                            Turn.LEFT,
-                            HeadingAndRadial(
-                                100,
-                                NavaidRef("TRM", NavaidType.VORTAC),
-                                136,
-                                outbound=True,
-                                until=AtFix(FixRef("MECCA")),
-                            ),
-                        ),
-                        Thence(),
-                    ),
-                )
-            ],
-            (ProceedOnCourse(),),
-            id="intercept to a fix",
-        ),
-        pytest.param(
             "Rwy 22, NA - Obstacles. Rwys 2L/R, NA-ATC.\n"
             "Rwy 4: Climb heading 154° to 2500 before turning left.",
             [
@@ -133,7 +107,7 @@ def test_parses_fixture_procedures(name):
                 )
             ],
             None,
-            id="speed restriction",
+            id="speed restriction until established on course",
         ),
         pytest.param(
             "Rwy 4, climb on heading 036° and BAM VORTAC R-036 outbound to BAM "
@@ -226,6 +200,39 @@ def test_parses_leg_shapes(text, groups, shared_tail):
             'unsupported inline VCOA "for climb in visual conditions"',
         ),
         ("Rwy 15, climb direct", 'unexpected end after "direct"'),
+        ("Rwy 15, climb direct TPH", 'unexpected end after "<id>"'),
+        (
+            (
+                "Rwy 17, climbing left turn heading 100° to intercept TRM VORTAC R-136 "
+                "to MECCA, thence... ...climb on course."
+            ),
+            'radial without "inbound" or "outbound"',
+        ),
+        (
+            (
+                "Rwy 16, climb heading 154° to 2500, do not exceed 200 KIAS until "
+                "turning left direct ABC VOR."
+            ),
+            'unmatched phrase "turning left direct <id>"',
+        ),
+        (
+            (
+                "Rwy 4, climb direct ABC VOR, then climb via ABC R-090 outbound to "
+                "5000, continue climb-in-hold to 6000 (north, left turns, 270° inbound)."
+            ),
+            "climb in hold without a preceding fix",
+        ),
+        (
+            (
+                "Rwy 33, climb heading 330° to 5000. Rwy 22, NA - ATC. Rwy 15, "
+                "climbing left turn direct TPH VORTAC thence... ...climb on course."
+            ),
+            '"..." without a preceding "thence"',
+        ),
+        (
+            "Rwy 8, climb heading 080° and ABC VOR R-080 outbound to MECCA 12.0 DME.",
+            "DME from a fix",
+        ),
         (
             "Rwy 20, climb on ALW VOR/DME R-201 to 2500.",
             'radial without "inbound" or "outbound"',
@@ -238,6 +245,20 @@ def test_parses_leg_shapes(text, groups, shared_tail):
 )
 def test_rejects_unsupported_text(text, signature):
     assert signature_of(text) == signature
+
+
+@pytest.mark.parametrize(
+    "until",
+    ["reaching 4000", "crossing ABC VOR", "ABC VOR", "12 DME", "established on course"],
+)
+def test_speed_restriction_until_named_shapes(until):
+    text = f"Rwy 16, climb heading 154° to 2500, do not exceed 200 KIAS until {until}."
+
+    (group,) = parse_departure_procedure(
+        text, airport="X", amendment=None
+    ).runway_groups
+
+    assert group.legs == (ClimbHeading(154, to(2500), SpeedRestriction(200, until)),)
 
 
 def test_rejects_any_unconsumed_word():
@@ -254,7 +275,8 @@ def test_vcoa_navaid_named_without_ident_needs_the_departure_procedure():
     with pytest.raises(ParseError) as error:
         parse_vcoa(fixture_text("tph.vcoa"))
 
-    assert error.value.signature == 'navaid without ident "TONOPAH VORTAC"'
+    assert error.value.signature == "navaid without ident"
+    assert error.value.detail == "TONOPAH VORTAC"
 
 
 def test_parses_vcoa_for_all_runways():
