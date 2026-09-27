@@ -1,0 +1,215 @@
+name: Build ODP content pack
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+  schedule:
+    # Daily at 15:00 UTC. NASR cycles turn over every 28 days on a
+    # Thursday; a daily poll catches new cycles within a day of effective
+    # date, and each publish step exits early once its cycle already has
+    # the release it needs.
+    - cron: "0 15 * * *"
+
+permissions:
+  contents: write   # create / update / prune releases
+  issues: write      # file findings from the build report
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Install system dependencies
+        run: sudo apt-get install -y poppler-utils
+
+      - name: Lint
+        run: |
+          set -euo pipefail
+          ruff check .
+          ruff format --check .
+
+      - name: Test
+        run: pytest -q
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Install system dependencies
+        run: sudo apt-get install -y poppler-utils
+
+      - name: Resolve NASR cycles
+        id: cycles
+        run: |
+          set -euo pipefail
+          line=$(python generate_odp_kml.py --print-cycles)
+          echo "$line"
+          read -ra fields <<< "$line"
+          for field in "${fields[@]}"; do
+            echo "$field" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Cache NASR downloads
+        uses: actions/cache@v5
+        with:
+          path: data_cache
+          key: data-${{ steps.cycles.outputs.current }}
+          restore-keys: |
+            data-
+
+      - name: Publish cycles
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          CURRENT: ${{ steps.cycles.outputs.current }}
+          NEXT: ${{ steps.cycles.outputs.next }}
+          NEXT_AVAILABLE: ${{ steps.cycles.outputs.next_available }}
+        run: |
+          set -euo pipefail
+
+          # Builds and publishes (or replaces) the release for one cycle.
+          # `kind` is "latest" for the currently-effective cycle and
+          # "prerelease" for the upcoming one. It picks the `gh release
+          # create` flag and, since only a full release can ever be
+          # GitHub's "latest", which download URL form the release notes
+          # use: the `/releases/latest/download/` redirect for a full
+          # release, or the tag-pinned URL for a prerelease.
+          publish_cycle() {
+            local date="$1" kind="$2"
+            local dir="build-${kind}"
+            local rebuild=true
+
+            if release_json=$(gh release view "$date" --repo "$REPO" --json isPrerelease 2>/dev/null); then
+              local existing_prerelease
+              existing_prerelease=$(jq -r '.isPrerelease' <<< "$release_json")
+              if [ "$kind" = "latest" ] && [ "$existing_prerelease" = "true" ]; then
+                echo "Promoting prerelease $date to a full release"
+              elif [ "$EVENT" = "schedule" ]; then
+                echo "Release $date already exists; skipping on schedule"
+                rebuild=false
+              else
+                echo "Release $date already exists; rebuilding on $EVENT"
+              fi
+              if [ "$rebuild" = true ]; then
+                gh release delete "$date" --repo "$REPO" --cleanup-tag --yes
+              fi
+            fi
+
+            [ "$rebuild" = true ] || return 0
+
+            rm -rf -- "$dir"
+            mkdir -p -- "$dir"
+
+            python generate_odp_kml.py --cycle "$date" \
+              --out "$dir/Textual ODPs.zip" --report "$dir/report.json" -v
+            python generate_odp_kml.py --test-grid --out "$dir/ODP Test Grid.zip"
+
+            # GitHub rewrites spaces in release-asset filenames to dots;
+            # rename up front so the name announced in the release notes
+            # matches the name GitHub actually serves.
+            mv -- "$dir/Textual ODPs.zip" "$dir/Textual.ODPs.zip"
+            mv -- "$dir/ODP Test Grid.zip" "$dir/ODP.Test.Grid.zip"
+
+            local pack_asset="Textual.ODPs.zip" grid_asset="ODP.Test.Grid.zip"
+            local url_base
+            if [ "$kind" = "latest" ]; then
+              url_base="https://github.com/${REPO}/releases/latest/download"
+            else
+              url_base="https://github.com/${REPO}/releases/download/${date}"
+            fi
+            local pack_url="${url_base}/${pack_asset}"
+            local grid_url="${url_base}/${grid_asset}"
+            local pack_install grid_install
+            pack_install="https://foreflight.com/content?downloadURL=$(printf %s "$pack_url" | jq -sRr @uri)"
+            grid_install="https://foreflight.com/content?downloadURL=$(printf %s "$grid_url" | jq -sRr @uri)"
+
+            local expires
+            expires=$(date -u -d "$date + 28 days" +%Y-%m-%d)
+
+            {
+              head -n 1 -- "$dir/report.md"
+              echo
+              echo "Cycle effective **${date}**, valid through **${expires}**."
+              echo
+              echo "## Import into ForeFlight"
+              echo
+              echo "[Install the ODP layer](${pack_install})"
+              echo
+              echo "[Install the construction test grid](${grid_install})"
+              echo
+              echo "## Direct download"
+              echo
+              echo "${pack_url}"
+              echo "${grid_url}"
+            } > "$dir/release-notes.md"
+
+            local flag
+            if [ "$kind" = "latest" ]; then flag="--latest"; else flag="--prerelease"; fi
+
+            gh release create "$date" \
+              --repo "$REPO" \
+              --title "Textual ODPs - NASR ${date}" \
+              --notes-file "$dir/release-notes.md" \
+              "$flag" \
+              "$dir/$pack_asset" "$dir/$grid_asset" "$dir/report.json" "$dir/report.md"
+          }
+
+          publish_cycle "$CURRENT" latest
+          if [ -f "build-latest/report.json" ]; then
+            echo "current_built=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "current_built=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$NEXT_AVAILABLE" = "true" ]; then
+            publish_cycle "$NEXT" prerelease
+          fi
+
+      - name: Sync findings to GitHub issues
+        if: steps.publish.outputs.current_built == 'true' && github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m odp_kml.issues --report "build-latest/report.json" --repo "${{ github.repository }}"
+
+      - name: Prune old releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # ISO-8601 tag names (cycle dates) sort lexically the same as
+          # chronologically, so sorting by tag name -- never by createdAt,
+          # which reflects when a release was last rebuilt -- keeps the
+          # newest six cycles regardless of rebuild order.
+          gh release list --repo "$REPO" --limit 200 --json tagName \
+            --jq 'sort_by(.tagName) | reverse | .[6:] | .[].tagName' \
+            | while read -r old_tag; do
+                [ -z "$old_tag" ] && continue
+                echo "Pruning old release $old_tag"
+                gh release delete "$old_tag" --repo "$REPO" --cleanup-tag --yes
+              done
