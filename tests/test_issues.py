@@ -152,7 +152,7 @@ class TestRenderTitle:
         title = render_title(
             Kind.UNRESOLVED_REF, 'unresolved fix "ABCDE" on radial R-210'
         )
-        assert title == '[odp] unresolved_ref: unresolved fix "abcde" on radial r-nnn'
+        assert title == '[odp] unresolved_ref: unresolved fix "id" on radial r-nnn'
 
 
 class TestRenderBody:
