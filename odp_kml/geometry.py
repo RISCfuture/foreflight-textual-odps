@@ -80,6 +80,7 @@ ON_COURSE_DASH_NM = 0.15
 ON_COURSE_BEND_DEG = 45.0
 VCOA_DASHES = 36
 ARROW_ARM_NM = 0.25
+ARROW_SETBACK_NM = 0.5
 ARROW_SPLAY_DEG = 30.0
 
 
@@ -682,9 +683,11 @@ def _offset_label(pen: _Pen, text: str, anchor: Vec, turn_side: int) -> None:
     )
 
 
-def _arrowhead(ctx: _Context, name: str, style: Style, tip: Vec, course: float) -> None:
-    """A two-armed "V" at `tip` pointing along `course`."""
+def _arrowhead(ctx: _Context, name: str, style: Style, end: Vec, course: float) -> None:
+    """A two-armed "V" pointing along `course`, its tip `ARROW_SETBACK_NM`
+    short of `end` so arrows converging on one fix stay distinguishable."""
     back = course + 180
+    tip = offset(end, back, ARROW_SETBACK_NM)
     arms = [
         offset(tip, back - ARROW_SPLAY_DEG, ARROW_ARM_NM),
         tip,

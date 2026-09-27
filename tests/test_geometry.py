@@ -6,6 +6,7 @@ import pytest
 
 from odp_kml.geo import LatLon, LocalPlane
 from odp_kml.geometry import (
+    ARROW_SETBACK_NM,
     Degenerate,
     draw,
     format_altitude,
@@ -363,3 +364,15 @@ def test_climb_heading_to_an_altitude_not_above_the_climb_start_is_degenerate(
         draw(resolved(group(leg)))
 
     assert raised.value.signature == "altitude not above current"
+
+
+def test_arrowhead_stands_back_from_the_leg_end():
+    leg = ClimbHeading(magnetic(0), feet(7000))
+
+    drawing = draw(resolved(group(leg)))
+
+    end = route_vertices(drawing)[-1]
+    arrow = next(line for line in polylines(drawing) if line.name.endswith("arrow"))
+    tip = xy(arrow.points[1])
+    assert distance(tip, end) == pytest.approx(ARROW_SETBACK_NM, abs=1e-6)
+    assert tip[1] < end[1]

@@ -22,10 +22,10 @@ LABEL_STYLE_ID = "label"
 
 # Line width per shape style.
 _LINE_WIDTHS: dict[Style, int] = {
-    Style.ROUTE: 6,
-    Style.RADIAL: 3,
-    Style.HOLD: 5,
-    Style.VCOA: 3,
+    Style.ROUTE: 10,
+    Style.RADIAL: 5,
+    Style.HOLD: 8,
+    Style.VCOA: 5,
 }
 
 # One color per palette index, in KML "aabbggrr" order: blue, red, green,

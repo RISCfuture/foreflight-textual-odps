@@ -33,145 +33,145 @@ GOLDEN_KML = """<?xml version="1.0" encoding="UTF-8"?>
     <Style id="route-0">
       <LineStyle>
         <color>ff8b3a1e</color>
-        <width>6</width>
+        <width>10</width>
       </LineStyle>
     </Style>
     <Style id="radial-0">
       <LineStyle>
         <color>ff8b3a1e</color>
-        <width>3</width>
+        <width>5</width>
       </LineStyle>
     </Style>
     <Style id="hold-0">
       <LineStyle>
         <color>ff8b3a1e</color>
-        <width>5</width>
+        <width>8</width>
       </LineStyle>
     </Style>
     <Style id="vcoa-0">
       <LineStyle>
         <color>ff8b3a1e</color>
-        <width>3</width>
+        <width>5</width>
       </LineStyle>
     </Style>
     <Style id="route-1">
       <LineStyle>
         <color>ff1e1ec8</color>
-        <width>6</width>
+        <width>10</width>
       </LineStyle>
     </Style>
     <Style id="radial-1">
       <LineStyle>
         <color>ff1e1ec8</color>
-        <width>3</width>
+        <width>5</width>
       </LineStyle>
     </Style>
     <Style id="hold-1">
       <LineStyle>
         <color>ff1e1ec8</color>
-        <width>5</width>
+        <width>8</width>
       </LineStyle>
     </Style>
     <Style id="vcoa-1">
       <LineStyle>
         <color>ff1e1ec8</color>
-        <width>3</width>
+        <width>5</width>
       </LineStyle>
     </Style>
     <Style id="route-2">
       <LineStyle>
         <color>ff287814</color>
-        <width>6</width>
+        <width>10</width>
       </LineStyle>
     </Style>
     <Style id="radial-2">
       <LineStyle>
         <color>ff287814</color>
-        <width>3</width>
+        <width>5</width>
       </LineStyle>
     </Style>
     <Style id="hold-2">
       <LineStyle>
         <color>ff287814</color>
-        <width>5</width>
+        <width>8</width>
       </LineStyle>
     </Style>
     <Style id="vcoa-2">
       <LineStyle>
         <color>ff287814</color>
-        <width>3</width>
+        <width>5</width>
       </LineStyle>
     </Style>
     <Style id="route-3">
       <LineStyle>
         <color>ffa01e78</color>
-        <width>6</width>
+        <width>10</width>
       </LineStyle>
     </Style>
     <Style id="radial-3">
       <LineStyle>
         <color>ffa01e78</color>
-        <width>3</width>
+        <width>5</width>
       </LineStyle>
     </Style>
     <Style id="hold-3">
       <LineStyle>
         <color>ffa01e78</color>
-        <width>5</width>
+        <width>8</width>
       </LineStyle>
     </Style>
     <Style id="vcoa-3">
       <LineStyle>
         <color>ffa01e78</color>
-        <width>3</width>
+        <width>5</width>
       </LineStyle>
     </Style>
     <Style id="route-4">
       <LineStyle>
         <color>ff0078e6</color>
-        <width>6</width>
+        <width>10</width>
       </LineStyle>
     </Style>
     <Style id="radial-4">
       <LineStyle>
         <color>ff0078e6</color>
-        <width>3</width>
+        <width>5</width>
       </LineStyle>
     </Style>
     <Style id="hold-4">
       <LineStyle>
         <color>ff0078e6</color>
-        <width>5</width>
+        <width>8</width>
       </LineStyle>
     </Style>
     <Style id="vcoa-4">
       <LineStyle>
         <color>ff0078e6</color>
-        <width>3</width>
+        <width>5</width>
       </LineStyle>
     </Style>
     <Style id="route-5">
       <LineStyle>
         <color>ff14466e</color>
-        <width>6</width>
+        <width>10</width>
       </LineStyle>
     </Style>
     <Style id="radial-5">
       <LineStyle>
         <color>ff14466e</color>
-        <width>3</width>
+        <width>5</width>
       </LineStyle>
     </Style>
     <Style id="hold-5">
       <LineStyle>
         <color>ff14466e</color>
-        <width>5</width>
+        <width>8</width>
       </LineStyle>
     </Style>
     <Style id="vcoa-5">
       <LineStyle>
         <color>ff14466e</color>
-        <width>3</width>
+        <width>5</width>
       </LineStyle>
     </Style>
     <Style id="label">
