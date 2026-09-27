@@ -54,10 +54,13 @@ class TestSignatureKey:
         ) == signature_key(second.kind, second.signature, second.airport)
 
     def test_allowlisted_aviation_abbreviations_survive_blurring(self):
-        text = 'unmatched phrase "direct TPH VORTAC via NDB thence"'
+        text = (
+            'unmatched phrase "direct TPH VORTAC via NDB thence, graphic DP reference"'
+        )
         normalized = normalize_signature(text, airport="TPH")
         assert "vortac" in normalized
         assert "ndb" in normalized
+        assert "graphic dp reference" in normalized
         assert "tph" not in normalized
 
     def test_own_airport_is_blurred_even_outside_the_identifier_shape(self):
