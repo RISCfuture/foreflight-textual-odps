@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import dataclasses
 import io
+import re
 import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -56,19 +57,21 @@ class Airport:
     runways: tuple[Runway, ...]
 
     def runway_end(self, end_id: str) -> RunwayEnd | None:
-        """The runway end named ``end_id`` (e.g. "15"), or None if absent."""
+        """The runway end named ``end_id`` (e.g. "15" or "4"), or None if absent."""
+        target = canonical_runway_id(end_id)
         for runway in self.runways:
             for end in runway.ends:
-                if end.id == end_id:
+                if canonical_runway_id(end.id) == target:
                     return end
         return None
 
     def reciprocal_end(self, end_id: str) -> RunwayEnd | None:
         """The other end of the runway that ``end_id`` belongs to."""
+        target = canonical_runway_id(end_id)
         for runway in self.runways:
-            ids = [end.id for end in runway.ends]
-            if end_id in ids:
-                return runway.ends[1 - ids.index(end_id)]
+            ids = [canonical_runway_id(end.id) for end in runway.ends]
+            if target in ids:
+                return runway.ends[1 - ids.index(target)]
         return None
 
 
@@ -165,6 +168,25 @@ def parse_mag_var(raw: str, hemisphere: str) -> float | None:
     if magnitude is None:
         return None
     return magnitude if hemisphere.strip().upper() == "E" else -magnitude
+
+
+_RUNWAY_ID = re.compile(r"(\d{1,2})([A-Za-z]?)")
+
+
+def canonical_runway_id(text: str) -> str:
+    """A runway or runway-end id in NASR's zero-padded, uppercase form.
+
+    Procedure text and NASR disagree on runway-end spelling ("Rwy 4" vs.
+    NASR's "04"), so lookups canonicalize both sides through this: the
+    numeric part is zero-padded to two digits and any side suffix is
+    uppercased ("4" -> "04", "4l" -> "04L"). An id with no leading number
+    (e.g. the helipad id "H1") passes through unchanged but uppercased.
+    """
+    match = _RUNWAY_ID.fullmatch(text.strip())
+    if match is None:
+        return text.strip().upper()
+    number, suffix = match.groups()
+    return f"{int(number):02d}{suffix.upper()}"
 
 
 # --- CSV access ------------------------------------------------------------

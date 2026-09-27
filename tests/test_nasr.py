@@ -8,6 +8,7 @@ import pytest
 from odp_kml.cycle import Cycle
 from odp_kml.nasr import (
     _load_hold,
+    canonical_runway_id,
     fetch,
     group_url,
     load,
@@ -74,6 +75,23 @@ class TestParseHelpers:
         assert parse_mag_var("15", "W") == pytest.approx(-15.0)
 
 
+class TestCanonicalRunwayId:
+    def test_pads_a_single_digit_number(self):
+        assert canonical_runway_id("4") == "04"
+
+    def test_already_zero_padded_is_unchanged(self):
+        assert canonical_runway_id("04") == "04"
+
+    def test_two_digit_number_is_unchanged(self):
+        assert canonical_runway_id("15") == "15"
+
+    def test_uppercases_and_pads_a_side_suffix(self):
+        assert canonical_runway_id("4l") == "04L"
+
+    def test_non_numeric_id_passes_through(self):
+        assert canonical_runway_id("H1") == "H1"
+
+
 class TestAirports:
     def test_sql_runway_end_12_has_true_alignment_and_position(self, nasr_data):
         end = nasr_data.airports["SQL"].runway_end("12")
@@ -113,6 +131,14 @@ class TestAirports:
 
     def test_non_airport_site_type_is_excluded(self, nasr_data):
         assert "26CN" not in nasr_data.airports
+
+    def test_runway_end_accepts_an_unpadded_numeric_id(self, nasr_data):
+        end = nasr_data.airports["BAM"].runway_end("4")
+        assert end is not None
+        assert end.true_alignment == 49
+
+    def test_reciprocal_end_accepts_an_unpadded_numeric_id(self, nasr_data):
+        assert nasr_data.airports["BAM"].reciprocal_end("4").id == "22"
 
 
 class TestNavaids:
