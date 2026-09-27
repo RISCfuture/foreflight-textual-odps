@@ -15,9 +15,10 @@ import dataclasses
 import itertools
 import re
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
+from .dtpp import AirportMeta
 from .lines import canonical_title, is_amendment, join_lines
 
 _PAGE_FURNITURE = re.compile(
@@ -32,6 +33,8 @@ _AIRPORT_LINE = re.compile(
     r"(?P<name>[^a-z]+?)\s*\((?P<lid>[A-Z0-9]{3,4})\)(?:\s*\([A-Z0-9]{4}\))?"
 )
 
+# Looser than _AIRPORT_LINE: any line ending in ``(LID)`` or ``(LID) (ICAO)``.
+_HEADING_CANDIDATE = re.compile(r".*\((?P<lid>[A-Z0-9]{3})\)(?:\s*\([A-Z0-9]{4}\))?\s*")
 _PARENTHESIZED_ID = re.compile(r"\(([A-Z0-9]{3})\)")
 _DESTINATION = re.compile(r'"\((?P<name>[^)]+)\)\d*"\s*$')
 # Named destinations for the front matter's "(DPs)", "(DVA)" and "(ICA)".
@@ -94,17 +97,71 @@ def named_destinations(pdf: Path) -> set[str]:
 def extract_blocks(pdf: Path, volume: str) -> tuple[list[AirportBlock], list[str]]:
     """Every airport block in a volume PDF, plus warnings about its structure.
 
+    Content oddities never raise; a failing PDF tool does.
+    """
+    return blocks_from_pages(pdf_text_pages(pdf), named_destinations(pdf), volume)
+
+
+def blocks_from_pages(
+    pages: list[str], destinations: set[str], volume: str
+) -> tuple[list[AirportBlock], list[str]]:
+    """Airport blocks from a volume's page texts, plus warnings.
+
     Warnings name destinations with no block, blocks with no destination and
-    duplicate LIDs. Content oddities never raise; a failing PDF tool does.
+    duplicate LIDs.
     """
     lines = _without_repeated_headings(
-        _merge_wrapped_titles(list(_content_lines(pdf_text_pages(pdf))))
+        _merge_wrapped_titles(list(_content_lines(pages)))
     )
     blocks = [_block(entry, lines, volume) for entry in _entries(lines)]
     airport_destinations = (
-        named_destinations(pdf) - FRONT_MATTER_DESTINATIONS - _mentioned_only(lines)
+        destinations - FRONT_MATTER_DESTINATIONS - _mentioned_only(lines)
     )
     return blocks, _warnings(blocks, airport_destinations, volume)
+
+
+def check_against_metafile(
+    blocks: list[AirportBlock], expected: Mapping[str, AirportMeta]
+) -> list[str]:
+    """Compare one volume's blocks with the metafile airports expected in it.
+
+    ``expected`` maps LID to airport for that volume only. A block matches an
+    airport when its printed id is the airport's LID or ICAO id, or is the
+    LID with a leading ``K`` (``KW94`` for ``W94``).
+    """
+    aliases = _metafile_aliases(expected)
+    matched = {
+        aliases.get(identifier) for block in blocks for identifier in _ids_of(block)
+    }
+    return [
+        *(
+            f"{airport.volume}: metafile airport {lid} has no block"
+            for lid, airport in expected.items()
+            if lid not in matched
+        ),
+        *(
+            f"{block.volume}: block {block.lid} has no metafile airport"
+            for block in blocks
+            if not any(identifier in aliases for identifier in _ids_of(block))
+        ),
+    ]
+
+
+def _metafile_aliases(expected: Mapping[str, AirportMeta]) -> dict[str, str]:
+    """Every id an airport may be printed under, mapped to its LID."""
+    return {
+        alias: lid
+        for lid, airport in expected.items()
+        for alias in (lid, airport.icao)
+        if alias
+    }
+
+
+def _ids_of(block: AirportBlock) -> tuple[str, ...]:
+    """The block's printed id, plus that id without a leading ``K``."""
+    if len(block.lid) == 4 and block.lid.startswith("K"):
+        return block.lid, block.lid[1:]
+    return (block.lid,)
 
 
 def _run(*command: str) -> str:
@@ -224,14 +281,19 @@ def _block(entry: _Entry, lines: list[_Line], volume: str) -> AirportBlock:
 
 
 def _mentioned_only(lines: list[_Line]) -> set[str]:
-    """Parenthesized identifiers that never head an airport entry.
+    """Parenthesized identifiers that never end a possible heading line.
 
     pdfinfo names a destination for navaids, airways and procedure
     originators that appear in parentheses in running text, e.g.
-    ``Linden (LIN) VOR/DME`` or ``(USA)`` in an amendment line.
+    ``Linden (LIN) VOR/DME`` or ``(USA)`` in an amendment line. Any
+    non-amendment line ending in ``(ID)`` counts as a possible heading, so a
+    heading too unusual to parse still leaves its destination unmatched.
     """
     heading_ids = {
-        airport["lid"] for line in lines if (airport := _airport_line(line.text))
+        candidate["lid"]
+        for line in lines
+        if not is_amendment(line.text)
+        and (candidate := _HEADING_CANDIDATE.fullmatch(line.text))
     }
     mentioned = {
         ident for line in lines for ident in _PARENTHESIZED_ID.findall(line.text)

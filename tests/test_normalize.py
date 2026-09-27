@@ -28,6 +28,9 @@ class TestNormalize:
             ("Rwys 13, 31 ,\t 2600-3", "Rwys 13, 31 , 2600-3"),
             ("direct of of TPH", "direct of TPH"),
             ("  Rwy 4, std.  ", "Rwy 4, std."),
+            ("Rwy 4, std.\nRwy 22, NA.", "Rwy 4, std.\nRwy 22, NA."),
+            ("Rwy 4,  std.  \n  Rwy 22, NA.", "Rwy 4, std.\nRwy 22, NA."),
+            ("Rwy 4, std.\n\n \n\nRwy 22, NA.", "Rwy 4, std.\n\nRwy 22, NA."),
         ],
     )
     def test_substitution(self, raw, expected):

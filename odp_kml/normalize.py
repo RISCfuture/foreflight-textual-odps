@@ -34,7 +34,7 @@ def _expand_ellipsis(text: str) -> str:
 
 def _spell_out_min_climb(text: str) -> str:
     """``w/min.``, ``w/ min.``, ``w/min`` and ``with a min.`` all read ``with a min.``."""
-    return re.sub(r"\b(?:w/\s*|with a )min\b\.?", "with a min.", text)
+    return re.sub(r"\b(?:w/ ?|with a )min\b\.?", "with a min.", text)
 
 
 def _expand_fractions(text: str) -> str:
@@ -51,8 +51,18 @@ def _drop_foot_marks(text: str) -> str:
     return re.sub(r"(?<=\d)'", "", text)
 
 
-def _collapse_whitespace(text: str) -> str:
-    return re.sub(r"\s+", " ", text)
+def _collapse_horizontal_whitespace(text: str) -> str:
+    """Runs of spaces and tabs become one space; line breaks stay."""
+    return re.sub(r"[^\S\n]+", " ", text)
+
+
+def _strip_lines(text: str) -> str:
+    return "\n".join(line.strip() for line in text.split("\n"))
+
+
+def _collapse_blank_lines(text: str) -> str:
+    """A run of blank lines becomes one blank line."""
+    return re.sub(r"\n{3,}", "\n\n", text)
 
 
 def _drop_doubled_of(text: str) -> str:
@@ -65,7 +75,9 @@ _SUBSTITUTIONS: tuple[Callable[[str], str], ...] = (
     _spell_out_min_climb,
     _expand_fractions,
     _drop_foot_marks,
-    _collapse_whitespace,
+    _collapse_horizontal_whitespace,
+    _strip_lines,
+    _collapse_blank_lines,
     _drop_doubled_of,
     str.strip,
 )

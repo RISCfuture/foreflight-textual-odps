@@ -1,14 +1,24 @@
 """Takeoff-Minimums PDF text extraction into one block per airport."""
 
+import dataclasses
 from pathlib import Path
 
 import pytest
 
-from odp_kml.extract import extract_blocks, named_destinations, pdf_text_pages
+from odp_kml.dtpp import AirportMeta, parse_metafile
+from odp_kml.extract import (
+    blocks_from_pages,
+    check_against_metafile,
+    extract_blocks,
+    named_destinations,
+    pdf_text_pages,
+)
 
 # Pages 35-38 of the 2609 SW4TO.PDF: SPK, JTC, TYL, TPH, KTNX, TVY, RYN and
 # the first part of TUS.
-EXCERPT = Path(__file__).parent / "fixtures" / "pdf" / "SW4TO-excerpt.pdf"
+FIXTURES = Path(__file__).parent / "fixtures"
+EXCERPT = FIXTURES / "pdf" / "SW4TO-excerpt.pdf"
+METAFILE = FIXTURES / "dtpp" / "metafile-excerpt.xml"
 
 
 @pytest.fixture(scope="module")
@@ -138,3 +148,47 @@ class TestExtractBlocks:
             in lines_of(blocks["JTC"])
         )
         assert blocks["JTC"].pages == (1, 2)
+
+    def test_unrecognized_heading_warns_instead_of_vanishing(self):
+        page = """\
+McCALL, ID
+McCALL MUNI (MYL)
+TAKEOFF MINIMUMS AND (OBSTACLE) DEPARTURE PROCEDURES
+AMDT 1 01JAN20 (20001) (FAA)
+DEPARTURE PROCEDURE:
+Rwy 16, climb direct Linden (LIN) VOR/DME."""
+        blocks, warnings = blocks_from_pages([page], {"MYL", "LIN"}, "NW1")
+        assert blocks == []
+        assert warnings == ["NW1: destination (MYL) has no block"]
+
+
+class TestCheckAgainstMetafile:
+    @pytest.mark.parametrize(
+        "tonopah_test_range_icao",
+        ["KTNX", None],
+        ids=["by-icao", "by-stripped-K"],
+    )
+    def test_reports_both_directions(self, extraction, tonopah_test_range_icao):
+        airports = parse_metafile(METAFILE).airports
+        expected = {
+            "TPH": airports["TPH"],
+            "TNX": dataclasses.replace(airports["TNX"], icao=tonopah_test_range_icao),
+            "05U": AirportMeta(
+                lid="05U",
+                icao=None,
+                name="EUREKA",
+                city="EUREKA",
+                state="NV",
+                volume="SW4",
+                pdf_name="SW4TO.PDF",
+            ),
+        }
+        assert check_against_metafile(extraction[0], expected) == [
+            "SW4: metafile airport 05U has no block",
+            "SW4: block SPK has no metafile airport",
+            "SW4: block JTC has no metafile airport",
+            "SW4: block TYL has no metafile airport",
+            "SW4: block TVY has no metafile airport",
+            "SW4: block RYN has no metafile airport",
+            "SW4: block TUS has no metafile airport",
+        ]
