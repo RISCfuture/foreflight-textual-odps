@@ -125,8 +125,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ap.add_argument(
         "--report",
         type=Path,
-        default=Path("report.json"),
-        help="Findings report JSON path; the Markdown report goes next to it as .md.",
+        help="Findings report JSON path (default: report.json beside --out); "
+        "the Markdown report goes next to it as .md.",
     )
     ap.add_argument(
         "--dump-sections",
@@ -170,7 +170,7 @@ def _build_odp_layer(
     result = build(_build_options(args, cycle))
     out = _output_path(args, ODP_LAYER)
     _write_layer(result.drawings, out, ODP_LAYER, cycle, args.kml_only)
-    _write_report(result, args.report)
+    _write_report(result, args.report or out.with_name("report.json"))
     if args.dump_sections is not None:
         _write_json(result.sections_dump, args.dump_sections)
     print(result.report.summary_line())

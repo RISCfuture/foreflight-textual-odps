@@ -19,7 +19,7 @@ COLUMNS = 6
 def test_cells_are_unique_and_laid_out_row_major():
     grid = cells(ORIGIN, SPACING_DEG, COLUMNS)
 
-    assert len(grid) == 18
+    assert len(grid) == 28
     assert len({cell.code for cell in grid}) == len(grid)
     assert len({cell.title for cell in grid}) == len(grid)
     assert [cell.code for cell in grid[:8]] == [
@@ -52,7 +52,7 @@ def test_draw_grid_labels_every_cell_and_uses_only_allowed_kml_elements():
 # Recorded from a known-good render of `draw_grid()`. Update deliberately
 # (and explain why in the commit) whenever a geometry change legitimately
 # alters the grid's output.
-GOLDEN_SHA256 = "9e0b9abca967f790cc0934288eb2a735512c76d318a32ed8da24f65c15760679"
+GOLDEN_SHA256 = "006e4391c9f2dc483bb638caffc59f2b841084a1505e3b6db941b02df15d6580"
 
 
 def test_render_kml_of_grid_matches_recorded_hash():

@@ -51,21 +51,28 @@ def parse_procedure(sections: Sections, *, airport: str) -> Procedure:
     `Procedure`.
 
     A VCOA navaid named without an ident resolves to the navaid the
-    DEPARTURE PROCEDURE section named with that ident. Raises `ParseError`
-    when there is no DEPARTURE PROCEDURE section or either section fails
-    to parse.
+    DEPARTURE PROCEDURE section named with that ident. A procedure with
+    only a VCOA section has no runway groups. Raises `ParseError` when
+    neither section is present or either fails to parse.
     """
-    if sections.departure_procedure is None:
-        raise ParseError("no departure procedure section")
-    procedure = parse_departure_procedure(
-        normalize(sections.departure_procedure),
-        airport=airport,
-        amendment=sections.amendment,
-    )
+    procedure = _departure_procedure(sections, airport)
     if sections.vcoa is None:
         return procedure
     vcoa = parse_vcoa(normalize(sections.vcoa), known_navaids=_named_navaids(procedure))
     return dataclasses.replace(procedure, vcoa=vcoa)
+
+
+def _departure_procedure(sections: Sections, airport: str) -> Procedure:
+    """The DEPARTURE PROCEDURE section's procedure, or an empty one beside a VCOA."""
+    if sections.departure_procedure is not None:
+        return parse_departure_procedure(
+            normalize(sections.departure_procedure),
+            airport=airport,
+            amendment=sections.amendment,
+        )
+    if sections.vcoa is None:
+        raise ParseError("no departure procedure section")
+    return Procedure(airport, sections.amendment, (), None, vcoa=())
 
 
 def _named_navaids(procedure: Procedure) -> dict[str, NavaidRef]:

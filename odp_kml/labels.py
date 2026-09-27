@@ -19,17 +19,24 @@ CHART_MARKS = {
     AltitudeKind.AT_OR_ABOVE: UNDERLINE,
     AltitudeKind.AT_OR_BELOW: OVERLINE,
     AltitudeKind.AT: UNDERLINE + OVERLINE,
+    AltitudeKind.TO: "",
 }
 FMS_SUFFIXES = {
     AltitudeKind.AT_OR_ABOVE: "A",
     AltitudeKind.AT_OR_BELOW: "B",
     AltitudeKind.AT: "",
+    AltitudeKind.TO: "",
 }
 
 
 def format_altitude(alt: Altitude, style: str) -> str:
     """Render an altitude as charted ("chart": digits under/overlined) or as
-    an FMS constraint ("fms": 7000A, 7000B, 7000)."""
+    an FMS constraint ("fms": 7000A, 7000B, 7000).
+
+    A climb-to altitude (`AltitudeKind.TO`) is plain digits in both styles.
+    An FMS has no suffix for a mandatory altitude, so `AltitudeKind.AT` is
+    also bare digits in the "fms" style; only the chart style tells it apart.
+    """
     return format_feet(alt.feet, alt.kind, style)
 
 

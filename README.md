@@ -2,9 +2,10 @@
 
 A ForeFlight content pack that draws FAA textual obstacle departure
 procedures (ODPs) as a planview KML layer, nationwide. ForeFlight shows a
-textual ODP only as scanned PDF text under Airport → Procedures; this pack
-parses that text and NASR data, then draws the routing — climb, turns, and
-navaid tracking — directly on the map. Rebuilt every 28-day NASR cycle by
+textual ODP only as text in the FAA's Takeoff Minimums PDF under Airport →
+Procedures; this pack extracts that text from the born-digital PDF, parses
+it against NASR data, then draws the routing — climb, turns, and navaid
+tracking — directly on the map. Rebuilt every 28-day NASR cycle by
 GitHub Actions.
 
 ## Install in ForeFlight
@@ -43,12 +44,17 @@ with certainty:
 
 - Initial climb, climbing turns, and turns at a fix or altitude.
 - Direct-to-navaid and heading legs flown to an altitude.
-- Radial intercepts and tracking, including "climb on course."
+- Radial intercepts and tracking to an altitude, fix, DME distance, or
+  the navaid.
+- "Proceed on course" as a short dashed stub, bent toward any published
+  turn restriction.
 - Climb-in-hold racetracks.
-- VCOA (visual climb over airport) circles.
-- Altitude labels in chart style (underline for "at or above," overline
-  for "at or below") or, with `--label-style fms`, the FMS `A`/`B` suffix
-  form.
+- VCOA (visual climb over airport) circles, including airports whose only
+  procedure is a VCOA.
+- Altitude labels in chart style: plain digits for "climb to," underlined
+  for "at or above," overlined for "at or below," and both for a mandatory
+  "at." With `--label-style fms` they take the FMS form: `A` and `B`
+  suffixes, and plain digits for "climb to" and "at."
 
 **Not drawn:** takeoff minimums (ceiling/visibility and climb gradient
 tables), obstacle notes, diverse vector areas (DVAs), procedures that
@@ -151,8 +157,10 @@ activity — push a commit (or run it manually) if releases stop appearing.
 from real ODP text, using the Claude API (`ANTHROPIC_API_KEY` required;
 `pip install -r requirements-tools.txt`). It drafts a parse for each
 airport's section and checks it mechanically, but every draft is reviewed
-by a human before it becomes a fixture in `tests/fixtures/golden/`. It is
-never imported by, or run as part of, the build.
+by a human before it becomes a fixture in `tests/fixtures/golden/`. The
+test suite then requires the grammar to parse each fixture's text to exactly
+its reviewed AST, or to refuse it. The tool is never imported by, or run as
+part of, the build.
 
 ## License
 

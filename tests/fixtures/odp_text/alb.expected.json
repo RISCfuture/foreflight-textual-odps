@@ -11,7 +11,7 @@
           "speed": null,
           "until": {
             "feet": 2000,
-            "kind": "at",
+            "kind": "to",
             "node": "Altitude",
             "phrase": "to 2000"
           }
@@ -34,7 +34,7 @@
           "speed": null,
           "until": {
             "feet": 1400,
-            "kind": "at",
+            "kind": "to",
             "node": "Altitude",
             "phrase": "to 1400"
           }
@@ -57,7 +57,7 @@
           "speed": null,
           "until": {
             "feet": 2000,
-            "kind": "at",
+            "kind": "to",
             "node": "Altitude",
             "phrase": "to 2000"
           }

@@ -25,6 +25,7 @@ from .procedure import (
     Compass8,
     Direct,
     Dme,
+    FixRef,
     HeadingAndRadial,
     HoldSpec,
     Leg,
@@ -82,7 +83,17 @@ def _group(*legs: Leg, runway: str = "09") -> RunwayGroup:
     return RunwayGroup((runway,), legs)
 
 
+def _label_kinds_group() -> RunwayGroup:
+    """Three climb-heading legs ending at-or-above, at, and climb-to altitudes."""
+    return _group(
+        ClimbHeading(90, Altitude(6000, AltitudeKind.AT_OR_ABOVE, "at or above 6000")),
+        ClimbHeading(45, Altitude(6500, AltitudeKind.AT, "at 6500")),
+        ClimbHeading(90, Altitude(7000, AltitudeKind.TO, "to 7000")),
+    )
+
+
 VOR = NavaidRef(VOR_IDENT)
+FIX = FixRef(FIX_IDENT)
 
 _CONSTRUCTIONS: tuple[_Construction, ...] = (
     _Construction(
@@ -145,7 +156,7 @@ _CONSTRUCTIONS: tuple[_Construction, ...] = (
                         VOR,
                         45,
                         outbound=True,
-                        until=Altitude(9000, AltitudeKind.AT, "to 9000"),
+                        until=Altitude(9000, AltitudeKind.TO, "to 9000"),
                     ),
                 )
             ),
@@ -244,6 +255,80 @@ _CONSTRUCTIONS: tuple[_Construction, ...] = (
                 )
             ),
         ),
+        params=DisplayParams(label_style="fms"),
+    ),
+    _Construction(
+        "Direct to a VOR then a radial outbound to an altitude",
+        (
+            _group(
+                Direct(VOR),
+                Radial(
+                    VOR,
+                    100,
+                    outbound=True,
+                    until=Altitude(9000, AltitudeKind.TO, "to 9000"),
+                ),
+            ),
+        ),
+        vor_xy=(6.0, 0.0),
+    ),
+    _Construction(
+        "Radial outbound ending at a fix",
+        (_group(Direct(VOR), Radial(VOR, 100, outbound=True, until=AtFix(FIX))),),
+        vor_xy=(6.0, 0.0),
+        fix_xy=plane_offset((6.0, 0.0), 100.0, 8.0),
+    ),
+    _Construction(
+        "Radial outbound ending at a DME distance",
+        (_group(Direct(VOR), Radial(VOR, 100, outbound=True, until=Dme(VOR, 8.0))),),
+        vor_xy=(6.0, 0.0),
+    ),
+    _Construction(
+        "Climb heading to an altitude then direct to a hold ahead",
+        (
+            _group(
+                ClimbHeading(90, Altitude(7000, AltitudeKind.TO, "to 7000")),
+                ClimbInHold(
+                    VOR,
+                    HoldSpec(Compass8.NE, Turn.RIGHT, 225),
+                    Altitude(9300, AltitudeKind.AT_OR_ABOVE, "at or above 9300"),
+                ),
+            ),
+        ),
+        vor_xy=(14.0, 4.0),
+    ),
+    _Construction(
+        "Climbing turn to a heading, no altitude, then on course",
+        (_group(ClimbHeading(135), ProceedOnCourse()),),
+    ),
+    _Construction(
+        "Climbing turn to an altitude reached before the turn-start point",
+        (
+            _group(
+                ClimbingTurn(
+                    Turn.LEFT,
+                    ClimbHeading(360, Altitude(5300, AltitudeKind.TO, "to 5300")),
+                )
+            ),
+        ),
+    ),
+    _Construction(
+        "Visual climb over a fix then direct to a VOR",
+        (),
+        vcoa=(VcoaGroup(("09",), FIX, 7800, (Direct(VOR),)),),
+    ),
+    _Construction(
+        "Visual climb over the airport from all runways, then on course",
+        (),
+        vcoa=(VcoaGroup((), None, 7800, (ProceedOnCourse(),)),),
+    ),
+    _Construction(
+        "Altitude label kinds: at or above, at, climb to (chart style)",
+        (_label_kinds_group(),),
+    ),
+    _Construction(
+        "Altitude label kinds: at or above, at, climb to (FMS style)",
+        (_label_kinds_group(),),
         params=DisplayParams(label_style="fms"),
     ),
 )

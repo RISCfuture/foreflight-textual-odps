@@ -381,7 +381,7 @@ class LegParser(TokenStream):
         start = self._position()
         self._expect("to")
         feet = self._integer()
-        return Altitude(feet, AltitudeKind.AT, self._slice_from(start))
+        return Altitude(feet, AltitudeKind.TO, self._slice_from(start))
 
     def _cross_radial(self) -> CrossRadial:
         """cross-radial := "to cross" navaid "R-nnn" """

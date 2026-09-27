@@ -254,7 +254,7 @@ def _draw_vcoa(ctx: _Context, vcoa: VcoaGroup) -> None:
     """A dashed circle to climb in over the airport (or a fix), then its legs."""
     centre = ctx.xy(vcoa.cross.ident) if vcoa.cross else (0.0, 0.0)
     radius = ctx.params.vcoa_radius_nm
-    name = f"RWY {'/'.join(vcoa.runways)}: VCOA"
+    name = f"{_vcoa_runways_name(vcoa.runways)}: VCOA"
     for start in _dash_starts(VCOA_DASHES):
         dash = ctx.arc(centre, radius, start, 180 / VCOA_DASHES)
         ctx.polyline(name, Style.VCOA, dash)
@@ -262,7 +262,7 @@ def _draw_vcoa(ctx: _Context, vcoa: VcoaGroup) -> None:
         vcoa_label(vcoa.at_or_above, ctx.params.label_style),
         offset(centre, 0.0, radius),
     )
-    if vcoa.then:
+    if _departs_toward_something(vcoa.then):
         outward = _departure_bearing(ctx, centre, vcoa.then[0])
         pen = _Pen(
             ctx,
@@ -274,6 +274,16 @@ def _draw_vcoa(ctx: _Context, vcoa: VcoaGroup) -> None:
             ctx.params.default_gradient_ft_nm,
         )
         _draw_legs(pen, vcoa.then)
+
+
+def _vcoa_runways_name(runways: tuple[str, ...]) -> str:
+    """``RWY 15/33``, or ``ALL RWYS`` for a VCOA that names no runways."""
+    return f"RWY {'/'.join(runways)}" if runways else "ALL RWYS"
+
+
+def _departs_toward_something(legs: tuple[Leg, ...]) -> bool:
+    """Whether the legs after a VCOA fly anywhere beyond "proceed on course"."""
+    return any(not isinstance(leg, ProceedOnCourse) for leg in legs)
 
 
 def _dash_starts(count: int) -> list[float]:
@@ -350,11 +360,15 @@ def _draw_leg(pen: _Pen, leg: Leg, direction: Turn | None) -> None:
 
 
 def _unsupported(leg) -> None:
-    raise Degenerate("unsupported construction", repr(leg))
+    raise Degenerate(f"unsupported construction: {type(leg).__name__}", repr(leg))
 
 
 def _climb_heading(pen: _Pen, leg: ClimbHeading, direction: Turn | None) -> None:
-    """Turn onto the heading, then (with an altitude) climb straight to it."""
+    """Turn onto the heading, then (with an altitude) climb straight to it.
+
+    An altitude the climb already reached before the turn ends the leg
+    where the turn ends.
+    """
     ctx = pen.ctx
     name = _leg_name(pen, direction, heading_phrase(leg))
     points, side = pen.turn_onto(ctx.heading_true(leg.heading), direction)
@@ -365,13 +379,14 @@ def _climb_heading(pen: _Pen, leg: ClimbHeading, direction: Turn | None) -> None
                 _arrowhead(ctx, name, Style.ROUTE, pen.at, pen.course)
             return
         case Altitude():
-            straight = pen.altitude_leg_nm(leg.until.feet) - pen.along_nm
+            straight = max(0.0, pen.altitude_leg_nm(leg.until.feet) - pen.along_nm)
         case _:
             _unsupported(leg)
-    _require_length(straight, leg)
     turn_end = pen.at
     pen.straight_to(offset(turn_end, pen.course, straight))
-    ctx.polyline(name, Style.ROUTE, [*points, pen.at])
+    route = [*points, pen.at] if straight else points
+    if len(route) > 1:
+        ctx.polyline(name, Style.ROUTE, route)
     _arrowhead(ctx, name, Style.ROUTE, pen.at, pen.course)
     _offset_label(pen, heading_label(leg.heading), midpoint(turn_end, pen.at), side)
     ctx.label(format_altitude(leg.until, ctx.params.label_style), pen.at)
@@ -563,13 +578,18 @@ def _proceed_on_course(pen: _Pen, leg: ProceedOnCourse) -> None:
 
 
 def _climb_in_hold(pen: _Pen, leg: ClimbInHold) -> None:
-    """Proceed to the fix if not already there, then draw the racetrack."""
+    """Proceed direct to the fix if not already there, then draw the racetrack.
+
+    A fix behind the aircraft would need a turn the procedure does not
+    describe, so it is degenerate.
+    """
     ctx = pen.ctx
     ident = leg.fix.ident
     spec = _hold_spec(ctx, leg)
     fix = ctx.xy(ident)
     if distance(pen.at, fix) > ARRIVAL_TOLERANCE_NM:
-        _straight_route(pen, _leg_name(pen, None, f"direct {ident}"), fix)
+        _require_ahead(pen, fix, leg)
+        _direct(pen, Direct(leg.fix), None)
     inbound = magnetic_to_true(spec.inbound_course, ctx.declination(ident))
     side = _side(spec.turns)
     length = _hold_leg_nm(ctx, leg)
@@ -583,6 +603,11 @@ def _climb_in_hold(pen: _Pen, leg: ClimbInHold) -> None:
     pen.at, pen.course = fix, inbound
     if isinstance(leg.until, Altitude):
         pen.base_alt_ft, pen.along_nm = leg.until.feet, 0.0
+
+
+def _require_ahead(pen: _Pen, fix: Vec, leg: ClimbInHold) -> None:
+    if abs(wrap180(bearing(pen.at, fix) - pen.course)) > 90:
+        raise Degenerate("hold fix behind", repr(leg))
 
 
 def _hold_spec(ctx: _Context, leg: ClimbInHold) -> HoldSpec:
@@ -621,13 +646,6 @@ def _racetrack(
     )
     far_turn = ctx.arc(offset(far_end, across, radius), radius, across, 180 * side)
     return [*fix_turn, *far_turn, fix]
-
-
-def _straight_route(pen: _Pen, name: str, end: Vec) -> None:
-    start = pen.at
-    pen.straight_to(end)
-    pen.ctx.polyline(name, Style.ROUTE, [start, end])
-    _arrowhead(pen.ctx, name, Style.ROUTE, end, pen.course)
 
 
 def _leg_name(pen: _Pen, direction: Turn | None, phrase: str) -> str:

@@ -197,11 +197,27 @@ def _wmm_declination(position: LatLon) -> float:
 def _resolve_points(
     nodes: list, airport: nasr.Airport, data: nasr.NasrData, airport_variation: float
 ) -> dict[str, ResolvedPoint]:
-    """Every navaid or fix the procedure refers to, resolved by identifier."""
+    """Every navaid or fix the procedure refers to, resolved by identifier.
+
+    Raises `ResolveError` when refs sharing an identifier land on different
+    facilities. Where a navaid and a fix share one, the navaid's resolution
+    (with its own declination) is kept.
+    """
     refs = {node for node in nodes if isinstance(node, (NavaidRef, FixRef))}
-    return {
-        ref.ident: _resolve_ref(ref, airport, data, airport_variation) for ref in refs
-    }
+    points: dict[str, ResolvedPoint] = {}
+    for ref in sorted(refs, key=lambda ref: isinstance(ref, FixRef)):
+        point = _resolve_ref(ref, airport, data, airport_variation)
+        _require_same_facility(points.setdefault(ref.ident, point), point)
+    return points
+
+
+def _require_same_facility(kept: ResolvedPoint, other: ResolvedPoint) -> None:
+    if kept.position != other.position:
+        raise ResolveError(
+            Kind.AMBIGUOUS_REF,
+            "ident resolves to two facilities",
+            f'"{kept.ident}" at {kept.position} and {other.position}',
+        )
 
 
 def _resolve_ref(

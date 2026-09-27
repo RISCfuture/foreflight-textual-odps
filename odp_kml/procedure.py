@@ -42,9 +42,16 @@ class NavaidType(StrEnum):
 
 
 class AltitudeKind(StrEnum):
+    """How a leg's altitude constrains the climb.
+
+    ``TO`` is a climb-to altitude ("climb heading 090 to 7000") with no
+    at/above/below qualifier; ``AT`` is a mandatory "at 7000" crossing.
+    """
+
     AT_OR_ABOVE = "at_or_above"
     AT_OR_BELOW = "at_or_below"
     AT = "at"
+    TO = "to"
 
 
 @dataclasses.dataclass(frozen=True)

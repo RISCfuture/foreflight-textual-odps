@@ -192,6 +192,22 @@ class TestNavaids:
         assert excinfo.value.kind == Kind.AMBIGUOUS_REF
         assert excinfo.value.signature == "navaid ambiguous"
 
+    def test_one_ident_resolving_to_two_facilities_is_ambiguous(self):
+        airport = _airport("TST", LatLon(40.0, -100.0), 1000.0, 10.0)
+        vor = nasr.Navaid("ABC", "VOR", "ABLE", LatLon(40.1, -100.0), None, 10.0)
+        ndb = dataclasses.replace(vor, type="NDB", position=LatLon(40.3, -100.2))
+        data = dataclasses.replace(EMPTY_DATA, navaids={"ABC": (vor, ndb)})
+        procedure = _procedure_with_leg(
+            Direct(NavaidRef("ABC", NavaidType.VOR)),
+            Direct(NavaidRef("ABC", NavaidType.NDB)),
+        )
+
+        with pytest.raises(ResolveError) as excinfo:
+            resolve(procedure, airport, data)
+
+        assert excinfo.value.kind == Kind.AMBIGUOUS_REF
+        assert excinfo.value.signature == "ident resolves to two facilities"
+
 
 class TestFixes:
     def test_fix_beyond_150nm_is_excluded_and_unresolved(self, nasr_data):

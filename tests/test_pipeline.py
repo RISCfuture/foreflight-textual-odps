@@ -73,6 +73,13 @@ def label_texts(drawing):
     ]
 
 
+def vcoa_only(block):
+    """`block` without its DEPARTURE PROCEDURE section, its VCOA naming TPH by ident."""
+    head, rest = block.text.split("DEPARTURE PROCEDURE:\n")
+    vcoa = rest[rest.index("VCOA:") :].replace("TONOPAH VORTAC", "TONOPAH (TPH) VORTAC")
+    return dataclasses.replace(block, text=head + vcoa)
+
+
 class TestDrawings:
     def test_only_tph_is_drawn(self, result):
         assert [drawing.lid for drawing in result.drawings] == ["TPH"]
@@ -95,6 +102,17 @@ class TestDrawings:
 
         assert outcome.finding is None
         assert outcome.drawing.lid == "TPH"
+
+    def test_vcoa_only_block_draws_its_vcoa(self):
+        blocks, _ = extract_blocks(FIXTURES / "pdf" / "SW4TO-excerpt.pdf", "SW4")
+        tph = next(block for block in blocks if block.lid == "TPH")
+        options = BuildOptions(cycle=CYCLE, cache_dir=Path("unused"))
+
+        outcome = process_block(vcoa_only(tph), fixture_nasr(), options)
+
+        assert outcome.finding is None
+        styles = {s.style for s in outcome.drawing.shapes if isinstance(s, Polyline)}
+        assert styles == {Style.VCOA, Style.ROUTE, Style.HOLD}
 
 
 class TestFindings:

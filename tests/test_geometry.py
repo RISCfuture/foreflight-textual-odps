@@ -110,8 +110,8 @@ def distance(a, b) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
-def feet(n: int, kind=AltitudeKind.AT_OR_ABOVE) -> Altitude:
-    return Altitude(n, kind, f"{n}")
+def feet(n: int, kind=AltitudeKind.TO) -> Altitude:
+    return Altitude(n, kind, f"to {n}")
 
 
 def test_turn_radius_uses_standard_rate_at_150_kt():
@@ -136,7 +136,7 @@ def test_climb_heading_ends_where_gradient_reaches_altitude():
     altitude_label = next(
         lbl for lbl in labels(drawing) if distance(xy(lbl.at), end) < 1e-6
     )
-    assert altitude_label.text == format_altitude(feet(7000), "chart")
+    assert altitude_label.text == "7000"
     assert any(lbl.text == f"{magnetic(0):03d}°" for lbl in labels(drawing))
 
 
@@ -256,7 +256,8 @@ def test_vcoa_circle_surrounds_the_airport():
     assert len(polylines(drawing, Style.VCOA)) == 36
     assert all(distance(v, (0.0, 0.0)) == pytest.approx(2.0, abs=0.01) for v in circle)
     assert any(
-        lbl.text == "VCOA " + format_altitude(feet(7000), "chart")
+        lbl.text
+        == "VCOA " + format_altitude(feet(7000, AltitudeKind.AT_OR_ABOVE), "chart")
         for lbl in labels(drawing)
     )
     assert route_vertices(drawing)[0] == pytest.approx((0.0, 2.0), abs=1e-6)
@@ -285,3 +286,66 @@ def test_shared_tail_is_drawn_once_from_where_the_groups_converge():
     with pytest.raises(Degenerate) as raised:
         draw(converging(ClimbHeading(magnetic(270), feet(7000))))
     assert raised.value.signature == "shared tail start mismatch"
+
+
+def test_vcoa_then_on_course_draws_only_the_circle_and_label():
+    vcoa = VcoaGroup((), None, 7000, (ProceedOnCourse(),))
+
+    drawing = draw(resolved(vcoa=(vcoa,)))
+
+    assert {line.name for line in polylines(drawing, Style.VCOA)} == {"ALL RWYS: VCOA"}
+    assert len(polylines(drawing, Style.VCOA)) == 36
+    assert polylines(drawing) == []
+    assert [lbl.text for lbl in labels(drawing)] == [
+        "VCOA " + format_altitude(feet(7000, AltitudeKind.AT_OR_ABOVE), "chart")
+    ]
+
+
+def test_unsupported_construction_signature_names_the_leg_type():
+    vcoa = VcoaGroup(("36",), None, 7000, (ProceedOnCourse(), Direct(FixRef("X"))))
+
+    with pytest.raises(Degenerate) as raised:
+        draw(resolved(vcoa=(vcoa,), points=(point("X", 0.0, 9.0),)))
+
+    assert raised.value.signature == "unsupported construction: ProceedOnCourse"
+
+
+def test_climb_heading_to_an_altitude_reached_before_turn_start_ends_there():
+    leg = ClimbHeading(magnetic(0), feet(5300))
+
+    drawing = draw(resolved(group(leg)))
+
+    turn_start = (0.0, 2.0)
+    assert route_vertices(drawing)[-1] == pytest.approx(turn_start, abs=1e-6)
+    (altitude_label,) = [lbl for lbl in labels(drawing) if lbl.text == "5300"]
+    assert xy(altitude_label.at) == pytest.approx(turn_start, abs=1e-6)
+
+
+def hold_after_climb(vor_xy) -> ResolvedProcedure:
+    """RWY 36 climbs north to 7000, then holds at a VOR placed at `vor_xy`."""
+    hold = ClimbInHold(NavaidRef("VOR"), HoldSpec(None, Turn.RIGHT, 0), feet(9000))
+    climb = ClimbHeading(magnetic(0), feet(7000))
+    return resolved(group(climb, hold), points=(point("VOR", *vor_xy),))
+
+
+def test_hold_fix_ahead_is_approached_through_a_tangent_arc():
+    drawing = draw(hold_after_climb((4.0, 16.0)))
+
+    (approach,) = [
+        line for line in polylines(drawing) if line.name.endswith("direct VOR")
+    ]
+    route = [xy(p) for p in approach.points]
+    climb_end = route[0]
+    assert len(route) > 2
+    assert all(
+        distance(v, (climb_end[0] + R, climb_end[1])) == pytest.approx(R, abs=1e-6)
+        for v in route[:-1]
+    )
+    assert route[-1] == pytest.approx((4.0, 16.0), abs=1e-6)
+
+
+def test_hold_fix_behind_is_degenerate():
+    with pytest.raises(Degenerate) as raised:
+        draw(hold_after_climb((1.0, 3.0)))
+
+    assert raised.value.signature == "hold fix behind"

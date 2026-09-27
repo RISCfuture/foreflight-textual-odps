@@ -1,5 +1,6 @@
 """Parsing DEPARTURE PROCEDURE and VCOA text into the procedure AST."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -31,10 +32,12 @@ from odp_kml.procedure import (
     SpeedRestriction,
     Turn,
     VcoaGroup,
+    from_dict,
 )
 from odp_kml.sections import Sections
 
 FIXTURES = Path(__file__).parent / "fixtures" / "odp_text"
+GOLDEN = sorted((Path(__file__).parent / "fixtures" / "golden").glob("*.json"))
 
 
 def fixture_text(name: str) -> str | None:
@@ -64,7 +67,7 @@ def signature_of(text: str) -> str:
 
 
 def to(feet: int) -> Altitude:
-    return Altitude(feet, AltitudeKind.AT, f"to {feet}")
+    return Altitude(feet, AltitudeKind.TO, f"to {feet}")
 
 
 @pytest.mark.parametrize("name", ["tph", "alb", "bam"])
@@ -301,3 +304,36 @@ def test_vcoa_crossing_a_navaid_is_not_the_airport():
         parse_vcoa(text)
 
     assert error.value.signature == "unsupported VCOA crossing a navaid"
+
+
+@pytest.mark.parametrize(
+    "path",
+    GOLDEN
+    or [pytest.param(None, marks=pytest.mark.skip(reason="no reviewed golden files"))],
+    ids=lambda path: path.stem if path else "none",
+)
+def test_golden_set_parses_to_its_reviewed_ast_or_is_refused(path):
+    """Each reviewed golden file parses to exactly its stored AST, or not at all.
+
+    A golden file is ``tests/fixtures/golden/<LID>.json``: a draft written by
+    ``tools/draft_golden.py`` after human review, keeping the keys ``lid``,
+    ``amendment``, ``departure_procedure`` and ``vcoa`` (normalized section
+    text, either may be null) and ``procedure`` (the reviewed `Procedure` in
+    `procedure.to_dict` form). Refusing with `ParseError` passes, because a
+    refused procedure is reported rather than drawn; a different AST fails.
+    """
+    golden = json.loads(path.read_text())
+    sections = Sections(
+        amendment=golden["amendment"],
+        takeoff_minimums=None,
+        departure_procedure=golden["departure_procedure"],
+        vcoa=golden["vcoa"],
+        obstacle_notes=None,
+        dva=None,
+    )
+    try:
+        parsed = parse_procedure(sections, airport=golden["lid"])
+    except ParseError:
+        return
+
+    assert parsed == from_dict(golden["procedure"])

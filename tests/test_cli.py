@@ -72,17 +72,16 @@ def test_kml_only_build_of_one_airport(tmp_path, capsys):
     assert str(kml) in out
 
 
-def test_pack_build_wraps_the_kml(tmp_path):
+def test_pack_build_wraps_the_kml_and_reports_beside_it(tmp_path):
     out = tmp_path / "pack.zip"
     args = ["--cycle", "2026-09-03", "--airports", "TPH", "--out", str(out)]
 
-    assert (
-        main([*args, "--report", str(tmp_path / "r.json")], build=build_on_fixtures)
-        == 0
-    )
+    assert main(args, build=build_on_fixtures) == 0
 
     names = zipfile.ZipFile(out).namelist()
     assert "Textual ODPs/layers/Textual ODPs.kml" in names
+    assert (tmp_path / "report.json").exists()
+    assert (tmp_path / "report.md").exists()
 
 
 def test_download_failure_exits_1(tmp_path):

@@ -22,6 +22,8 @@ def decorated(digits: str, marks: str) -> str:
         (AltitudeKind.AT_OR_ABOVE, "fms", "7000A"),
         (AltitudeKind.AT_OR_BELOW, "fms", "7000B"),
         (AltitudeKind.AT, "fms", "7000"),
+        (AltitudeKind.TO, "chart", "7000"),
+        (AltitudeKind.TO, "fms", "7000"),
     ],
 )
 def test_format_altitude(kind, style, expected):

@@ -346,8 +346,8 @@ def _procedure(lid, groups, tail=None, vcoa=()) -> Procedure:
     return Procedure(lid, None, tuple(groups), tail, tuple(vcoa))
 
 
-def _at(feet: int) -> Altitude:
-    return Altitude(feet, AltitudeKind.AT, f"to {feet}")
+def _to(feet: int) -> Altitude:
+    return Altitude(feet, AltitudeKind.TO, f"to {feet}")
 
 
 def _at_or_above(feet: int) -> Altitude:
@@ -422,8 +422,8 @@ EXAMPLES: tuple[Example, ...] = (
         _procedure(
             "ALB",
             [
-                RunwayGroup(("10",), (ClimbHeading(110, _at(2000)), ProceedOnCourse())),
-                RunwayGroup(("28",), (ClimbHeading(281, _at(2000)), ProceedOnCourse())),
+                RunwayGroup(("10",), (ClimbHeading(110, _to(2000)), ProceedOnCourse())),
+                RunwayGroup(("28",), (ClimbHeading(281, _to(2000)), ProceedOnCourse())),
             ],
         ),
         (
@@ -449,7 +449,7 @@ EXAMPLES: tuple[Example, ...] = (
                     (
                         ClimbingTurn(
                             Turn.RIGHT,
-                            HeadingAndRadial(240, _BAM, 210, True, _at(10000)),
+                            HeadingAndRadial(240, _BAM, 210, True, _to(10000)),
                         ),
                         ProceedOnCourse(),
                     ),
@@ -458,7 +458,7 @@ EXAMPLES: tuple[Example, ...] = (
                     ("22",),
                     (
                         Direct(_BAM),
-                        Radial(NavaidRef("BAM"), 210, True, _at(10100)),
+                        Radial(NavaidRef("BAM"), 210, True, _to(10100)),
                         ProceedOnCourse(),
                     ),
                 ),
@@ -522,7 +522,7 @@ EXAMPLES: tuple[Example, ...] = (
                             HeadingAndRadial(130, _CPN, 340, False, AtFix(_CPN)),
                         ),
                         ClimbInHold(
-                            _CPN, HoldSpec(Compass8.N, Turn.LEFT, 166), _at(10200)
+                            _CPN, HoldSpec(Compass8.N, Turn.LEFT, 166), _to(10200)
                         ),
                         ProceedOnCourse(),
                     ),
@@ -548,7 +548,7 @@ EXAMPLES: tuple[Example, ...] = (
         _procedure(
             "XML",
             [
-                RunwayGroup(("16",), (ClimbHeading(154, _at(2500)), ProceedOnCourse())),
+                RunwayGroup(("16",), (ClimbHeading(154, _to(2500)), ProceedOnCourse())),
                 RunwayGroup(
                     ("34",),
                     (
@@ -612,7 +612,7 @@ EXAMPLES: tuple[Example, ...] = (
                     (
                         Direct(_BOACH),
                         ClimbInHold(
-                            _BOACH, HoldSpec(Compass8.SW, Turn.LEFT, 31), _at(8000)
+                            _BOACH, HoldSpec(Compass8.SW, Turn.LEFT, 31), _to(8000)
                         ),
                         ProceedOnCourse(),
                     ),
@@ -634,10 +634,10 @@ EXAMPLES: tuple[Example, ...] = (
             "XTR",
             [
                 RunwayGroup(
-                    ("3",), (ClimbHeading(30, _at(1500)), ProceedOnCourse(Turn.LEFT))
+                    ("3",), (ClimbHeading(30, _to(1500)), ProceedOnCourse(Turn.LEFT))
                 ),
                 RunwayGroup(
-                    ("21",), (ClimbHeading(210, _at(1500)), ProceedOnCourse(Turn.RIGHT))
+                    ("21",), (ClimbHeading(210, _to(1500)), ProceedOnCourse(Turn.RIGHT))
                 ),
             ],
         ),
@@ -710,7 +710,7 @@ EXAMPLES: tuple[Example, ...] = (
         "course.",
         _procedure(
             "XVC",
-            [RunwayGroup(("5",), (ClimbHeading(50, _at(6500)), ProceedOnCourse()))],
+            [RunwayGroup(("5",), (ClimbHeading(50, _to(6500)), ProceedOnCourse()))],
             vcoa=[VcoaGroup(("5",), _BOACH, 6500, (ProceedOnCourse(),))],
         ),
         ("climb on heading 050° to 6500", "to 6500", _POC, _POC),
@@ -745,8 +745,9 @@ Output: one Procedure object matching the response schema. Every object carries
   and Thence (the "thence..." marker leading into a shared tail).
 - shared_tail: the legs after a leading "..." or "All aircraft" line that every
   group continues with; null when there is none.
-- until ends a leg: Altitude ("to 2000" is kind "at", "at or above 9300" is
-  "at_or_above", "at or below" is "at_or_below"; phrase is the exact words),
+- until ends a leg: Altitude ("to 2000" is kind "to", "at 2000" is "at",
+  "at or above 9300" is "at_or_above", "at or below" is "at_or_below"; phrase
+  is the exact words),
   AtFix, Dme ("to MLF 12 DME"), or CrossRadial ("to cross LAS VORTAC R-110").
 - Navaids: ident is the three-letter identifier; name only when the text spells
   it out ("TONOPAH (TPH) VORTAC" gives name TONOPAH); type only when the text
