@@ -22,6 +22,7 @@ from .geometry import DEFAULT_PARAMS, Degenerate, DisplayParams, draw
 from .grammar import ParseError, parse_procedure
 from .minimums import parse_takeoff_minimums
 from .normalize import normalize
+from .palette import assign_palettes
 from .resolve import ResolveError, resolve
 from .sections import Sections, split_sections
 from .shapes import AirportDrawing, Label
@@ -94,9 +95,8 @@ def build_from_sources(
         blocks = _volume_blocks(pdf, volume)
         findings += _metafile_findings(blocks, metafile, volume, options)
         outcomes += _process_blocks(blocks, nasr_data, options)
-    drawings = sorted(
-        (outcome.drawing for outcome in outcomes if outcome.drawing),
-        key=lambda drawing: drawing.lid,
+    drawings = assign_palettes(
+        outcome.drawing for outcome in outcomes if outcome.drawing
     )
     findings += [outcome.finding for outcome in outcomes if outcome.finding]
     report = Report(

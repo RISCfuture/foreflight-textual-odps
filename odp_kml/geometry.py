@@ -17,7 +17,6 @@ from .labels import (
     heading_label,
     heading_phrase,
     hold_label,
-    mileage_label,
     radial_label,
     radial_phrase,
     turn_phrase,
@@ -94,7 +93,7 @@ class DisplayParams:
     vcoa_radius_nm: float = 2.0
     arc_step_deg: float = 5.0
     label_offset_nm: float = 0.35
-    label_style: str = "chart"
+    label_style: str = "plain"
 
 
 DEFAULT_PARAMS = DisplayParams()
@@ -139,7 +138,10 @@ def draw(
     for vcoa in procedure.vcoa:
         _draw_vcoa(ctx, vcoa)
     return AirportDrawing(
-        resolved.airport_lid, resolved.airport_name, tuple(ctx.shapes)
+        resolved.airport_lid,
+        resolved.airport_name,
+        tuple(ctx.shapes),
+        position=resolved.airport_position,
     )
 
 
@@ -417,8 +419,6 @@ def _direct(pen: _Pen, leg: Direct, direction: Turn | None) -> None:
     pen.straight_to(target)
     ctx.polyline(name, Style.ROUTE, [*points, target])
     _arrowhead(ctx, name, Style.ROUTE, target, pen.course)
-    miles = mileage_label(distance(tangent, target))
-    _offset_label(pen, miles, midpoint(tangent, target), side)
 
 
 def _turn_side(pen: _Pen, target: Vec, direction: Turn | None) -> int:

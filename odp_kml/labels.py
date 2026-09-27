@@ -1,5 +1,9 @@
 """Text drawn on the planview: altitude constraints, headings, radials,
-mileages, and the human phrases that name polylines."""
+and the human phrases that name polylines.
+
+Labels are plain text: ForeFlight renders neither combining characters nor
+rich text, so a constraint is spelled out ("at or above 9300'") rather than
+drawn with the chart's underline/overline marks."""
 
 from __future__ import annotations
 
@@ -13,12 +17,10 @@ from .procedure import (
     Until,
 )
 
-UNDERLINE = "̲"  # combining low line
-OVERLINE = "̅"  # combining overline
-CHART_MARKS = {
-    AltitudeKind.AT_OR_ABOVE: UNDERLINE,
-    AltitudeKind.AT_OR_BELOW: OVERLINE,
-    AltitudeKind.AT: UNDERLINE + OVERLINE,
+PLAIN_PREFIXES = {
+    AltitudeKind.AT_OR_ABOVE: "at or above ",
+    AltitudeKind.AT_OR_BELOW: "at or below ",
+    AltitudeKind.AT: "at ",
     AltitudeKind.TO: "",
 }
 FMS_SUFFIXES = {
@@ -30,12 +32,12 @@ FMS_SUFFIXES = {
 
 
 def format_altitude(alt: Altitude, style: str) -> str:
-    """Render an altitude as charted ("chart": digits under/overlined) or as
-    an FMS constraint ("fms": 7000A, 7000B, 7000).
+    """Render an altitude spelled out ("plain": at or above 7000') or as an
+    FMS constraint ("fms": 7000A, 7000B, 7000).
 
-    A climb-to altitude (`AltitudeKind.TO`) is plain digits in both styles.
+    A climb-to altitude (`AltitudeKind.TO`) is the bare figure in both styles.
     An FMS has no suffix for a mandatory altitude, so `AltitudeKind.AT` is
-    also bare digits in the "fms" style; only the chart style tells it apart.
+    also bare digits in the "fms" style; only the plain style tells it apart.
     """
     return format_feet(alt.feet, alt.kind, style)
 
@@ -44,7 +46,7 @@ def format_feet(feet: int, kind: AltitudeKind, style: str) -> str:
     """`format_altitude` for a bare figure and constraint kind."""
     if style == "fms":
         return f"{feet}{FMS_SUFFIXES[kind]}"
-    return "".join(digit + CHART_MARKS[kind] for digit in str(feet))
+    return f"{PLAIN_PREFIXES[kind]}{feet}'"
 
 
 def heading_label(magnetic: int) -> str:
@@ -57,21 +59,16 @@ def radial_label(radial: int) -> str:
     return f"R-{radial:03d}"
 
 
-def mileage_label(nm: float) -> str:
-    """A segment's charted mileage, e.g. ``(12)``."""
-    return f"({nm:.0f})"
-
-
 def hold_label(until: Until | None, style: str) -> str:
-    """``HOLD`` plus the altitude to climb to in the hold, if one is given."""
+    """``Hold`` plus, in parentheses, the altitude to climb to in the hold."""
     if isinstance(until, Altitude):
-        return f"HOLD {format_altitude(until, style)}"
-    return "HOLD"
+        return f"Hold ({format_altitude(until, style)})"
+    return "Hold"
 
 
 def vcoa_label(at_or_above: int, style: str) -> str:
-    """``VCOA`` plus the altitude to cross the airport at or above."""
-    return f"VCOA {format_feet(at_or_above, AltitudeKind.AT_OR_ABOVE, style)}"
+    """``VCOA`` plus, in parentheses, the altitude to cross the airport at."""
+    return f"VCOA ({format_feet(at_or_above, AltitudeKind.AT_OR_ABOVE, style)})"
 
 
 def turn_phrase(direction: Turn | None) -> str:

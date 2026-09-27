@@ -119,7 +119,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument(
         "--label-style",
-        choices=("chart", "fms"),
+        choices=("plain", "fms"),
         default=DisplayParams.label_style,
     )
     ap.add_argument(

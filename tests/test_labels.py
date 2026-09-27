@@ -1,30 +1,33 @@
-"""Tests for odp_kml.labels: charted altitude constraints."""
+"""Tests for odp_kml.labels: altitude, hold and VCOA label wording."""
 
 import pytest
 
-from odp_kml.labels import format_altitude
+from odp_kml.labels import format_altitude, hold_label, vcoa_label
 from odp_kml.procedure import Altitude, AltitudeKind
-
-LOW_LINE = "̲"
-OVERLINE = "̅"
-
-
-def decorated(digits: str, marks: str) -> str:
-    return "".join(digit + marks for digit in digits)
 
 
 @pytest.mark.parametrize(
     ("kind", "style", "expected"),
     [
-        (AltitudeKind.AT_OR_ABOVE, "chart", decorated("7000", LOW_LINE)),
-        (AltitudeKind.AT_OR_BELOW, "chart", decorated("7000", OVERLINE)),
-        (AltitudeKind.AT, "chart", decorated("7000", LOW_LINE + OVERLINE)),
+        (AltitudeKind.TO, "plain", "7000'"),
+        (AltitudeKind.AT_OR_ABOVE, "plain", "at or above 7000'"),
+        (AltitudeKind.AT_OR_BELOW, "plain", "at or below 7000'"),
+        (AltitudeKind.AT, "plain", "at 7000'"),
         (AltitudeKind.AT_OR_ABOVE, "fms", "7000A"),
         (AltitudeKind.AT_OR_BELOW, "fms", "7000B"),
         (AltitudeKind.AT, "fms", "7000"),
-        (AltitudeKind.TO, "chart", "7000"),
         (AltitudeKind.TO, "fms", "7000"),
     ],
 )
 def test_format_altitude(kind, style, expected):
     assert format_altitude(Altitude(7000, kind, "7000"), style) == expected
+
+
+def test_hold_label_wraps_the_altitude_in_parentheses():
+    until = Altitude(9300, AltitudeKind.AT_OR_ABOVE, "at or above 9300")
+    assert hold_label(until, "plain") == "Hold (at or above 9300')"
+    assert hold_label(None, "plain") == "Hold"
+
+
+def test_vcoa_label_wraps_the_altitude_in_parentheses():
+    assert vcoa_label(7800, "plain") == "VCOA (at or above 7800')"

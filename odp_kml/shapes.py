@@ -35,3 +35,5 @@ class AirportDrawing:
     lid: str
     name: str
     shapes: tuple[Polyline | Label, ...]
+    position: LatLon | None = None
+    palette: int = 0

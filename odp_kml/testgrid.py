@@ -13,6 +13,7 @@ import dataclasses
 
 from .geo import LatLon, LocalPlane
 from .geometry import DisplayParams, draw
+from .palette import PALETTE_SIZE
 from .plane import Vec
 from .plane import offset as plane_offset
 from .procedure import (
@@ -323,7 +324,7 @@ _CONSTRUCTIONS: tuple[_Construction, ...] = (
         vcoa=(VcoaGroup((), None, 7800, (ProceedOnCourse(),)),),
     ),
     _Construction(
-        "Altitude label kinds: at or above, at, climb to (chart style)",
+        "Altitude label kinds: at or above, at, climb to (plain style)",
         (_label_kinds_group(),),
     ),
     _Construction(
@@ -348,17 +349,18 @@ def draw_grid(
     spacing_deg: float = DEFAULT_SPACING_DEG,
     columns: int = DEFAULT_COLUMNS,
 ) -> list[AirportDrawing]:
-    """Draw every cell, each labelled with its code and construction title."""
+    """Draw every cell, each labelled with its code and construction title
+    and cycling through the palette so every line color is on show."""
     return [
-        _draw_cell(cell, top_left)
-        for cell, top_left in _layout(origin, spacing_deg, columns)
+        dataclasses.replace(_draw_cell(cell, top_left), palette=index % PALETTE_SIZE)
+        for index, (cell, top_left) in enumerate(_layout(origin, spacing_deg, columns))
     ]
 
 
 def _draw_cell(cell: Cell, top_left: LatLon) -> AirportDrawing:
     drawing = draw(cell.resolved, cell.params)
     title = Label(f"{cell.code}: {cell.title}", top_left)
-    return AirportDrawing(drawing.lid, drawing.name, (title, *drawing.shapes))
+    return dataclasses.replace(drawing, shapes=(title, *drawing.shapes))
 
 
 def _layout(

@@ -14,18 +14,32 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from .geo import LatLon
+from .palette import PALETTE_SIZE
 from .shapes import AirportDrawing, Label, Polyline, Style
 
 KML_NAMESPACE = "http://www.opengis.net/kml/2.2"
 LABEL_STYLE_ID = "label"
 
-# (style id, line width, color) for every shared LineStyle, in "aabbggrr" order.
-_LINE_STYLES: tuple[tuple[Style, int, str], ...] = (
-    (Style.ROUTE, 3, "ff8b3a1e"),
-    (Style.RADIAL, 1, "ff8b3a1e"),
-    (Style.HOLD, 2, "ff8b3a1e"),
-    (Style.VCOA, 1, "ff8b3a1e"),
+# Line width per shape style.
+_LINE_WIDTHS: dict[Style, int] = {
+    Style.ROUTE: 6,
+    Style.RADIAL: 3,
+    Style.HOLD: 5,
+    Style.VCOA: 3,
+}
+
+# One color per palette index, in KML "aabbggrr" order: blue, red, green,
+# purple, orange, brown. Chosen to stay legible over sectional tints and to
+# avoid ForeFlight's magenta active-leg color.
+PALETTE_COLORS: tuple[str, ...] = (
+    "ff8b3a1e",
+    "ff1e1ec8",
+    "ff287814",
+    "ffa01e78",
+    "ff0078e6",
+    "ff14466e",
 )
+assert len(PALETTE_COLORS) == PALETTE_SIZE
 
 
 def render_kml(drawings: Iterable[AirportDrawing], *, document_name: str) -> str:
@@ -56,13 +70,22 @@ def write_kml(
 
 def _build_shared_styles() -> list[ET.Element]:
     line_styles = [
-        _build_line_style(style, width, color) for style, width, color in _LINE_STYLES
+        _build_line_style(style, palette)
+        for palette in range(PALETTE_SIZE)
+        for style in Style
     ]
     return [*line_styles, _build_label_style()]
 
 
-def _build_line_style(style: Style, width: int, color: str) -> ET.Element:
-    element = ET.Element("Style", {"id": style.value})
+def line_style_id(style: Style, palette: int) -> str:
+    """The shared style id for a shape style drawn in a palette color."""
+    return f"{style.value}-{palette}"
+
+
+def _build_line_style(style: Style, palette: int) -> ET.Element:
+    element = ET.Element("Style", {"id": line_style_id(style, palette)})
+    width = _LINE_WIDTHS[style]
+    color = PALETTE_COLORS[palette]
     line_style = ET.SubElement(element, "LineStyle")
     _add_text_child(line_style, "color", color)
     _add_text_child(line_style, "width", str(width))
@@ -80,20 +103,20 @@ def _build_folder(drawing: AirportDrawing) -> ET.Element:
     folder = ET.Element("Folder")
     _add_text_child(folder, "name", f"{drawing.lid} – {drawing.name}")
     for shape in drawing.shapes:
-        folder.append(_build_placemark(shape))
+        folder.append(_build_placemark(shape, drawing.palette))
     return folder
 
 
-def _build_placemark(shape: Polyline | Label) -> ET.Element:
+def _build_placemark(shape: Polyline | Label, palette: int) -> ET.Element:
     if isinstance(shape, Polyline):
-        return _build_polyline_placemark(shape)
+        return _build_polyline_placemark(shape, palette)
     return _build_label_placemark(shape)
 
 
-def _build_polyline_placemark(polyline: Polyline) -> ET.Element:
+def _build_polyline_placemark(polyline: Polyline, palette: int) -> ET.Element:
     placemark = ET.Element("Placemark")
     _add_text_child(placemark, "name", polyline.name)
-    _add_text_child(placemark, "styleUrl", f"#{polyline.style.value}")
+    _add_text_child(placemark, "styleUrl", f"#{line_style_id(polyline.style, palette)}")
     line_string = ET.SubElement(placemark, "LineString")
     _add_text_child(line_string, "coordinates", _format_coordinates(polyline.points))
     return placemark

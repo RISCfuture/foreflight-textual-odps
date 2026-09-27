@@ -52,10 +52,15 @@ with certainty:
 - Climb-in-hold racetracks.
 - VCOA (visual climb over airport) circles, including airports whose only
   procedure is a VCOA.
-- Altitude labels in chart style: plain digits for "climb to," underlined
-  for "at or above," overlined for "at or below," and both for a mandatory
-  "at." With `--label-style fms` they take the FMS form: `A` and `B`
-  suffixes, and plain digits for "climb to" and "at."
+- Altitude labels spelled out in plain text (ForeFlight renders neither
+  rich text nor combining marks): `7000'` for "climb to," `at or above
+  7000'`, `at or below 7000'`, and `at 7000'` for a mandatory altitude;
+  holds read `Hold (at or above 9300')`. With `--label-style fms` they take
+  the FMS form: `A` and `B` suffixes, and plain digits for "climb to" and
+  "at." Heading legs are labelled with the magnetic heading; leg lengths
+  are not labelled.
+- Each airport's lines take one of six colors, chosen so that no two
+  airports within 40 NM share a color.
 
 **Not drawn:** takeoff minimums (ceiling/visibility and climb gradient
 tables), obstacle notes, diverse vector areas (DVAs), procedures that

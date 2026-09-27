@@ -52,7 +52,7 @@ def test_draw_grid_labels_every_cell_and_uses_only_allowed_kml_elements():
 # Recorded from a known-good render of `draw_grid()`. Update deliberately
 # (and explain why in the commit) whenever a geometry change legitimately
 # alters the grid's output.
-GOLDEN_SHA256 = "006e4391c9f2dc483bb638caffc59f2b841084a1505e3b6db941b02df15d6580"
+GOLDEN_SHA256 = "ed5ed4d91626115fafab924f5fd03d05414f2b578120fdf28acc2427d4ebc546"
 
 
 def test_render_kml_of_grid_matches_recorded_hash():

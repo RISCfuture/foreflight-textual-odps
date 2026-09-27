@@ -136,7 +136,7 @@ def test_climb_heading_ends_where_gradient_reaches_altitude():
     altitude_label = next(
         lbl for lbl in labels(drawing) if distance(xy(lbl.at), end) < 1e-6
     )
-    assert altitude_label.text == "7000"
+    assert altitude_label.text == "7000'"
     assert any(lbl.text == f"{magnetic(0):03d}°" for lbl in labels(drawing))
 
 
@@ -221,7 +221,7 @@ def test_hold_racetrack_extends_two_radii_to_the_turning_side(turns, side):
     assert max(xs) == pytest.approx(2 * R, abs=1e-3)
     assert min(y for _, y in racetrack) == pytest.approx(6.0 - leg_nm - R, abs=1e-3)
     assert route_vertices(drawing)[-1] == pytest.approx((0.0, 6.0), abs=1e-6)
-    assert any(lbl.text.startswith("HOLD 9") for lbl in labels(drawing))
+    assert any(lbl.text.startswith("Hold (") for lbl in labels(drawing))
 
 
 def test_hold_falls_back_to_the_published_hold_else_is_degenerate():
@@ -257,7 +257,9 @@ def test_vcoa_circle_surrounds_the_airport():
     assert all(distance(v, (0.0, 0.0)) == pytest.approx(2.0, abs=0.01) for v in circle)
     assert any(
         lbl.text
-        == "VCOA " + format_altitude(feet(7000, AltitudeKind.AT_OR_ABOVE), "chart")
+        == "VCOA ("
+        + format_altitude(feet(7000, AltitudeKind.AT_OR_ABOVE), "plain")
+        + ")"
         for lbl in labels(drawing)
     )
     assert route_vertices(drawing)[0] == pytest.approx((0.0, 2.0), abs=1e-6)
@@ -297,7 +299,7 @@ def test_vcoa_then_on_course_draws_only_the_circle_and_label():
     assert len(polylines(drawing, Style.VCOA)) == 36
     assert polylines(drawing) == []
     assert [lbl.text for lbl in labels(drawing)] == [
-        "VCOA " + format_altitude(feet(7000, AltitudeKind.AT_OR_ABOVE), "chart")
+        "VCOA (" + format_altitude(feet(7000, AltitudeKind.AT_OR_ABOVE), "plain") + ")"
     ]
 
 
@@ -317,7 +319,7 @@ def test_climb_heading_to_an_altitude_reached_before_turn_start_ends_there():
 
     turn_start = (0.0, 2.0)
     assert route_vertices(drawing)[-1] == pytest.approx(turn_start, abs=1e-6)
-    (altitude_label,) = [lbl for lbl in labels(drawing) if lbl.text == "5300"]
+    (altitude_label,) = [lbl for lbl in labels(drawing) if lbl.text == "5300'"]
     assert xy(altitude_label.at) == pytest.approx(turn_start, abs=1e-6)
 
 
