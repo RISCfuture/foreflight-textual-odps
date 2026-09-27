@@ -3,7 +3,7 @@
 import json
 
 from odp_kml.findings import Kind, Report
-from odp_kml.issues import SyncSummary, render_body, render_title, sync_issues
+from odp_kml.issues import SyncSummary, main, render_body, render_title, sync_issues
 from tests.test_findings import make_finding
 
 REPO = "example/repo"
@@ -178,3 +178,59 @@ class TestRenderBody:
         assert "… and 2 more, see report.json in the release" in body
         assert body.count("```") == 100
         assert "A051" not in body
+
+
+class TestMain:
+    def test_dry_run_lists_but_makes_no_mutating_gh_calls(self, tmp_path, capsys):
+        finding = make_finding(
+            kind=Kind.PARSE_FAILED, signature="garbled text near line 12"
+        )
+        report = Report(
+            cycle="2026-09-03",
+            airports_with_text=1,
+            drawn=0,
+            findings=[finding],
+            label_count=0,
+        )
+        report_path = tmp_path / "report.json"
+        report_path.write_text(report.to_json())
+        run = RecordingRun(issue_list="[]")
+
+        exit_code = main(
+            ["--report", str(report_path), "--repo", REPO, "--dry-run"], run=run
+        )
+
+        assert exit_code == 0
+        mutating = {
+            ("issue", "create"),
+            ("issue", "edit"),
+            ("issue", "comment"),
+            ("issue", "close"),
+            ("label", "create"),
+        }
+        assert not any(tuple(call[:2]) in mutating for call in run.calls)
+        assert [call[:2] for call in run.calls] == [["issue", "list"]]
+        assert "CREATE" in capsys.readouterr().out
+
+    def test_without_dry_run_syncs_and_prints_summary_counts(self, tmp_path, capsys):
+        finding = make_finding(
+            kind=Kind.PARSE_FAILED, signature="garbled text near line 12"
+        )
+        report = Report(
+            cycle="2026-09-03",
+            airports_with_text=1,
+            drawn=0,
+            findings=[finding],
+            label_count=0,
+        )
+        report_path = tmp_path / "report.json"
+        report_path.write_text(report.to_json())
+        run = RecordingRun(issue_list="[]", create_number=42)
+
+        exit_code = main(["--report", str(report_path), "--repo", REPO], run=run)
+
+        assert exit_code == 0
+        assert ["issue", "create"] in [call[:2] for call in run.calls]
+        out = capsys.readouterr().out
+        assert "created 1" in out
+        assert "closed 0" in out
