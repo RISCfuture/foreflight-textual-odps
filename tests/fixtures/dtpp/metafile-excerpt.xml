@@ -1,0 +1,148 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<digital_tpp cycle="2609" from_edate="0901Z  09/03/26" to_edate="0901Z  10/01/26">
+  <state_code ID="NV" state_fullname="NEVADA">
+    <city_name ID="EUREKA" volume="SW-4">
+      <airport_name ID="EUREKA" military="N" apt_ident="05U" icao_ident="" alnum="9852">
+        <record>
+          <chartseq>10200</chartseq>
+          <chart_code>MIN</chart_code>
+          <chart_name>ALTERNATE MINIMUMS</chart_name>
+          <useraction></useraction>
+          <pdf_name>SW4ALT.PDF</pdf_name>
+          <cn_flg>N</cn_flg>
+          <cnsection></cnsection>
+          <cnpage></cnpage>
+          <bvsection>M</bvsection>
+          <bvpage></bvpage>
+          <procuid></procuid>
+          <two_colored>N</two_colored>
+          <civil></civil>
+          <faanfd18></faanfd18>
+          <copter></copter>
+          <amdtnum></amdtnum>
+          <amdtdate></amdtdate>
+        </record>
+        <record>
+          <chartseq>53525</chartseq>
+          <chart_code>IAP</chart_code>
+          <chart_name>RNAV (GPS) RWY 18</chart_name>
+          <useraction></useraction>
+          <pdf_name>09852R18.PDF</pdf_name>
+          <cn_flg>N</cn_flg>
+          <cnsection></cnsection>
+          <cnpage></cnpage>
+          <bvsection></bvsection>
+          <bvpage>86</bvpage>
+          <procuid>32295</procuid>
+          <two_colored>Y</two_colored>
+          <civil>C</civil>
+          <faanfd18></faanfd18>
+          <copter></copter>
+          <amdtnum>1</amdtnum>
+          <amdtdate>01/25/2024</amdtdate>
+        </record>
+      </airport_name>
+    </city_name>
+    <city_name ID="TONOPAH" volume="SW-4">
+      <airport_name ID="TONOPAH" military="N" apt_ident="TPH" icao_ident="KTPH" alnum="423">
+        <record>
+          <chartseq>10100</chartseq>
+          <chart_code>MIN</chart_code>
+          <chart_name>TAKEOFF MINIMUMS</chart_name>
+          <useraction></useraction>
+          <pdf_name>SW4TO.PDF</pdf_name>
+          <cn_flg>N</cn_flg>
+          <cnsection></cnsection>
+          <cnpage></cnpage>
+          <bvsection>L</bvsection>
+          <bvpage></bvpage>
+          <procuid></procuid>
+          <two_colored>N</two_colored>
+          <civil></civil>
+          <faanfd18></faanfd18>
+          <copter></copter>
+          <amdtnum></amdtnum>
+          <amdtdate></amdtdate>
+        </record>
+        <record>
+          <chartseq>10200</chartseq>
+          <chart_code>MIN</chart_code>
+          <chart_name>ALTERNATE MINIMUMS</chart_name>
+          <useraction></useraction>
+          <pdf_name>SW4ALT.PDF</pdf_name>
+          <cn_flg>N</cn_flg>
+          <cnsection></cnsection>
+          <cnpage></cnpage>
+          <bvsection>M</bvsection>
+          <bvpage></bvpage>
+          <procuid></procuid>
+          <two_colored>N</two_colored>
+          <civil></civil>
+          <faanfd18></faanfd18>
+          <copter></copter>
+          <amdtnum></amdtnum>
+          <amdtdate></amdtdate>
+        </record>
+        <record>
+          <chartseq>53525</chartseq>
+          <chart_code>IAP</chart_code>
+          <chart_name>RNAV (GPS) RWY 15</chart_name>
+          <useraction></useraction>
+          <pdf_name>00423R15.PDF</pdf_name>
+          <cn_flg>N</cn_flg>
+          <cnsection></cnsection>
+          <cnpage></cnpage>
+          <bvsection></bvsection>
+          <bvpage>517</bvpage>
+          <procuid>31657</procuid>
+          <two_colored>N</two_colored>
+          <civil>C</civil>
+          <faanfd18></faanfd18>
+          <copter></copter>
+          <amdtnum>0C</amdtnum>
+          <amdtdate>11/03/2022</amdtdate>
+        </record>
+      </airport_name>
+      <airport_name ID="TONOPAH TEST RANGE" military="M" apt_ident="TNX" icao_ident="KTNX" alnum="3188">
+        <record>
+          <chartseq>10100</chartseq>
+          <chart_code>MIN</chart_code>
+          <chart_name>TAKEOFF MINIMUMS</chart_name>
+          <useraction></useraction>
+          <pdf_name>SW4TO.PDF</pdf_name>
+          <cn_flg>N</cn_flg>
+          <cnsection></cnsection>
+          <cnpage></cnpage>
+          <bvsection>L</bvsection>
+          <bvpage></bvpage>
+          <procuid></procuid>
+          <two_colored>N</two_colored>
+          <civil></civil>
+          <faanfd18></faanfd18>
+          <copter></copter>
+          <amdtnum></amdtnum>
+          <amdtdate></amdtdate>
+        </record>
+        <record>
+          <chartseq>50750</chartseq>
+          <chart_code>IAP</chart_code>
+          <chart_name>ILS OR LOC/DME RWY 14</chart_name>
+          <useraction></useraction>
+          <pdf_name>03188ILD14.PDF</pdf_name>
+          <cn_flg>N</cn_flg>
+          <cnsection></cnsection>
+          <cnpage></cnpage>
+          <bvsection></bvsection>
+          <bvpage>520</bvpage>
+          <procuid>30868</procuid>
+          <two_colored>N</two_colored>
+          <civil>N</civil>
+          <faanfd18></faanfd18>
+          <copter></copter>
+          <amdtnum></amdtnum>
+          <amdtdate></amdtdate>
+        </record>
+      </airport_name>
+    </city_name>
+  </state_code>
+</digital_tpp>
