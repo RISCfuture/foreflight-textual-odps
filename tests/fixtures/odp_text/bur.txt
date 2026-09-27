@@ -1,0 +1,4 @@
+Rwys 8, 15, climbing right turn direct VNY VOR/DME.
+Rwy 26, climb direct VNY VOR/DME.
+Rwy 33, Climbing left turn direct VNY VOR/DME.
+All aircraft continue climb in VNY holding pattern (SE, left turns, 295° inbound) to cross VNY VOR/DME at or above 5100, then westbound on V326 to GINNA or eastbound on V186 to DARTS.

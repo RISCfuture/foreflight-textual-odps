@@ -1,0 +1,78 @@
+{
+  "airport": "ALB",
+  "amendment": "AMDT 14 07OCT21 (21280) (FAA)",
+  "node": "Procedure",
+  "runway_groups": [
+    {
+      "legs": [
+        {
+          "heading": 110,
+          "node": "ClimbHeading",
+          "speed": null,
+          "until": {
+            "feet": 2000,
+            "kind": "at",
+            "node": "Altitude",
+            "phrase": "to 2000"
+          }
+        },
+        {
+          "node": "ProceedOnCourse",
+          "turn_restriction": null
+        }
+      ],
+      "node": "RunwayGroup",
+      "runways": [
+        "10"
+      ]
+    },
+    {
+      "legs": [
+        {
+          "heading": 191,
+          "node": "ClimbHeading",
+          "speed": null,
+          "until": {
+            "feet": 1400,
+            "kind": "at",
+            "node": "Altitude",
+            "phrase": "to 1400"
+          }
+        },
+        {
+          "node": "ProceedOnCourse",
+          "turn_restriction": null
+        }
+      ],
+      "node": "RunwayGroup",
+      "runways": [
+        "19"
+      ]
+    },
+    {
+      "legs": [
+        {
+          "heading": 281,
+          "node": "ClimbHeading",
+          "speed": null,
+          "until": {
+            "feet": 2000,
+            "kind": "at",
+            "node": "Altitude",
+            "phrase": "to 2000"
+          }
+        },
+        {
+          "node": "ProceedOnCourse",
+          "turn_restriction": null
+        }
+      ],
+      "node": "RunwayGroup",
+      "runways": [
+        "28"
+      ]
+    }
+  ],
+  "shared_tail": null,
+  "vcoa": []
+}

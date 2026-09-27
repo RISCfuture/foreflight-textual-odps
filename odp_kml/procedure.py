@@ -174,7 +174,11 @@ class ClimbInHold:
 
 @dataclasses.dataclass(frozen=True)
 class ProceedOnCourse:
-    """Continue on course, optionally without turning a given direction."""
+    """Continue on course before turning, e.g. "before turning left".
+
+    `turn_restriction` is the direction of that eventual turn, which must
+    wait for the leg's end condition; `None` if none is published.
+    """
 
     turn_restriction: Turn | None = None
 
@@ -206,7 +210,10 @@ class RunwayGroup:
 
 @dataclasses.dataclass(frozen=True)
 class VcoaGroup:
-    """A visual climb over airport: climb over the airport or a fix, then proceed."""
+    """A visual climb over airport: climb over the airport or a fix, then proceed.
+
+    An empty ``runways`` means every runway.
+    """
 
     runways: tuple[str, ...]
     cross: FixRef | None

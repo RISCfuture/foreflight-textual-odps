@@ -1,0 +1,162 @@
+{
+  "airport": "BAM",
+  "amendment": "AMDT 5 26MAR20 (20086) (FAA)",
+  "node": "Procedure",
+  "runway_groups": [
+    {
+      "legs": [
+        {
+          "heading": 36,
+          "navaid": {
+            "ident": "BAM",
+            "name": null,
+            "node": "NavaidRef",
+            "type": "VORTAC"
+          },
+          "node": "HeadingAndRadial",
+          "outbound": true,
+          "radial": 36,
+          "speed": null,
+          "until": {
+            "feet": 8200,
+            "kind": "at",
+            "node": "Altitude",
+            "phrase": "to 8200"
+          }
+        },
+        {
+          "node": "ProceedOnCourse",
+          "turn_restriction": null
+        }
+      ],
+      "node": "RunwayGroup",
+      "runways": [
+        "4"
+      ]
+    },
+    {
+      "legs": [
+        {
+          "direction": "R",
+          "node": "ClimbingTurn",
+          "then": {
+            "heading": 240,
+            "navaid": {
+              "ident": "BAM",
+              "name": null,
+              "node": "NavaidRef",
+              "type": "VORTAC"
+            },
+            "node": "HeadingAndRadial",
+            "outbound": true,
+            "radial": 210,
+            "speed": null,
+            "until": {
+              "feet": 10000,
+              "kind": "at",
+              "node": "Altitude",
+              "phrase": "to 10000"
+            }
+          }
+        },
+        {
+          "node": "ProceedOnCourse",
+          "turn_restriction": null
+        }
+      ],
+      "node": "RunwayGroup",
+      "runways": [
+        "13"
+      ]
+    },
+    {
+      "legs": [
+        {
+          "node": "Direct",
+          "speed": null,
+          "target": {
+            "ident": "BAM",
+            "name": null,
+            "node": "NavaidRef",
+            "type": "VORTAC"
+          }
+        },
+        {
+          "navaid": {
+            "ident": "BAM",
+            "name": null,
+            "node": "NavaidRef",
+            "type": null
+          },
+          "node": "Radial",
+          "outbound": true,
+          "radial": 210,
+          "speed": null,
+          "until": {
+            "feet": 10100,
+            "kind": "at",
+            "node": "Altitude",
+            "phrase": "to 10100"
+          }
+        },
+        {
+          "node": "ProceedOnCourse",
+          "turn_restriction": null
+        }
+      ],
+      "node": "RunwayGroup",
+      "runways": [
+        "22"
+      ]
+    },
+    {
+      "legs": [
+        {
+          "heading": 306,
+          "navaid": {
+            "ident": "BAM",
+            "name": null,
+            "node": "NavaidRef",
+            "type": "VORTAC"
+          },
+          "node": "HeadingAndRadial",
+          "outbound": true,
+          "radial": 329,
+          "speed": null,
+          "until": {
+            "feet": 9100,
+            "kind": "at",
+            "node": "Altitude",
+            "phrase": "to 9100"
+          }
+        },
+        {
+          "node": "ProceedOnCourse",
+          "turn_restriction": null
+        }
+      ],
+      "node": "RunwayGroup",
+      "runways": [
+        "31"
+      ]
+    }
+  ],
+  "shared_tail": null,
+  "vcoa": [
+    {
+      "at_or_above": 9200,
+      "cross": null,
+      "node": "VcoaGroup",
+      "runways": [
+        "4",
+        "13"
+      ],
+      "then": [
+        {
+          "node": "ProceedOnCourse",
+          "turn_restriction": null
+        }
+      ]
+    }
+  ]
+}

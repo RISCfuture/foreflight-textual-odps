@@ -1,0 +1,132 @@
+{
+  "airport": "TPH",
+  "amendment": "AMDT 2 17AUG17 (17229) (FAA)",
+  "node": "Procedure",
+  "runway_groups": [
+    {
+      "legs": [
+        {
+          "direction": "L",
+          "node": "ClimbingTurn",
+          "then": {
+            "node": "Direct",
+            "speed": null,
+            "target": {
+              "ident": "TPH",
+              "name": "TONOPAH",
+              "node": "NavaidRef",
+              "type": "VORTAC"
+            }
+          }
+        },
+        {
+          "node": "Thence"
+        }
+      ],
+      "node": "RunwayGroup",
+      "runways": [
+        "15"
+      ]
+    },
+    {
+      "legs": [
+        {
+          "direction": "R",
+          "node": "ClimbingTurn",
+          "then": {
+            "node": "Direct",
+            "speed": null,
+            "target": {
+              "ident": "TPH",
+              "name": "TONOPAH",
+              "node": "NavaidRef",
+              "type": "VORTAC"
+            }
+          }
+        },
+        {
+          "node": "Thence"
+        }
+      ],
+      "node": "RunwayGroup",
+      "runways": [
+        "33"
+      ]
+    }
+  ],
+  "shared_tail": [
+    {
+      "fix": {
+        "ident": "TPH",
+        "name": null,
+        "node": "NavaidRef",
+        "type": null
+      },
+      "hold": {
+        "direction_from_fix": "NE",
+        "inbound_course": 246,
+        "node": "HoldSpec",
+        "turns": "R"
+      },
+      "node": "ClimbInHold",
+      "until": {
+        "feet": 9300,
+        "kind": "at_or_above",
+        "node": "Altitude",
+        "phrase": "at or above 9300"
+      }
+    },
+    {
+      "node": "ProceedOnCourse",
+      "turn_restriction": null
+    }
+  ],
+  "vcoa": [
+    {
+      "at_or_above": 7800,
+      "cross": null,
+      "node": "VcoaGroup",
+      "runways": [
+        "15",
+        "33"
+      ],
+      "then": [
+        {
+          "node": "Direct",
+          "speed": null,
+          "target": {
+            "ident": "TPH",
+            "name": "TONOPAH",
+            "node": "NavaidRef",
+            "type": "VORTAC"
+          }
+        },
+        {
+          "fix": {
+            "ident": "TPH",
+            "name": null,
+            "node": "NavaidRef",
+            "type": null
+          },
+          "hold": {
+            "direction_from_fix": "NE",
+            "inbound_course": 246,
+            "node": "HoldSpec",
+            "turns": "R"
+          },
+          "node": "ClimbInHold",
+          "until": {
+            "feet": 9300,
+            "kind": "at_or_above",
+            "node": "Altitude",
+            "phrase": "at or above 9300"
+          }
+        },
+        {
+          "node": "ProceedOnCourse",
+          "turn_restriction": null
+        }
+      ]
+    }
+  ]
+}
