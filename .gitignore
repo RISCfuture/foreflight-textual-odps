@@ -15,6 +15,7 @@ data_cache/
 
 # Generated artifacts
 *.zip
+!tests/fixtures/**/*.zip
 *.kml
 report.json
 report.md
