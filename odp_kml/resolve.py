@@ -273,20 +273,45 @@ def _pick_one(
 def _resolve_holds(nodes: list, data: nasr.NasrData) -> dict[str, HoldSpec]:
     """Published `HoldSpec`s for every `ClimbInHold` whose text omits one.
 
-    Also checks a text-provided hold against a single matching published
-    hold, raising when the two disagree on inbound course or turn.
+    Also checks a text-provided hold against every published hold at that
+    fix that plausibly belongs to this procedure, raising when none of them
+    agrees on inbound course and turn.
     """
+    navaid_idents = {node.ident for node in nodes if isinstance(node, NavaidRef)}
     published: dict[str, HoldSpec] = {}
     for leg in nodes:
         if not isinstance(leg, ClimbInHold):
             continue
         fix_ident = leg.fix.ident
-        matches = data.holds.get(fix_ident, ())
+        matches = _matching_holds(data, fix_ident, navaid_idents)
         if leg.hold is None:
             published[fix_ident] = _hold_from_nasr(matches, fix_ident)
-        elif len(matches) == 1:
-            _check_hold_agrees(leg.hold, _hold_spec(matches[0]), fix_ident)
+        else:
+            _check_hold_agrees_with_any(leg.hold, matches, fix_ident)
     return published
+
+
+def _matching_holds(
+    data: nasr.NasrData, fix_ident: str, navaid_idents: set[str]
+) -> tuple[nasr.Hold, ...]:
+    """HPF holds at `fix_ident` whose navaid, if any, plausibly belongs to
+    this procedure.
+
+    A hold record's own fix identifier can be reused nationally for an
+    unrelated navaid elsewhere, so a hold is kept only when it has no
+    navaid, its navaid is `fix_ident` itself, or that navaid is one this
+    procedure already resolves.
+    """
+    return tuple(
+        hold
+        for hold in data.holds.get(fix_ident, ())
+        if hold.fix_ident == fix_ident
+        and (
+            hold.navaid_ident is None
+            or hold.navaid_ident == fix_ident
+            or hold.navaid_ident in navaid_idents
+        )
+    )
 
 
 def _hold_from_nasr(matches: tuple[nasr.Hold, ...], fix_ident: str) -> HoldSpec:
@@ -300,22 +325,40 @@ def _hold_from_nasr(matches: tuple[nasr.Hold, ...], fix_ident: str) -> HoldSpec:
     return _hold_spec(matches[0])
 
 
-def _check_hold_agrees(
-    text_hold: HoldSpec, published: HoldSpec, fix_ident: str
+def _check_hold_agrees_with_any(
+    text_hold: HoldSpec, published: tuple[nasr.Hold, ...], fix_ident: str
 ) -> None:
-    """Raise if the procedure text's hold disagrees with the published one."""
-    if (
-        text_hold.turns != published.turns
-        or text_hold.inbound_course != published.inbound_course
+    """Raise if the text's hold matches none of `published` on inbound
+    course and turn. Nothing to check against when NASR has no holds here:
+    the text's hold is trusted as-is."""
+    if not published:
+        return
+    specs = [_hold_spec(hold) for hold in published]
+    if not any(
+        spec.turns == text_hold.turns
+        and spec.inbound_course == text_hold.inbound_course
+        for spec in specs
     ):
         raise ResolveError(
             Kind.HOLD_AMBIGUOUS,
             "hold contradicts NASR",
-            f'text says {text_hold}, NASR says {published} at "{fix_ident}"',
+            f'text says {text_hold}, NASR has {specs} at "{fix_ident}"',
         )
 
 
 def _hold_spec(hold: nasr.Hold) -> HoldSpec:
-    """A `HoldSpec` from a NASR `Hold` record."""
-    direction = Compass8(hold.direction) if hold.direction else None
-    return HoldSpec(direction, Turn(hold.turn), hold.inbound_course)
+    """A `HoldSpec` from a NASR `Hold` record.
+
+    Raises `ResolveError` when the record's turn or direction field is not
+    one of the known enum values, rather than guessing.
+    """
+    try:
+        direction = Compass8(hold.direction) if hold.direction else None
+        turn = Turn(hold.turn)
+    except ValueError as error:
+        raise ResolveError(
+            Kind.HOLD_AMBIGUOUS,
+            "hold record unparseable",
+            f'hold at "{hold.fix_ident}": {error}',
+        ) from error
+    return HoldSpec(direction, turn, hold.inbound_course)

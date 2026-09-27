@@ -203,6 +203,14 @@ class TestFixes:
         assert point.declination_east == pytest.approx(12.0)
 
 
+def _vny_area_data(nasr_data: nasr.NasrData) -> nasr.NasrData:
+    """`nasr_data` with a hand-added "CANOG" fix near Van Nuys, so the real
+    HPF-fixture hold record for CANOG (which belongs to the VNY navaid) can
+    be looked up in tests without a full Van Nuys APT/FIX fixture."""
+    canog = nasr.Fix("CANOG", "CA", LatLon(34.15, -118.45))
+    return dataclasses.replace(nasr_data, fixes={**nasr_data.fixes, "CANOG": (canog,)})
+
+
 class TestHolds:
     def test_tph_hold_in_text_is_used_as_is(self, nasr_data):
         airport = nasr_data.airports["TPH"]
@@ -230,32 +238,91 @@ class TestHolds:
 
     def test_hold_from_hpf_when_text_omits_it(self, nasr_data):
         airport = _airport("VNY", LatLon(34.2098, -118.4899), 802.0, 14.0)
-        canog = nasr.Fix("CANOG", "CA", LatLon(34.15, -118.45))
-        data = dataclasses.replace(
-            nasr_data, fixes={**nasr_data.fixes, "CANOG": (canog,)}
+        data = _vny_area_data(nasr_data)
+        # The procedure must resolve the CANOG hold's own navaid (VNY)
+        # somewhere else, or the hold is filtered out as belonging to a
+        # possibly unrelated, nationally reused fix identifier.
+        procedure = _procedure_with_leg(
+            Direct(NavaidRef("VNY", NavaidType.VOR_DME)),
+            ClimbInHold(FixRef("CANOG"), None),
         )
-        leg = ClimbInHold(FixRef("CANOG"), None)
-        procedure = _procedure_with_leg(leg)
 
         result = resolve(procedure, airport, data)
 
         assert result.published_holds["CANOG"] == HoldSpec(Compass8.W, Turn.RIGHT, 75)
 
-    def test_hold_contradicting_nasr_raises_hold_ambiguous(self, nasr_data):
+    def test_hold_at_an_unrelated_navaid_is_filtered_and_raises_ambiguous(
+        self, nasr_data
+    ):
         airport = _airport("VNY", LatLon(34.2098, -118.4899), 802.0, 14.0)
-        canog = nasr.Fix("CANOG", "CA", LatLon(34.15, -118.45))
-        data = dataclasses.replace(
-            nasr_data, fixes={**nasr_data.fixes, "CANOG": (canog,)}
-        )
-        contradicting = HoldSpec(Compass8.W, Turn.LEFT, 75)  # NASR: turn R, not L
-        leg = ClimbInHold(FixRef("CANOG"), contradicting)
+        data = _vny_area_data(nasr_data)
+        # Nothing else in this procedure resolves VNY, so CANOG's published
+        # hold (which belongs to the VNY navaid) must not be trusted as
+        # this procedure's hold at CANOG.
+        leg = ClimbInHold(FixRef("CANOG"), None)
         procedure = _procedure_with_leg(leg)
 
         with pytest.raises(ResolveError) as excinfo:
             resolve(procedure, airport, data)
 
         assert excinfo.value.kind == Kind.HOLD_AMBIGUOUS
+
+    def test_hold_contradicting_nasr_raises_hold_ambiguous(self, nasr_data):
+        airport = _airport("VNY", LatLon(34.2098, -118.4899), 802.0, 14.0)
+        data = _vny_area_data(nasr_data)
+        contradicting = HoldSpec(Compass8.W, Turn.LEFT, 75)  # NASR: turn R, not L
+        procedure = _procedure_with_leg(
+            Direct(NavaidRef("VNY", NavaidType.VOR_DME)),
+            ClimbInHold(FixRef("CANOG"), contradicting),
+        )
+
+        with pytest.raises(ResolveError) as excinfo:
+            resolve(procedure, airport, data)
+
+        assert excinfo.value.kind == Kind.HOLD_AMBIGUOUS
         assert excinfo.value.signature == "hold contradicts NASR"
+
+    def test_hold_contradicts_when_none_of_several_published_holds_agree(
+        self, nasr_data
+    ):
+        airport = nasr_data.airports["TPH"]
+        # All 4 published TPH holds turn right; a left-turning text hold
+        # cannot agree with any of them, regardless of inbound course.
+        contradicting = HoldSpec(Compass8.NE, Turn.LEFT, 246)
+        leg = ClimbInHold(NavaidRef("TPH", NavaidType.VORTAC), contradicting)
+        procedure = _procedure_with_leg(leg)
+
+        with pytest.raises(ResolveError) as excinfo:
+            resolve(procedure, airport, nasr_data)
+
+        assert excinfo.value.kind == Kind.HOLD_AMBIGUOUS
+        assert excinfo.value.signature == "hold contradicts NASR"
+
+    def test_hold_record_with_unparseable_turn_raises_hold_ambiguous(self, nasr_data):
+        airport = nasr_data.airports["TPH"]
+        bogus_fix = nasr.Fix("BOGUS", "NV", airport.position)
+        bogus_hold = nasr.Hold(
+            name="BOGUS HOLD",
+            fix_ident="BOGUS",
+            navaid_ident=None,
+            inbound_course=100,
+            turn="Q",  # not a valid Turn value
+            leg_length_nm=None,
+            direction=None,
+        )
+        data = dataclasses.replace(
+            nasr_data,
+            fixes={**nasr_data.fixes, "BOGUS": (bogus_fix,)},
+            holds={**nasr_data.holds, "BOGUS": (bogus_hold,)},
+        )
+        leg = ClimbInHold(FixRef("BOGUS"), None)
+        procedure = _procedure_with_leg(leg)
+
+        with pytest.raises(ResolveError) as excinfo:
+            resolve(procedure, airport, data)
+
+        assert excinfo.value.kind == Kind.HOLD_AMBIGUOUS
+        assert excinfo.value.signature == "hold record unparseable"
 
 
 class TestAirportVariation:
