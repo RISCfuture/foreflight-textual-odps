@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Environment
+venv/
+.env
+.python-version
+
+# Downloaded FAA data - regenerable from the FAA
+data_cache/
+
+# Generated artifacts
+*.zip
+*.kml
+report.json
+report.md
+release-notes.md
+tests/fixtures/golden/draft/
+.claude/settings.local.json

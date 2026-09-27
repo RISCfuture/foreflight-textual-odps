@@ -1,0 +1,7 @@
+target-version = "py314"
+line-length = 88
+
+[lint]
+# Ruff's defaults plus import sorting (I), pyupgrade (UP), bugbear (B) and
+# simplify (SIM).
+extend-select = ["I", "UP", "B", "SIM"]
