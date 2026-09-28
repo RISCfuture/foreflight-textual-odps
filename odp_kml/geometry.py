@@ -135,6 +135,7 @@ def draw(
     pens = [
         pen
         for runway_group in procedure.runway_groups
+        if not runway_group.graphic
         for pen in _draw_runway_group(ctx, runway_group)
     ]
     if procedure.shared_tail:
@@ -251,7 +252,12 @@ def _draw_shared_tail(ctx: _Context, pens: list[_Pen], legs: tuple[Leg, ...]) ->
             raise Degenerate(
                 "shared tail start mismatch", f"{pen.name} {gap:.2f} NM away"
             )
-    runways = (r for g in ctx.resolved.procedure.runway_groups for r in g.runways)
+    runways = (
+        runway
+        for group in ctx.resolved.procedure.runway_groups
+        if not group.graphic
+        for runway in group.runways
+    )
     first.name = f"RWY {'/'.join(runways)}"
     _draw_legs(first, legs)
 

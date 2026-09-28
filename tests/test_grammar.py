@@ -22,6 +22,7 @@ from odp_kml.procedure import (
     Direct,
     Dme,
     FixRef,
+    GraphicDeparture,
     HeadingAndRadial,
     HoldSpec,
     NavaidRef,
@@ -193,8 +194,14 @@ def test_parses_leg_shapes(text, groups, shared_tail):
             ),
             'unsupported inline VCOA "or for climb in visual conditions"',
         ),
-        (fixture_text("afo"), 'graphic DP reference "use ... departure"'),
-        ("Use VAMPS (RNAV) DEPARTURE.", 'graphic DP reference "use ... departure"'),
+        (
+            "All runways, climb heading 360° to 5000.",
+            'unsupported "all runways" group',
+        ),
+        (
+            "Use published departure procedures.",
+            'unmatched phrase "published departure procedures."',
+        ),
         (
             (
                 "Rwys 8, 26, for climb in visual conditions, cross Central Airport "
@@ -248,6 +255,55 @@ def test_parses_leg_shapes(text, groups, shared_tail):
 )
 def test_rejects_unsupported_text(text, signature):
     assert signature_of(text) == signature
+
+
+@pytest.mark.parametrize(
+    ("text", "groups"),
+    [
+        pytest.param(
+            fixture_text("afo"),
+            [
+                RunwayGroup(("16",), (GraphicDeparture("LUNDI"),)),
+                RunwayGroup(("34",), (GraphicDeparture("AFTON"),)),
+            ],
+            id="one charted DP per runway",
+        ),
+        pytest.param(
+            "Use VAMPS (RNAV) DEPARTURE.",
+            [RunwayGroup((), (GraphicDeparture("VAMPS (RNAV)"),))],
+            id="every runway",
+        ),
+        pytest.param(
+            "Use COEUR D'ALENE DEPARTURE (RNAV1).",
+            [RunwayGroup((), (GraphicDeparture("COEUR D'ALENE"),))],
+            id="apostrophe and trailing qualifier",
+        ),
+        pytest.param(
+            "See EBSIH DEPARTURE.",
+            [RunwayGroup((), (GraphicDeparture("EBSIH"),))],
+            id="see",
+        ),
+        pytest.param(
+            "All Rwys, use NASWI TWO (OBSTACLE) DEPARTURE.",
+            [RunwayGroup((), (GraphicDeparture("NASWI TWO (OBSTACLE)"),))],
+            id="all runways",
+        ),
+        pytest.param(
+            "Rwy 8, climb heading 080° to 5000 before proceeding on course.\n"
+            "Rwy 26, use SQUAT DEPARTURE.",
+            [
+                RunwayGroup(("8",), (ClimbHeading(80, to(5000)), ProceedOnCourse())),
+                RunwayGroup(("26",), (GraphicDeparture("SQUAT"),)),
+            ],
+            id="beside a text procedure",
+        ),
+    ],
+)
+def test_parses_charted_dp_references(text, groups):
+    procedure = parse_departure_procedure(text, airport="XXX", amendment=None)
+
+    assert procedure.runway_groups == tuple(groups)
+    assert procedure.graphic_only == all(group.graphic for group in groups)
 
 
 @pytest.mark.parametrize(

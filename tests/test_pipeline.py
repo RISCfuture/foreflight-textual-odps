@@ -117,10 +117,17 @@ class TestDrawings:
 
 class TestFindings:
     def test_grammar_failure_is_a_parse_finding_with_verbatim_text(self, result):
-        (finding,) = findings_for(result, "SPK", Kind.PARSE_FAILED)
-        assert finding.signature == 'graphic DP reference "use ... departure"'
-        assert "SPANISH FORK DEPARTURE" in finding.verbatim_text
+        (finding,) = findings_for(result, "KTNX", Kind.PARSE_FAILED)
+        assert finding.signature == 'unmatched phrase "<n>-<n> with"'
+        assert "min. climb of 320 ft/NM" in finding.verbatim_text
         assert finding.cycle == "2026-09-03"
+
+    def test_charted_dp_only_airports_are_neither_drawn_nor_findings(self, result):
+        drawn = {drawing.lid for drawing in result.drawings}
+        for lid in ("SPK", "RYN"):
+            assert lid not in drawn
+            assert findings_for(result, lid, Kind.PARSE_FAILED) == []
+        assert result.report.graphic_only == 2
 
     def test_airport_missing_from_nasr(self, result):
         kinds = {(f.kind, f.signature) for f in findings_for(result, "JTC")}

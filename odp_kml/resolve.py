@@ -76,8 +76,12 @@ def resolve(
 
 
 def _runway_ids(procedure: Procedure) -> set[str]:
-    """Every runway identifier named by a runway group or a VCOA group."""
-    return {rwy for group in procedure.runway_groups for rwy in group.runways} | {
+    """Every runway identifier named by a flown runway group or a VCOA group.
+
+    A runway that flies a charted DP is never drawn, so it is not resolved.
+    """
+    flown = (group for group in procedure.runway_groups if not group.graphic)
+    return {rwy for group in flown for rwy in group.runways} | {
         rwy for group in procedure.vcoa for rwy in group.runways
     }
 

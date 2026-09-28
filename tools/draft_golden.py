@@ -735,7 +735,10 @@ Output: one Procedure object matching the response schema. Every object carries
 
 - runway_groups: one group per runway header ("Rwy 15," / "Rwys 4, 35,"), runway
   ids as strings in text order. A runway marked "NA - Obstacles" (or similar)
-  gets a group with no legs.
+  gets a group with no legs. A runway told to "use LUNDI DEPARTURE" (a charted
+  DP) gets a group whose only leg is GraphicDeparture, name as printed before
+  the word DEPARTURE ("ELIM (RNAV)"); with no runway header, or "All Rwys,",
+  the group's runways are empty.
 - Legs, in the order flown: ClimbHeading (climb on a magnetic heading),
   Direct (proceed direct to a navaid or fix), Radial (fly a navaid's radial,
   outbound true when flying away from it), HeadingAndRadial (fly a heading until
@@ -764,7 +767,7 @@ Output: one Procedure object matching the response schema. Every object carries
   PROCEDURE text except runway headers, "and", "the", "then", and "thence".
 - Never guess a turn direction, altitude, heading, or navaid that the text does
   not state. When a phrase has no faithful representation in the schema (airway
-  routings, graphic departure references, inline VCOA alternatives, a leg with
+  routings, inline VCOA alternatives, a leg with
   two terminating conditions), leave it out rather than force-fitting it; the
   uncovered words flag the draft for review.
 

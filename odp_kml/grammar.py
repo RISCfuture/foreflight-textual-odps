@@ -17,7 +17,16 @@ from collections.abc import Iterator, Mapping
 
 from .legs import FIX_LENGTH, NAVAID_TYPE_WORDS, VISUAL_CLIMB, LegParser
 from .normalize import normalize
-from .procedure import FixRef, Leg, NavaidRef, Procedure, RunwayGroup, Thence, VcoaGroup
+from .procedure import (
+    FixRef,
+    GraphicDeparture,
+    Leg,
+    NavaidRef,
+    Procedure,
+    RunwayGroup,
+    Thence,
+    VcoaGroup,
+)
 from .sections import Sections
 from .tokens import ParseError, Token, is_ident_word
 
@@ -96,6 +105,9 @@ def _navaid_refs(node) -> Iterator[NavaidRef]:
 
 
 _RUNWAY = re.compile(r"\d{1,2}[LRC]?")
+_DP_NAME_WORD = re.compile(r"[A-Z][A-Z0-9]*")
+_DP_NAME_PUNCTUATION = frozenset("()'")
+_DP_NAME_MAX_TOKENS = 8
 
 
 class _Parser(LegParser):
@@ -109,11 +121,15 @@ class _Parser(LegParser):
     def departure_procedure(
         self,
     ) -> tuple[tuple[RunwayGroup, ...], tuple[Leg, ...] | None]:
-        """procedure := graphic-dp | runway-group+ [shared-tail]"""
+        """procedure := [graphic-dp] runway-group* [shared-tail]
+
+        A leading graphic-dp names the charted DP every runway flies.
+        """
         if self._at_end():
             raise ParseError("empty departure procedure")
-        self._reject_graphic_dp()
         groups: list[RunwayGroup] = []
+        if self._peek_graphic_departure():
+            groups.append(RunwayGroup((), (self._graphic_departure(),)))
         shared_tail = None
         while not self._at_end():
             self._reject_visual_climb_sentence()
@@ -125,23 +141,61 @@ class _Parser(LegParser):
         self._require_tail_for_thence(groups, shared_tail)
         return tuple(groups), shared_tail
 
-    def _reject_graphic_dp(self) -> None:
-        """``use LUNDI DEPARTURE`` names a charted DP, which is not drawn here."""
-        if self._peek("use") and any(
-            self._peek("departure", offset=offset) for offset in range(1, 6)
-        ):
-            raise self._error('graphic DP reference "use ... departure"')
+    def _peek_graphic_departure(self) -> bool:
+        return (self._peek("use") or self._peek("see")) and any(
+            self._peek("departure", offset=offset)
+            for offset in range(2, _DP_NAME_MAX_TOKENS + 2)
+        )
+
+    def _graphic_departure(self) -> GraphicDeparture:
+        """graphic-dp := ("use" | "see") dp-name "departure" ["(" NAME ")"]* "."
+
+        dp-name := (NAME | "(" | ")" | "'")+ with at least one NAME, e.g.
+        ``BINAL TWO``, ``ELIM (RNAV)``, ``COEUR D'ALENE``. The trailing
+        parenthesized words qualify the DP (``(RNAV)``, ``(OBSTACLE)``).
+        """
+        self._expect_any("use", "see")
+        first = self._index
+        while not self._peek("departure"):
+            if not self._is_dp_name_token(self._token()):
+                raise self._unmatched()
+            self._index += 1
+        name = self._tokens[first : self._index]
+        if not any(_DP_NAME_WORD.fullmatch(token.text) for token in name):
+            raise self._unmatched()
+        self._expect("departure")
+        while self._accept("("):
+            if not self._is_dp_name_token(self._token()):
+                raise self._unmatched()
+            self._index += 1
+            self._expect(")")
+        self._expect(".")
+        return GraphicDeparture(self._text[name[0].start : name[-1].end])
+
+    @staticmethod
+    def _is_dp_name_token(token: Token | None) -> bool:
+        return token is not None and (
+            bool(_DP_NAME_WORD.fullmatch(token.text))
+            or token.text in _DP_NAME_PUNCTUATION
+        )
 
     def _reject_visual_climb_sentence(self) -> None:
         if self._peek(*VISUAL_CLIMB):
             raise self._error(f'unsupported inline VCOA "{" ".join(VISUAL_CLIMB)}"')
 
     def _runway_group(self) -> RunwayGroup:
-        """runway-group := runway-header (not-available | legs)"""
+        """runway-group := runway-header (not-available | graphic-dp | legs)
+        | all-runways graphic-dp"""
+        if self._accept("all", "rwys") or self._accept("all", "runways"):
+            self._expect(",")
+            if not self._peek_graphic_departure():
+                raise self._error('unsupported "all runways" group')
+            return RunwayGroup((), (self._graphic_departure(),))
         runways = self._runway_header()
         if self._not_available():
             return RunwayGroup(runways, ())
-        self._reject_graphic_dp()
+        if self._peek_graphic_departure():
+            return RunwayGroup(runways, (self._graphic_departure(),))
         self._reject_visual_climb_sentence()
         self._last_fix = None
         return RunwayGroup(runways, self._legs([self._leg()]))
@@ -302,7 +356,7 @@ class _Parser(LegParser):
 
 def _all_flown_end_with_thence(groups: list[RunwayGroup]) -> bool:
     """Every runway group that flies legs (not an NA group) ends in "thence"."""
-    flown = [group for group in groups if group.legs]
+    flown = [group for group in groups if group.legs and not group.graphic]
     return bool(flown) and all(_ends_with_thence(group.legs) for group in flown)
 
 

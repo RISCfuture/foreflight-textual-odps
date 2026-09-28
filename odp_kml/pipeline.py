@@ -23,6 +23,7 @@ from .grammar import ParseError, parse_procedure
 from .minimums import parse_takeoff_minimums
 from .normalize import normalize
 from .palette import assign_palettes
+from .procedure import Procedure
 from .resolve import ResolveError, resolve
 from .sections import Sections, split_sections
 from .shapes import AirportDrawing, Label
@@ -67,11 +68,13 @@ class BuildResult:
 
 @dataclasses.dataclass(frozen=True)
 class BlockOutcome:
-    """One airport block's sections entry and either its drawing or its finding."""
+    """One airport block's sections entry and either its drawing, its finding,
+    or `graphic_only` when every runway flies a charted DP instead."""
 
     sections: SectionsEntry
     drawing: AirportDrawing | None = None
     finding: Finding | None = None
+    graphic_only: bool = False
 
 
 def build(options: BuildOptions) -> BuildResult:
@@ -105,6 +108,7 @@ def build_from_sources(
         drawn=len(drawings),
         findings=findings,
         label_count=_label_count(drawings),
+        graphic_only=sum(outcome.graphic_only for outcome in outcomes),
     )
     return BuildResult(drawings, report, [outcome.sections for outcome in outcomes])
 
@@ -114,7 +118,9 @@ def process_block(
 ) -> BlockOutcome | None:
     """Parse, resolve and draw one block; ``None`` when it has no procedure text.
 
-    A parse, resolve or geometry failure becomes the outcome's finding.
+    A parse, resolve or geometry failure becomes the outcome's finding. A
+    procedure whose every runway flies a charted DP is neither drawn nor a
+    finding.
     """
     raw = split_sections(block.text)
     if raw.departure_procedure is None and raw.vcoa is None:
@@ -122,7 +128,12 @@ def process_block(
     sections = _normalized(raw)
     entry = _sections_entry(block.lid, sections)
     try:
-        drawing = _draw_block(block.lid, sections, nasr_data, options.params)
+        procedure = parse_procedure(sections, airport=block.lid)
+        if procedure.graphic_only:
+            return BlockOutcome(entry, graphic_only=True)
+        drawing = _draw_procedure(
+            block.lid, procedure, sections, nasr_data, options.params
+        )
     except (ParseError, ResolveError, Degenerate) as error:
         return BlockOutcome(entry, finding=_finding(error, block.lid, raw, options))
     return BlockOutcome(entry, drawing=drawing)
@@ -231,10 +242,13 @@ def _sections_entry(lid: str, sections: Sections) -> SectionsEntry:
     }
 
 
-def _draw_block(
-    lid: str, sections: Sections, nasr_data: nasr.NasrData, params: DisplayParams
+def _draw_procedure(
+    lid: str,
+    procedure: Procedure,
+    sections: Sections,
+    nasr_data: nasr.NasrData,
+    params: DisplayParams,
 ) -> AirportDrawing:
-    procedure = parse_procedure(sections, airport=lid)
     airport = find_airport(nasr_data, lid)
     min_climb = parse_takeoff_minimums(sections.takeoff_minimums or "")
     return draw(resolve(procedure, airport, nasr_data, min_climb=min_climb), params)

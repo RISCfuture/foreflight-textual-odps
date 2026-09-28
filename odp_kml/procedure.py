@@ -196,6 +196,17 @@ class Thence:
     """A no-op leg marking a transition to the shared tail."""
 
 
+@dataclasses.dataclass(frozen=True)
+class GraphicDeparture:
+    """Fly a charted (graphic) departure procedure instead, e.g. "use LUNDI
+    DEPARTURE". Charted DPs are not drawn by this layer.
+
+    `name` is the DP as printed before the word DEPARTURE, e.g. ``ELIM (RNAV)``.
+    """
+
+    name: str
+
+
 Leg = (
     ClimbHeading
     | Direct
@@ -205,6 +216,7 @@ Leg = (
     | ClimbInHold
     | ProceedOnCourse
     | Thence
+    | GraphicDeparture
 )
 
 
@@ -214,6 +226,11 @@ class RunwayGroup:
 
     runways: tuple[str, ...]
     legs: tuple[Leg, ...]
+
+    @property
+    def graphic(self) -> bool:
+        """Whether these runways fly a charted DP rather than text legs."""
+        return any(isinstance(leg, GraphicDeparture) for leg in self.legs)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -238,6 +255,17 @@ class Procedure:
     runway_groups: tuple[RunwayGroup, ...]
     shared_tail: tuple[Leg, ...] | None
     vcoa: tuple[VcoaGroup, ...]
+
+    @property
+    def graphic_only(self) -> bool:
+        """Whether every runway flies a charted DP (or is NA), leaving no text
+        procedure to draw."""
+        return (
+            not self.vcoa
+            and self.shared_tail is None
+            and any(group.graphic for group in self.runway_groups)
+            and all(group.graphic or not group.legs for group in self.runway_groups)
+        )
 
     def to_json(self, *, indent: int = 2) -> str:
         """Serialize to JSON with sorted keys, for stable golden-fixture diffs."""

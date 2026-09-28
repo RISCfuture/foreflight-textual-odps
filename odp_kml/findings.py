@@ -175,6 +175,13 @@ class Report:
     drawn: int
     findings: list[Finding]
     label_count: int
+    graphic_only: int = 0
+
+    @property
+    def textual(self) -> int:
+        """Airports with a text procedure to draw: those with DEPARTURE
+        PROCEDURE or VCOA text, less those that only name charted DPs."""
+        return self.airports_with_text - self.graphic_only
 
     def not_drawn_by_kind(self) -> dict[Kind, int]:
         """Count of findings for each `Kind` that actually occurred."""
@@ -191,15 +198,19 @@ class Report:
         return groups
 
     def summary_line(self) -> str:
-        """e.g. "Drew 2,341 of 2,512 ODPs (93%); 171 findings in 23 signatures"."""
-        percentage = (
-            round(100 * self.drawn / self.airports_with_text)
-            if self.airports_with_text
-            else 0
-        )
+        """e.g. "Drew 2,341 of 2,512 ODPs (93%); 171 findings in 23 signatures",
+        with "; 202 airports use only charted DPs" when any do.
+
+        Airports that only name charted DPs have no text procedure to draw, so
+        they are left out of the percentage.
+        """
+        percentage = round(100 * self.drawn / self.textual) if self.textual else 0
+        line = f"Drew {self.drawn:,} of {self.textual:,} ODPs ({percentage}%); "
+        if self.graphic_only:
+            line += f"{self.graphic_only:,} airports use only charted DPs; "
         return (
-            f"Drew {self.drawn:,} of {self.airports_with_text:,} ODPs ({percentage}%); "
-            f"{len(self.findings):,} findings in {len(self.grouped()):,} signatures"
+            line + f"{len(self.findings):,} findings in "
+            f"{len(self.grouped()):,} signatures"
         )
 
     def to_json(self) -> str:
@@ -209,6 +220,7 @@ class Report:
             "airports_with_text": self.airports_with_text,
             "drawn": self.drawn,
             "label_count": self.label_count,
+            "graphic_only": self.graphic_only,
             "findings": [dataclasses.asdict(finding) for finding in self.findings],
         }
         return json.dumps(payload, indent=2)
@@ -227,6 +239,7 @@ class Report:
             drawn=payload["drawn"],
             findings=findings,
             label_count=payload["label_count"],
+            graphic_only=payload.get("graphic_only", 0),
         )
 
     def to_markdown(self) -> str:

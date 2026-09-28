@@ -124,6 +124,11 @@ class TokenStream:
         """Consume whichever one of ``words`` comes next."""
         return any(self._accept(word) for word in words)
 
+    def _expect_any(self, *words: str) -> None:
+        """Consume whichever one of ``words`` comes next, or raise."""
+        if not self._accept_any(*words):
+            raise self._unmatched()
+
     def _expect(self, *words: str) -> None:
         for word in words:
             if not self._accept(word):

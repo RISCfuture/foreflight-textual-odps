@@ -57,8 +57,11 @@ with certainty:
 
 **Not drawn:** takeoff minimums (ceiling/visibility and climb gradient
 tables), obstacle notes, diverse vector areas (DVAs), procedures that
-reference a graphic ODP instead of text, and airway routing after the ODP
-ends.
+reference a graphic ODP instead of text ("use LUNDI DEPARTURE"), and
+airway routing after the ODP ends. A runway that flies a graphic ODP is
+drawn from none of its text; an airport whose every runway does is left
+out of the coverage percentage and counted on its own in the report,
+since ForeFlight charts graphic ODPs itself.
 
 ## How it decides what to draw
 

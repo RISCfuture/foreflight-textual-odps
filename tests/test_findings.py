@@ -143,6 +143,20 @@ class TestReportCounts:
             "Drew 2,341 of 2,512 ODPs (93%); 171 findings in 1 signatures"
         )
 
+    def test_summary_line_leaves_charted_dp_airports_out_of_the_percentage(self):
+        report = Report(
+            cycle="2026-09-03",
+            airports_with_text=1678,
+            drawn=761,
+            findings=[make_finding() for _ in range(715)],
+            label_count=0,
+            graphic_only=202,
+        )
+        assert report.summary_line() == (
+            "Drew 761 of 1,476 ODPs (52%); 202 airports use only charted DPs; "
+            "715 findings in 1 signatures"
+        )
+
     def test_summary_line_handles_zero_airports_without_dividing_by_zero(self):
         report = Report(
             cycle="2026-09-03",
