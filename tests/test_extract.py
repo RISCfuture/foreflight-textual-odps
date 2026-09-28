@@ -149,6 +149,17 @@ class TestExtractBlocks:
         )
         assert blocks["JTC"].pages == (1, 2)
 
+    def test_continuation_marker_with_a_doubled_apostrophe_is_removed(self):
+        page = """\
+TONOPAH, NV
+TONOPAH (TPH)
+TAKEOFF MINIMUMS AND (OBSTACLE) DEPARTURE PROCEDURES
+AMDT 1 01JAN20 (20001) (FAA)
+DEPARTURE PROCEDURE:
+Rwy 15, climb heading 150° to 7000 before proceeding on course. CON''T"""
+        blocks, _ = blocks_from_pages([page], {"TPH"}, "SW4")
+        assert blocks[0].text.endswith("before proceeding on course.")
+
     def test_unrecognized_heading_warns_instead_of_vanishing(self):
         page = """\
 McCALL, ID

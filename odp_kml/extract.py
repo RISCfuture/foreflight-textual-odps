@@ -27,7 +27,7 @@ _PAGE_FURNITURE = re.compile(
     r"|\d{5}(?:\s+L\d+)?"
     r"|\d{2} [A-Z]{3} \d{4} to \d{2} [A-Z]{3} \d{4}.*"
 )
-_CONTINUATION_MARK = re.compile(r"\s*\(?CON['’]T\b\)?")
+_CONTINUATION_MARK = re.compile(r"\s*\(?CON['’]+T\b\)?")
 _CITY_LINE = re.compile(r"(?P<city>[^a-z]+, [A-Z]{2})")
 _AIRPORT_LINE = re.compile(
     r"(?P<name>[^a-z]+?)\s*\((?P<lid>[A-Z0-9]{3,4})\)(?:\s*\([A-Z0-9]{4}\))?"
