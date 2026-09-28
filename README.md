@@ -168,6 +168,24 @@ the current cycle's build into GitHub issues.
 GitHub disables a scheduled workflow after 60 days with no repository
 activity — push a commit (or run it manually) if releases stop appearing.
 
+## Comparing builds
+
+`tools/compare_builds.py` checks a grammar or geometry change against every
+airport in a cycle, not just the fixtures. It snapshots each airport's
+outcome (drawn whole, drawn in part, charted DPs only, or not drawn), its
+findings and a digest of its shapes, then names every airport gained, lost
+or redrawn between two snapshots:
+
+```sh
+python tools/compare_builds.py snapshot --cycle 2026-09-03 --out before.json
+# ... change the code ...
+python tools/compare_builds.py snapshot --cycle 2026-09-03 --out after.json
+python tools/compare_builds.py diff before.json after.json --state CO
+```
+
+It reuses the build's `data_cache` and is never imported by, or run as part
+of, the build.
+
 ## Golden set drafting
 
 `tools/draft_golden.py` is an offline aid for drafting golden-fixture ASTs
