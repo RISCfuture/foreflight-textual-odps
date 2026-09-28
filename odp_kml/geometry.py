@@ -46,6 +46,7 @@ from .procedure import (
     ClimbInHold,
     Direct,
     Dme,
+    EnrouteAltitude,
     HeadingAndRadial,
     HeadingRange,
     HeadingSector,
@@ -782,14 +783,16 @@ def _hold_spec(ctx: _Context, leg: ClimbInHold) -> HoldSpec:
 
 
 def _hold_leg_nm(ctx: _Context, leg: ClimbInHold) -> float:
-    """One minute legs up to 14,000 ft, 1.5 minutes above, or a published DME length."""
+    """One minute legs up to 14,000 ft, 1.5 minutes above, or a published DME
+    length. A hold to an en-route minimum (MEA/MCA), whose figure the text
+    does not give, takes one-minute legs."""
     tas = ctx.params.tas_kt
     match leg.until:
         case Dme(navaid=navaid, nm=nm) if navaid.ident == leg.fix.ident:
             return nm
         case Altitude(feet=feet) if feet > HOLD_HIGH_ALTITUDE_FT:
             return tas * HOLD_LEG_MINUTES_HIGH / 60
-        case None | Altitude():
+        case None | Altitude() | EnrouteAltitude():
             return tas * HOLD_LEG_MINUTES_LOW / 60
     _unsupported(leg)
 

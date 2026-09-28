@@ -22,6 +22,7 @@ from odp_kml.procedure import (
     CrossRadial,
     Direct,
     Dme,
+    EnrouteAltitude,
     FixRef,
     GraphicDeparture,
     HeadingAndRadial,
@@ -455,6 +456,52 @@ def test_parses_what_follows_the_climb(ending, legs):
     ).runway_groups
 
     assert group.legs == (ClimbHeading(300, to(1400)), *legs)
+
+
+@pytest.mark.parametrize(
+    ("until_text", "until"),
+    [
+        (
+            "to cross BQU VOR/DME at or above MEA/MCA for route of flight",
+            EnrouteAltitude(
+                ("MEA", "MCA"),
+                AltitudeKind.AT_OR_ABOVE,
+                "at or above MEA/MCA for route of flight",
+            ),
+        ),
+        (
+            "to depart BQU VOR/DME at or above the MEA for direction of flight",
+            EnrouteAltitude(
+                ("MEA",),
+                AltitudeKind.AT_OR_ABOVE,
+                "at or above the MEA for direction of flight",
+            ),
+        ),
+        (
+            "to MCA or MEA for direction of flight",
+            EnrouteAltitude(
+                ("MCA", "MEA"), AltitudeKind.TO, "to MCA or MEA for direction of flight"
+            ),
+        ),
+        (
+            "until at or above MEA of intended route",
+            EnrouteAltitude(
+                ("MEA",), AltitudeKind.AT_OR_ABOVE, "at or above MEA of intended route"
+            ),
+        ),
+    ],
+)
+def test_hold_climbs_to_an_enroute_minimum(until_text, until):
+    text = (
+        "Rwy 6, climbing right turn direct BQU VOR/DME, continue climb in BQU "
+        f"VOR/DME holding pattern (hold south, left turns, 340° inbound) {until_text}."
+    )
+
+    (group,) = parse_departure_procedure(
+        text, airport="X", amendment=None
+    ).runway_groups
+
+    assert group.legs[-1].until == until
 
 
 def test_all_other_courses_needs_a_heading_range_before_it():

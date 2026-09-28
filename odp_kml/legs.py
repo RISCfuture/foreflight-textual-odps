@@ -22,6 +22,7 @@ from .procedure import (
     CrossRadial,
     Direct,
     Dme,
+    EnrouteAltitude,
     FixRef,
     HeadingAndRadial,
     HeadingRange,
@@ -67,6 +68,8 @@ _NAVAID_TYPES = (
 )
 NAVAID_TYPE_WORDS = frozenset(words[0] for words, _ in _NAVAID_TYPES)
 VISUAL_CLIMB = ("for", "climb", "in", "visual", "conditions")
+ENROUTE_MINIMUMS = frozenset({"mea", "mca"})
+ENROUTE_LEADS = frozenset({"the", "airway", "appropriate"})
 BOUND_WORDS = {
     f"{word}bound": point for word, point in COMPASS_WORDS.items() if len(word) > 2
 }
@@ -591,20 +594,29 @@ class LegParser(TokenStream):
             raise self._error("climb in hold without a preceding fix")
         return self._last_fix
 
-    def _hold_until(self, fix: NavaidRef | FixRef) -> Altitude | None:
-        """hold-until := "to" nnnn | "to cross" <fix> altitude-constraint"""
+    def _hold_until(self, fix: NavaidRef | FixRef) -> Altitude | EnrouteAltitude | None:
+        """hold-until := "to" (nnnn | enroute) | "until" altitude-constraint
+        | "to" ("cross" | "depart") <fix> altitude-constraint"""
         if self._peek("to") and self._peek_integer(1):
             return self._to_altitude()
-        if not self._peek("to", "cross"):
+        if self._peek("to") and self._peek_enroute(1):
+            start = self._position()
+            self._expect("to")
+            return self._enroute(AltitudeKind.TO, start)
+        if self._peek("until", "at"):
+            self._expect("until")
+            return self._altitude_constraint()
+        if not (self._peek("to", "cross") or self._peek("to", "depart")):
             return None
-        self._expect("to", "cross")
+        self._expect("to")
+        self._expect_any("cross", "depart")
         crossed = self._target()
         if not _same_facility(crossed, fix):
             raise self._error("hold crossing names a different fix")
         return self._altitude_constraint()
 
-    def _altitude_constraint(self) -> Altitude:
-        """altitude-constraint := "at" ["or" ("above" | "below")] nnnn ["MSL"]"""
+    def _altitude_constraint(self) -> Altitude | EnrouteAltitude:
+        """altitude-constraint := "at" ["or" ("above" | "below")] (nnnn ["MSL"] | enroute)"""
         start = self._position()
         self._expect("at")
         kind = AltitudeKind.AT
@@ -612,9 +624,43 @@ class LegParser(TokenStream):
             kind = AltitudeKind.AT_OR_ABOVE
         elif self._accept("or", "below"):
             kind = AltitudeKind.AT_OR_BELOW
+        if self._peek_enroute():
+            return self._enroute(kind, start)
         feet = self._integer()
         self._accept("msl")
         return Altitude(feet, kind, self._slice_from(start))
+
+    def _peek_enroute(self, offset: int = 0) -> bool:
+        if self._peek_any_of(ENROUTE_LEADS, offset):
+            offset += 1
+        return self._peek_any_of(ENROUTE_MINIMUMS, offset)
+
+    def _peek_any_of(self, words: frozenset[str], offset: int = 0) -> bool:
+        token = self._token(offset)
+        return token is not None and token.lower in words
+
+    def _enroute(self, kind: AltitudeKind, start: int) -> EnrouteAltitude:
+        """enroute := ["the" | "airway" | "appropriate"] minimum (("/" | "or")
+        minimum)* [("for" ["the"] ("route" | "direction") "of flight")
+        | "of intended route"]
+
+        minimum := "MEA" | "MCA"
+        """
+        if self._peek_any_of(ENROUTE_LEADS):
+            self._index += 1
+        names = [self._next().text.upper()]
+        while (self._peek("/") or self._peek("or")) and self._peek_any_of(
+            ENROUTE_MINIMUMS, 1
+        ):
+            self._index += 1
+            names.append(self._next().text.upper())
+        if self._accept("for"):
+            self._accept("the")
+            self._expect_any("route", "direction")
+            self._expect("of", "flight")
+        elif self._peek("of", "intended"):
+            self._expect("of", "intended", "route")
+        return EnrouteAltitude(tuple(names), kind, self._slice_from(start))
 
     def _hold_spec(self) -> HoldSpec:
         """hold-spec := "(" ["hold"] compass "," hold-turns "," nnn ["°"] "inbound" ")" """

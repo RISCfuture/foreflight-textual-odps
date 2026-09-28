@@ -80,6 +80,20 @@ class Altitude:
 
 
 @dataclasses.dataclass(frozen=True)
+class EnrouteAltitude:
+    """A leg ends at an en-route minimum rather than a figure, e.g. "at or
+    above MEA/MCA for route of flight".
+
+    `names` are the minimums as printed, in order (``("MEA", "MCA")``);
+    `phrase` is the exact words.
+    """
+
+    names: tuple[str, ...]
+    kind: AltitudeKind
+    phrase: str
+
+
+@dataclasses.dataclass(frozen=True)
 class AtFix:
     """A leg ends on reaching a fix or navaid."""
 
@@ -102,7 +116,7 @@ class CrossRadial:
     radial: int
 
 
-Until = Altitude | AtFix | Dme | CrossRadial
+Until = Altitude | EnrouteAltitude | AtFix | Dme | CrossRadial
 
 
 @dataclasses.dataclass(frozen=True)

@@ -15,6 +15,7 @@ from .procedure import (
     ClimbHeading,
     Compass8,
     Dme,
+    EnrouteAltitude,
     HeadingAndRadial,
     HeadingRange,
     HoldSpec,
@@ -39,14 +40,20 @@ FMS_SUFFIXES = {
 }
 
 
-def format_altitude(alt: Altitude, style: str) -> str:
+def format_altitude(alt: Altitude | EnrouteAltitude, style: str) -> str:
     """Render an altitude in plain text ("plain": ≥7000', ≤7000') or as an
     FMS constraint ("fms": 7000A, 7000B, 7000).
 
     A climb-to altitude (`AltitudeKind.TO`) is the bare figure in both styles.
     An FMS has no suffix for a mandatory altitude, so `AltitudeKind.AT` is
     also bare digits in the "fms" style; only the plain style tells it apart.
+    An en-route minimum reads as its names, e.g. ``≥MEA/MCA`` or ``MEA/MCA A``.
     """
+    if isinstance(alt, EnrouteAltitude):
+        names = "/".join(alt.names)
+        if style == "fms":
+            return f"{names} {FMS_SUFFIXES[alt.kind]}".rstrip()
+        return f"{PLAIN_PREFIXES[alt.kind]}{names}"
     return format_feet(alt.feet, alt.kind, style)
 
 
@@ -101,7 +108,7 @@ def hold_label(spec: HoldSpec, until: Until | None, style: str) -> str:
     the word "inbound" (implied by a hold's course) are left out.
     """
     label = f"Hold {spec.inbound_course:03d}° {spec.turns}T"
-    if isinstance(until, Altitude):
+    if isinstance(until, Altitude | EnrouteAltitude):
         label += f" {format_altitude(until, style)}"
     return label
 

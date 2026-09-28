@@ -3,7 +3,15 @@
 import pytest
 
 from odp_kml.labels import format_altitude, hold_label, speed_label, vcoa_label
-from odp_kml.procedure import Altitude, AltitudeKind, HoldSpec, SpeedRestriction, Turn
+from odp_kml.procedure import (
+    Altitude,
+    AltitudeKind,
+    Compass8,
+    EnrouteAltitude,
+    HoldSpec,
+    SpeedRestriction,
+    Turn,
+)
 
 
 @pytest.mark.parametrize(
@@ -23,15 +31,31 @@ def test_format_altitude(kind, style, expected):
     assert format_altitude(Altitude(7000, kind, "7000"), style) == expected
 
 
+@pytest.mark.parametrize(
+    ("names", "kind", "style", "expected"),
+    [
+        (("MEA", "MCA"), AltitudeKind.AT_OR_ABOVE, "plain", "≥MEA/MCA"),
+        (("MEA",), AltitudeKind.TO, "plain", "MEA"),
+        (("MEA", "MCA"), AltitudeKind.AT_OR_ABOVE, "fms", "MEA/MCA A"),
+        (("MCA",), AltitudeKind.TO, "fms", "MCA"),
+    ],
+)
+def test_format_enroute_minimum(names, kind, style, expected):
+    assert format_altitude(EnrouteAltitude(names, kind, "phrase"), style) == expected
+
+
 def test_hold_label_gives_inbound_course_turns_and_altitude():
     until = Altitude(9300, AltitudeKind.AT_OR_ABOVE, "at or above 9300")
     spec = HoldSpec(None, Turn.LEFT, 46)
     assert hold_label(spec, until, "plain") == "Hold 046° LT ≥9300'"
     assert hold_label(spec, None, "plain") == "Hold 046° LT"
+    mea = EnrouteAltitude(("MEA",), AltitudeKind.AT_OR_ABOVE, "at or above MEA")
+    assert hold_label(spec, mea, "plain") == "Hold 046° LT ≥MEA"
 
 
 def test_vcoa_label_wraps_the_altitude_in_parentheses():
     assert vcoa_label(7800, "plain") == "VCOA (≥7800')"
+    assert vcoa_label(8200, "plain", Compass8.SE) == "VCOA (≥8200' SE bound)"
 
 
 @pytest.mark.parametrize(
