@@ -22,6 +22,8 @@ from odp_kml.procedure import (
     Dme,
     FixRef,
     HeadingAndRadial,
+    HeadingRange,
+    HeadingSector,
     HoldSpec,
     NavaidRef,
     Procedure,
@@ -413,3 +415,55 @@ def test_identical_shapes_are_drawn_once():
 
     assert len(labels(drawing)) == 1
     assert len(drawing.shapes) == len(set(drawing.shapes))
+
+
+def test_heading_range_is_a_wedge_from_the_turn_start():
+    """RWY 36 may climb on any heading from 000° clockwise to 090° true."""
+    sector = HeadingSector(magnetic(0), magnetic(90), clockwise=True)
+
+    drawing = draw(resolved(group(HeadingRange((sector,), feet(7000)))))
+
+    apex = (0.0, 2.0)
+    wedge = [xy(p) for line in polylines(drawing, Style.RADIAL) for p in line.points]
+    assert apex in [pytest.approx(v, abs=1e-6) for v in wedge]
+    rim = [v for v in wedge if distance(v, apex) > 0.1]
+    assert all(distance(v, apex) == pytest.approx(3.0, abs=1e-6) for v in rim)
+    assert all(v[0] >= -1e-6 and v[1] >= apex[1] - 1e-6 for v in rim)
+    assert [lbl.text for lbl in labels(drawing)] == [
+        f"hdg {magnetic(0):03d}° CW {magnetic(90):03d}° "
+        + format_altitude(feet(7000), "plain")
+    ]
+
+
+def test_counterclockwise_sector_sweeps_the_other_way():
+    sector = HeadingSector(magnetic(90), magnetic(0), clockwise=False)
+
+    drawing = draw(resolved(group(HeadingRange((sector,)))))
+
+    rim = [
+        xy(p)
+        for line in polylines(drawing, Style.RADIAL)
+        for p in line.points
+        if distance(xy(p), (0.0, 2.0)) > 0.1
+    ]
+    assert all(v[0] >= -1e-6 and v[1] >= 2.0 - 1e-6 for v in rim)
+
+
+def test_only_proceed_on_course_may_follow_a_heading_range():
+    sector = HeadingSector(magnetic(0), magnetic(90), clockwise=True)
+    after = ClimbHeading(magnetic(45), feet(9000))
+
+    draw(resolved(group(HeadingRange((sector,)), ProceedOnCourse())))
+    with pytest.raises(Degenerate) as raised:
+        draw(resolved(group(HeadingRange((sector,)), after)))
+
+    assert raised.value.signature == "leg after a heading range"
+
+
+def test_empty_heading_sector_is_degenerate():
+    sector = HeadingSector(90, 90, clockwise=True)
+
+    with pytest.raises(Degenerate) as raised:
+        draw(resolved(group(HeadingRange((sector,)))))
+
+    assert raised.value.signature == "empty heading sector"

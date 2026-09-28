@@ -39,6 +39,9 @@ with certainty:
   toward any published turn restriction. A VCOA that only proceeds on
   course draws just its circle.
 - Climb-in-hold racetracks.
+- Heading ranges ("climb on a heading between 350° CW to 162° from DER")
+  as a thin wedge from the turn-start point, labelled as printed
+  (`hdg 350° CW 162°`), beside the route flown on "all other courses".
 - VCOA (visual climb over airport) circles, including airports whose only
   procedure is a VCOA and visual climbs written into the departure
   procedure itself ("..., or for climb in visual conditions: cross ...").
@@ -93,6 +96,7 @@ used whenever the text does not otherwise constrain the geometry:
 | Climb gradient for altitude legs | Published minimum, else 200 ft/NM |
 | Hold leg length | 1 minute (1.5 minutes above 14,000 ft) |
 | VCOA circle | 2 NM schematic radius |
+| Heading-range wedge | 3 NM schematic radius from the turn start |
 | Magnetic headings | Airport's variation of record (WMM if unpublished) |
 | Magnetic radials | Referenced navaid's own station declination |
 

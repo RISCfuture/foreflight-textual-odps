@@ -740,12 +740,17 @@ Output: one Procedure object matching the response schema. Every object carries
   the word DEPARTURE ("ELIM (RNAV)"); with no runway header, or "All Rwys,",
   the group's runways are empty.
 - Legs, in the order flown: ClimbHeading (climb on a magnetic heading),
+  HeadingRange (climb on any heading "between 350° CW to 162°": one
+  HeadingSector per range joined by "or", start and end as printed, clockwise
+  false for CCW; nothing but ProceedOnCourse follows it),
   Direct (proceed direct to a navaid or fix), Radial (fly a navaid's radial,
   outbound true when flying away from it), HeadingAndRadial (fly a heading until
   intercepting a radial), ClimbingTurn (a climbing turn onto its "then" leg;
   direction null when the text gives none), ClimbInHold, ProceedOnCourse
   (turn_restriction L/R only for "before turning left/right"; null otherwise),
   and Thence (the "thence..." marker leading into a shared tail).
+- "All other courses: ..." (or "or climb on a heading between ...") after a
+  HeadingRange is a further runway group for the same runways.
 - shared_tail: the legs after a leading "..." or "All aircraft" line that every
   group continues with; null when there is none.
 - until ends a leg: Altitude ("to 2000" is kind "to", "at 2000" is "at",

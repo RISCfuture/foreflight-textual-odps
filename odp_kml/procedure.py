@@ -123,6 +123,26 @@ class ClimbHeading:
 
 
 @dataclasses.dataclass(frozen=True)
+class HeadingSector:
+    """Headings from `start` sweeping `clockwise` (or counterclockwise) to
+    `end`, magnetic, as printed: "between 213° CCW to 353°"."""
+
+    start: int
+    end: int
+    clockwise: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class HeadingRange:
+    """Climb on any heading within the sectors, e.g. "climb on a heading
+    between 350° CW to 162° from DER" (more than one sector when joined by
+    "or"). Nothing is flown after it but "before proceeding on course"."""
+
+    sectors: tuple[HeadingSector, ...]
+    until: Until | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class Direct:
     """Proceed direct to a navaid or fix."""
 
@@ -158,7 +178,7 @@ class ClimbingTurn:
     """Climb in a turn before flying the next leg."""
 
     direction: Turn | None
-    then: Direct | HeadingAndRadial | Radial | ClimbHeading
+    then: Direct | HeadingAndRadial | Radial | ClimbHeading | HeadingRange
 
 
 @dataclasses.dataclass(frozen=True)
@@ -209,6 +229,7 @@ class GraphicDeparture:
 
 Leg = (
     ClimbHeading
+    | HeadingRange
     | Direct
     | Radial
     | HeadingAndRadial

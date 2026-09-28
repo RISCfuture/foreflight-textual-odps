@@ -15,12 +15,21 @@ import dataclasses
 import re
 from collections.abc import Iterator, Mapping
 
-from .legs import COMPASS_WORDS, FIX_LENGTH, NAVAID_TYPE_WORDS, VISUAL_CLIMB, LegParser
+from .legs import (
+    COMPASS_WORDS,
+    FIX_LENGTH,
+    NAVAID_TYPE_WORDS,
+    RANGE_ALTERNATIVES,
+    VISUAL_CLIMB,
+    LegParser,
+)
 from .normalize import normalize
 from .procedure import (
+    ClimbingTurn,
     Compass8,
     FixRef,
     GraphicDeparture,
+    HeadingRange,
     Leg,
     NavaidRef,
     Procedure,
@@ -160,8 +169,7 @@ class _Parser(LegParser):
             if self._starts_shared_tail():
                 shared_tail = self._shared_tail(groups)
                 break
-            if (group := self._runway_group()) is not None:
-                groups.append(group)
+            groups.extend(self._runway_groups())
         self._expect_end()
         self._require_tail_for_thence(groups, shared_tail)
         return tuple(groups), shared_tail
@@ -204,34 +212,58 @@ class _Parser(LegParser):
             or token.text in _DP_NAME_PUNCTUATION
         )
 
-    def _runway_group(self) -> RunwayGroup | None:
+    def _runway_groups(self) -> list[RunwayGroup]:
         """runway-group := runway-header (not-available | graphic-dp | vcoa-only
-                           | legs [vcoa-alternative])
+                           | legs range-alternative* [vcoa-alternative])
                          | all-runways (graphic-dp | vcoa-only)
 
         A runway whose only procedure is a visual climb yields no runway group;
-        its VCOA group joins `inline_vcoa`.
+        its VCOA group joins `inline_vcoa`. Each alternative to a heading range
+        ("All other courses: …", "or climb on a heading between …") is another
+        group for the same runways.
         """
         if self._accept("all", "rwys") or self._accept("all", "runways"):
             self._expect(",")
             return self._all_runways_group()
         runways = self._runway_header()
         if self._not_available():
-            return RunwayGroup(runways, ())
+            return [RunwayGroup(runways, ())]
         if self._peek_graphic_departure():
-            return RunwayGroup(runways, (self._graphic_departure(),))
+            return [RunwayGroup(runways, (self._graphic_departure(),))]
         if self._vcoa_only(runways):
-            return None
-        self._last_fix = None
-        group = RunwayGroup(runways, self._legs([self._leg()]))
+            return []
+        groups = [RunwayGroup(runways, self._flown_legs())]
+        while _has_heading_range(groups[-1]) and self._range_alternative():
+            groups.append(RunwayGroup(runways, self._flown_legs()))
         self._vcoa_alternative(runways)
-        return group
+        return groups
 
-    def _all_runways_group(self) -> RunwayGroup | None:
+    def _flown_legs(self) -> tuple[Leg, ...]:
+        self._last_fix = None
+        return self._legs([self._leg()])
+
+    def _range_alternative(self) -> bool:
+        """range-alternative := ["," | ";"] ("all other" ("courses" | "headings")
+        [":" | ","] | "or"), leading the legs flown instead of a heading range.
+
+        Only a group whose legs include a heading range is followed by one.
+        """
+        for lead in ((), (",",), (";",)):
+            for words in RANGE_ALTERNATIVES:
+                if self._peek(*lead, *words):
+                    self._index += len(lead)
+                    if self._accept("or"):
+                        return True
+                    self._index += len(words)
+                    self._accept_any(":", ",")
+                    return True
+        return False
+
+    def _all_runways_group(self) -> list[RunwayGroup]:
         if self._peek_graphic_departure():
-            return RunwayGroup((), (self._graphic_departure(),))
+            return [RunwayGroup((), (self._graphic_departure(),))]
         if self._vcoa_only(()):
-            return None
+            return []
         raise self._error('unsupported "all runways" group')
 
     def _vcoa_only(self, runways: tuple[str, ...]) -> bool:
@@ -473,9 +505,22 @@ class _Parser(LegParser):
 
 
 def _all_flown_end_with_thence(groups: list[RunwayGroup]) -> bool:
-    """Every runway group that flies legs (not an NA group) ends in "thence"."""
-    flown = [group for group in groups if group.legs and not group.graphic]
+    """Every runway group that flies a route (not an NA, charted-DP or
+    heading-range group) ends in "thence"."""
+    flown = [
+        group
+        for group in groups
+        if group.legs and not group.graphic and not _has_heading_range(group)
+    ]
     return bool(flown) and all(_ends_with_thence(group.legs) for group in flown)
+
+
+def _has_heading_range(group: RunwayGroup) -> bool:
+    """Whether the group climbs within a heading range, which ends its route."""
+    return any(
+        isinstance(leg.then if isinstance(leg, ClimbingTurn) else leg, HeadingRange)
+        for leg in group.legs
+    )
 
 
 def _ends_with_thence(legs: tuple[Leg, ...]) -> bool:

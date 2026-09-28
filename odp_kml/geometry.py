@@ -17,6 +17,7 @@ from .labels import (
     format_altitude,
     heading_label,
     heading_phrase,
+    heading_range_label,
     hold_label,
     navaid_radial_label,
     radial_phrase,
@@ -46,6 +47,8 @@ from .procedure import (
     Direct,
     Dme,
     HeadingAndRadial,
+    HeadingRange,
+    HeadingSector,
     HoldSpec,
     Leg,
     ProceedOnCourse,
@@ -95,6 +98,7 @@ class DisplayParams:
     bank_deg: float = 25.0
     default_gradient_ft_nm: float = 200.0
     vcoa_radius_nm: float = 2.0
+    heading_range_radius_nm: float = 3.0
     arc_step_deg: float = 5.0
     label_offset_nm: float = 0.35
     label_style: str = "plain"
@@ -137,6 +141,7 @@ def draw(
         for runway_group in procedure.runway_groups
         if not runway_group.graphic
         for pen in _draw_runway_group(ctx, runway_group)
+        if _continues_to_tail(runway_group)
     ]
     if procedure.shared_tail:
         _draw_shared_tail(ctx, pens, procedure.shared_tail)
@@ -181,8 +186,9 @@ class _Context:
 
     def _emit(self, shape: Polyline | Label) -> None:
         """Keep one of identical shapes: routes that reach the same hold draw
-        it identically, and VCOA groups for several runways label the same
-        circle at the same point."""
+        it identically, VCOA groups for several runways label the same circle
+        at the same point, and groups that are alternatives for one runway
+        ("All other courses: …") share its initial climb."""
         if shape not in self.shapes:
             self.shapes.append(shape)
 
@@ -245,6 +251,10 @@ def _draw_runway_group(ctx: _Context, runway_group: RunwayGroup) -> list[_Pen]:
     for pen in pens:
         _draw_legs(pen, runway_group.legs)
     return pens
+
+
+def _continues_to_tail(runway_group: RunwayGroup) -> bool:
+    return bool(runway_group.legs) and isinstance(runway_group.legs[-1], Thence)
 
 
 def _draw_shared_tail(ctx: _Context, pens: list[_Pen], legs: tuple[Leg, ...]) -> None:
@@ -352,16 +362,31 @@ def _turn_start_nm(gradient: float) -> float:
 
 
 def _draw_legs(pen: _Pen, legs: tuple[Leg, ...]) -> None:
-    for leg in legs:
+    for index, leg in enumerate(legs):
         start, course = pen.at, pen.course
         _draw_leg(pen, leg, None)
         if speed := _speed_restriction(leg):
             _label_speed(pen.ctx, speed, start, course)
+        if _ends_in_heading_range(leg):
+            _require_only_on_course(legs[index + 1 :])
+            return
+
+
+def _ends_in_heading_range(leg: Leg) -> bool:
+    return isinstance(leg.then if isinstance(leg, ClimbingTurn) else leg, HeadingRange)
+
+
+def _require_only_on_course(legs: tuple[Leg, ...]) -> None:
+    """After a heading range the aircraft may be on any heading in it, so only
+    "before proceeding on course" can follow; it needs no stub of its own."""
+    for leg in legs:
+        if not isinstance(leg, ProceedOnCourse):
+            raise Degenerate("leg after a heading range", repr(leg))
 
 
 def _speed_restriction(leg: Leg) -> SpeedRestriction | None:
     if isinstance(leg, ClimbingTurn):
-        return leg.then.speed
+        return getattr(leg.then, "speed", None)
     return getattr(leg, "speed", None)
 
 
@@ -381,6 +406,8 @@ def _draw_leg(pen: _Pen, leg: Leg, direction: Turn | None) -> None:
             _draw_leg(pen, leg.then, leg.direction)
         case ClimbHeading():
             _climb_heading(pen, leg, direction)
+        case HeadingRange():
+            _heading_range(pen, leg, direction)
         case Direct():
             _direct(pen, leg, direction)
         case Radial():
@@ -430,6 +457,54 @@ def _climb_heading(pen: _Pen, leg: ClimbHeading, direction: Turn | None) -> None
     _arrowhead(ctx, name, Style.ROUTE, pen.at, pen.course)
     _offset_label(pen, heading_label(leg.heading), midpoint(turn_end, pen.at), side)
     ctx.label(format_altitude(leg.until, ctx.params.label_style), pen.at)
+
+
+def _heading_range(pen: _Pen, leg: HeadingRange, direction: Turn | None) -> None:
+    """Each sector as a wedge from where the turn may begin: its two limiting
+    headings and the arc between them, `heading_range_radius_nm` out.
+
+    The label (and any altitude) sits just beyond the arc of the first sector.
+    """
+    ctx = pen.ctx
+    match leg.until:
+        case None:
+            pass
+        case Altitude():
+            _require_climb(pen, leg.until)
+        case _:
+            _unsupported(leg)
+    radius = ctx.params.heading_range_radius_nm
+    apex = pen.at
+    for index, sector in enumerate(leg.sectors):
+        start = ctx.heading_true(sector.start)
+        sweep = _sector_sweep(sector)
+        name = f"{_leg_name(pen, direction, 'heading')} {_sector_phrase(sector)}"
+        ctx.polyline(name, Style.RADIAL, [offset(apex, start, radius), apex])
+        ctx.polyline(name, Style.RADIAL, [apex, offset(apex, start + sweep, radius)])
+        ctx.polyline(name, Style.RADIAL, ctx.arc(apex, radius, start, sweep))
+        if index == 0:
+            outside = offset(
+                apex, start + sweep / 2, radius + ctx.params.label_offset_nm
+            )
+            ctx.label(
+                heading_range_label(leg, direction, ctx.params.label_style), outside
+            )
+
+
+def _sector_sweep(sector: HeadingSector) -> float:
+    """Signed degrees (positive clockwise) from the sector's start to its end;
+    a sector whose ends coincide is refused rather than read as a full circle."""
+    if sector.start % 360 == sector.end % 360:
+        raise Degenerate("empty heading sector", repr(sector))
+    if sector.clockwise:
+        return (sector.end - sector.start) % 360
+    return -((sector.start - sector.end) % 360)
+
+
+def _sector_phrase(sector: HeadingSector) -> str:
+    """e.g. ``350 CW 162``."""
+    sense = "CW" if sector.clockwise else "CCW"
+    return f"{sector.start:03d} {sense} {sector.end:03d}"
 
 
 def _require_climb(pen: _Pen, altitude: Altitude) -> None:

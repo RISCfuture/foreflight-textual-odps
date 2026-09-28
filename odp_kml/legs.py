@@ -24,6 +24,8 @@ from .procedure import (
     Dme,
     FixRef,
     HeadingAndRadial,
+    HeadingRange,
+    HeadingSector,
     HoldSpec,
     Leg,
     NavaidRef,
@@ -38,6 +40,7 @@ from .procedure import (
 from .tokens import NUMBER, ParseError, TokenStream, is_ident_word, phrase_signature
 
 _MAX_IDENT_LENGTH = 4
+MAX_HEADING = 360
 _MAX_DME_IDENT_LENGTH = 3
 FIX_LENGTH = 5
 
@@ -91,7 +94,11 @@ class LegParser(TokenStream):
             if self._peek("before") or self._peek(",", "before"):
                 self._accept(",")
                 self._append(legs, self._before())
-            elif legs and self._peek_vcoa_alternative() or self._accept("."):
+            elif (
+                (legs and self._peek_vcoa_alternative())
+                or self._peek_range_alternative(legs)
+                or self._accept(".")
+            ):
                 return tuple(legs)
             elif self._thence():
                 return (*legs, Thence())
@@ -120,6 +127,16 @@ class LegParser(TokenStream):
             self._accept("then")
         elif not self._accept_any("then", "and") and required:
             raise self._unmatched()
+
+    def _peek_range_alternative(self, legs: list[Leg]) -> bool:
+        """After a heading range: ``, all other courses ...`` or ``or climb …``."""
+        if not any(isinstance(_turned(leg), HeadingRange) for leg in legs):
+            return False
+        return any(
+            self._peek(*lead, *words)
+            for lead in ((), (",",), (";",))
+            for words in RANGE_ALTERNATIVES
+        )
 
     def _peek_vcoa_alternative(self) -> bool:
         """``, or for climb in visual conditions``, ``; or for …``, ``, for …``"""
@@ -247,8 +264,10 @@ class LegParser(TokenStream):
         return self._to_altitude()
 
     def _with_leading_altitude(
-        self, leg: Direct | HeadingAndRadial | Radial | ClimbHeading, altitude: Altitude
-    ) -> Direct | HeadingAndRadial | Radial | ClimbHeading:
+        self,
+        leg: Direct | HeadingAndRadial | Radial | ClimbHeading | HeadingRange,
+        altitude: Altitude,
+    ) -> Direct | HeadingAndRadial | Radial | ClimbHeading | HeadingRange:
         """A leading altitude terminates a leg that has no other terminator."""
         if isinstance(leg, Direct):
             raise self._error('unsupported "to <alt>" before "direct"')
@@ -258,10 +277,14 @@ class LegParser(TokenStream):
             raise self._error('unsupported "to <alt>" before another terminator')
         return dataclasses.replace(leg, until=altitude)
 
-    def _turn_leg(self) -> Direct | HeadingAndRadial | Radial | ClimbHeading:
+    def _turn_leg(
+        self,
+    ) -> Direct | HeadingAndRadial | Radial | ClimbHeading | HeadingRange:
         if self._peek("direct"):
             return self._direct()
         self._accept_any("on", "via")
+        if self._peek_heading_range():
+            return self._heading_range()
         if self._peek_heading():
             return self._heading_leg()
         return self._radial_leg()
@@ -276,6 +299,8 @@ class LegParser(TokenStream):
         if self._peek("in") or self._peek("-", "in", "-", "hold"):
             return self._climb_in_hold()
         self._accept_any("on", "via")
+        if self._peek_heading_range():
+            return self._heading_range()
         if self._peek_heading():
             return self._heading_leg()
         return self._radial_leg()
@@ -307,6 +332,53 @@ class LegParser(TokenStream):
         if not self._accept_any("heading", "hdg"):
             raise self._unmatched()
         heading = self._integer()
+        self._accept("°")
+        return heading
+
+    def _peek_heading_range(self) -> bool:
+        offset = 1 if self._peek("a") else 0
+        return (
+            self._peek("heading", offset=offset) or self._peek("hdg", offset=offset)
+        ) and self._peek("between", offset=offset + 1)
+
+    def _heading_range(self) -> HeadingRange:
+        """heading-range := ["a"] ("heading" | "hdg") "between" sector
+        ("or" ["between"] sector)* ["from" "DER"] [until]"""
+        self._accept("a")
+        self._expect_any("heading", "hdg")
+        self._expect("between")
+        sectors = [self._sector()]
+        while self._peek("or") and (
+            self._peek_integer(1) or self._peek("between", offset=1)
+        ):
+            self._expect("or")
+            self._accept("between")
+            sectors.append(self._sector())
+        self._accept("from", "der")
+        return HeadingRange(tuple(sectors), self._until())
+
+    def _sector(self) -> HeadingSector:
+        """sector := nnn ["°"] ("CW" | "clockwise" | "CCW" | "counter clockwise")
+        ["to"] ["heading" | "hdg"] nnn ["°"]"""
+        start = self._compass_heading()
+        if self._accept_any("cw", "clockwise"):
+            clockwise = True
+        elif self._accept("ccw") or self._accept("counter", "clockwise"):
+            clockwise = False
+        else:
+            raise self._unmatched()
+        self._accept("to")
+        self._accept_any("heading", "hdg")
+        return HeadingSector(start, self._compass_heading(), clockwise)
+
+    def _compass_heading(self) -> int:
+        """nnn ["°"], a magnetic heading from 0 to 360."""
+        if not self._peek_integer():
+            raise self._unmatched()
+        heading = self._integer()
+        if heading > MAX_HEADING:
+            self._index -= 1
+            raise self._unmatched()
         self._accept("°")
         return heading
 
@@ -566,6 +638,19 @@ class LegParser(TokenStream):
             phrase = f"{name} {navaid_type.value}"
             raise ParseError("navaid without ident", phrase, start)
         return known
+
+
+RANGE_ALTERNATIVES = (
+    ("all", "other", "courses"),
+    ("all", "other", "headings"),
+    ("or", "climb"),
+    ("or", "climbing"),
+)
+
+
+def _turned(leg: Leg) -> Leg:
+    """The leg a climbing turn turns onto, else the leg itself."""
+    return leg.then if isinstance(leg, ClimbingTurn) else leg
 
 
 def _same_facility(target: NavaidRef | FixRef, navaid: NavaidRef | FixRef) -> bool:

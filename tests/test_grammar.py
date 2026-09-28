@@ -25,6 +25,8 @@ from odp_kml.procedure import (
     FixRef,
     GraphicDeparture,
     HeadingAndRadial,
+    HeadingRange,
+    HeadingSector,
     HoldSpec,
     NavaidRef,
     NavaidType,
@@ -303,6 +305,136 @@ def test_parses_charted_dp_references(text, groups):
 
     assert procedure.runway_groups == tuple(groups)
     assert procedure.graphic_only == all(group.graphic for group in groups)
+
+
+def _cw(start, end):
+    return HeadingSector(start, end, clockwise=True)
+
+
+def _ccw(start, end):
+    return HeadingSector(start, end, clockwise=False)
+
+
+@pytest.mark.parametrize(
+    ("text", "groups"),
+    [
+        pytest.param(
+            "Rwy 2, climb on heading between 040° CW to 200° from DER.",
+            [RunwayGroup(("2",), (HeadingRange((_cw(40, 200),)),))],
+            id="one sector",
+        ),
+        pytest.param(
+            "Rwys 16L, 16R, climb on a heading between 213° CCW to 353° from DER.",
+            [RunwayGroup(("16L", "16R"), (HeadingRange((_ccw(213, 353),)),))],
+            id="counterclockwise",
+        ),
+        pytest.param(
+            "Rwy 4, climb on hdg between 250° CW 040° from DER.",
+            [RunwayGroup(("4",), (HeadingRange((_cw(250, 40),)),))],
+            id="hdg without to",
+        ),
+        pytest.param(
+            "Rwy 20L, climb heading 196° to 1100, then climb on a heading between "
+            "226° counter clockwise to 016° from DER.",
+            [
+                RunwayGroup(
+                    ("20L",),
+                    (ClimbHeading(196, to(1100)), HeadingRange((_ccw(226, 16),))),
+                )
+            ],
+            id="after a heading leg, spelled out",
+        ),
+        pytest.param(
+            "Rwy 25, climb on a heading between 317° CW to 083° or 206° CCW to 083° "
+            "from DER. All other courses: climbing left turn direct DEN VOR/DME.",
+            [
+                RunwayGroup(("25",), (HeadingRange((_cw(317, 83), _ccw(206, 83))),)),
+                RunwayGroup(
+                    ("25",),
+                    (
+                        ClimbingTurn(
+                            Turn.LEFT, Direct(NavaidRef("DEN", NavaidType.VOR_DME))
+                        ),
+                    ),
+                ),
+            ],
+            id="two sectors and all other courses",
+        ),
+        pytest.param(
+            "Rwy 31, climbing right turn on a heading between 085° clockwise to "
+            "heading 115° from DER to 7700 before proceeding on course.",
+            [
+                RunwayGroup(
+                    ("31",),
+                    (
+                        ClimbingTurn(
+                            Turn.RIGHT, HeadingRange((_cw(85, 115),), to(7700))
+                        ),
+                        ProceedOnCourse(),
+                    ),
+                )
+            ],
+            id="climbing turn with an altitude",
+        ),
+        pytest.param(
+            "Rwy 8, climb on a heading between 312° CW to 228° from DER, all other "
+            "courses climbing left turn direct DEN VOR/DME.",
+            [
+                RunwayGroup(("8",), (HeadingRange((_cw(312, 228),)),)),
+                RunwayGroup(
+                    ("8",),
+                    (
+                        ClimbingTurn(
+                            Turn.LEFT, Direct(NavaidRef("DEN", NavaidType.VOR_DME))
+                        ),
+                    ),
+                ),
+            ],
+            id="comma before all other courses",
+        ),
+        pytest.param(
+            "Rwy 7, climbing left turn on a heading between 256° clockwise to 054° "
+            "from DER or climbing right turn on a heading between 179° clockwise to "
+            "254° from DER.",
+            [
+                RunwayGroup(
+                    ("7",), (ClimbingTurn(Turn.LEFT, HeadingRange((_cw(256, 54),))),)
+                ),
+                RunwayGroup(
+                    ("7",), (ClimbingTurn(Turn.RIGHT, HeadingRange((_cw(179, 254),))),)
+                ),
+            ],
+            id="or climbing turn alternative",
+        ),
+    ],
+)
+def test_parses_heading_ranges(text, groups):
+    procedure = parse_departure_procedure(text, airport="XXX", amendment=None)
+
+    assert procedure.runway_groups == tuple(groups)
+
+
+def test_all_other_courses_needs_a_heading_range_before_it():
+    text = (
+        "Rwy 8, climb heading 080° to 5000. All other courses: climbing left turn "
+        "direct DEN VOR/DME."
+    )
+
+    assert signature_of(text) == 'unmatched phrase "all other courses:"'
+
+
+def test_heading_range_group_need_not_continue_to_the_shared_tail():
+    text = (
+        "Rwy 7, climb on a heading between 315° CW to 218° from DER. All other "
+        "courses: climbing right turn direct DEN VOR/DME, thence...\n"
+        "...climb in DEN VOR/DME holding pattern (hold South, right turns, 343° "
+        "inbound) to 16500 before proceeding on course."
+    )
+
+    procedure = parse_departure_procedure(text, airport="DEN", amendment=None)
+
+    assert [len(group.legs) for group in procedure.runway_groups] == [1, 2]
+    assert procedure.shared_tail is not None
 
 
 def _vcoa(runways, feet, then=None, cross=None, bound=None):

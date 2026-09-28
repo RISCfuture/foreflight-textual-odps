@@ -16,6 +16,7 @@ from .procedure import (
     Compass8,
     Dme,
     HeadingAndRadial,
+    HeadingRange,
     HoldSpec,
     NavaidRef,
     Radial,
@@ -59,6 +60,21 @@ def format_feet(feet: int, kind: AltitudeKind, style: str) -> str:
 def heading_label(magnetic: int) -> str:
     """A heading to fly, e.g. ``hdg 077°``."""
     return f"hdg {magnetic:03d}°"
+
+
+def heading_range_label(leg: HeadingRange, direction: Turn | None, style: str) -> str:
+    """The sectors as printed, e.g. ``hdg 350° CW 162°`` or, with a published
+    turn and altitude, ``LT hdg 256° CW 054° or 179° CW 254° 7700'``."""
+    sectors = " or ".join(
+        f"{s.start:03d}° {'CW' if s.clockwise else 'CCW'} {s.end:03d}°"
+        for s in leg.sectors
+    )
+    label = f"hdg {sectors}"
+    if direction is not None:
+        label = f"{direction}T {label}"
+    if isinstance(leg.until, Altitude):
+        label += f" {format_altitude(leg.until, style)}"
+    return label
 
 
 def radial_label(radial: int) -> str:
