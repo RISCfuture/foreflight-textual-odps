@@ -696,8 +696,11 @@ def _tracking_end(pen: _Pen, leg: Radial | HeadingAndRadial, navaid: Vec) -> Vec
             if abs(across) > ON_RADIAL_TOLERANCE_NM:
                 raise Degenerate("off radial", f"{target.ident} {across:.2f} NM abeam")
             return offset(pen.at, pen.course, along)
-        case Dme(navaid=dme, nm=nm) if dme.ident == leg.navaid.ident:
-            return offset(navaid, _radial_true(ctx, leg), nm)
+        case Dme(navaid=dme, nm=nm, fix=fix) if dme.ident == leg.navaid.ident:
+            end = offset(navaid, _radial_true(ctx, leg), nm)
+            if fix is not None:
+                _require_at(ctx, fix.ident, end, leg)
+            return end
         case Altitude(feet=feet):
             remaining = pen.altitude_leg_nm(feet) - pen.along_nm
             end = offset(pen.at, pen.course, remaining)
@@ -705,6 +708,13 @@ def _tracking_end(pen: _Pen, leg: Radial | HeadingAndRadial, navaid: Vec) -> Vec
                 _unsupported(leg)
             return end
     _unsupported(leg)
+
+
+def _require_at(ctx: _Context, ident: str, end: Vec, leg) -> None:
+    """Refuse a DME terminator whose named fix is not at that distance."""
+    miss = distance(ctx.xy(ident), end)
+    if miss > ON_RADIAL_TOLERANCE_NM:
+        raise Degenerate("DME fix mismatch", f"{ident} {miss:.2f} NM away: {leg!r}")
 
 
 def _draw_radial(ctx: _Context, leg, navaid: Vec, far: Vec) -> None:

@@ -758,7 +758,8 @@ Output: one Procedure object matching the response schema. Every object carries
   "at or above 9300" is "at_or_above", "at or below" is "at_or_below"; phrase
   is the exact words),
   EnrouteAltitude ("at or above MEA/MCA for route of flight": names ["MEA",
-  "MCA"] as printed, kind as for Altitude), AtFix, Dme ("to MLF 12 DME"), or
+  "MCA"] as printed, kind as for Altitude), AtFix ("to RESER INT" is the fix RESER), Dme ("to MLF 12 DME"; "to CARRO
+  INT/OLM 19.43 DME" also sets fix CARRO), or
   CrossRadial ("to cross LAS VORTAC R-110").
 - Navaids: ident is the three-letter identifier; name only when the text spells
   it out ("TONOPAH (TPH) VORTAC" gives name TONOPAH); type only when the text

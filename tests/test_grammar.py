@@ -504,6 +504,35 @@ def test_hold_climbs_to_an_enroute_minimum(until_text, until):
     assert group.legs[-1].until == until
 
 
+@pytest.mark.parametrize(
+    ("until_text", "until"),
+    [
+        ("to RESER INT", AtFix(FixRef("RESER"))),
+        (
+            "to EMBER INT/ILA 48 DME",
+            Dme(NavaidRef("ILA"), 48.0, FixRef("EMBER")),
+        ),
+        ("to SATUE/TAL 12.00 DME", Dme(NavaidRef("TAL"), 12.0, FixRef("SATUE"))),
+        (
+            "to BRICK/MTJ VOR/DME 23.4 DME",
+            Dme(NavaidRef("MTJ"), 23.4, FixRef("BRICK")),
+        ),
+    ],
+)
+def test_parses_fix_terminators_named_as_intersections_and_dme(until_text, until):
+    text = f"Rwy 18, climb via ILA R-151 outbound {until_text} before proceeding on course."
+
+    (group,) = parse_departure_procedure(
+        text, airport="X", amendment=None
+    ).runway_groups
+
+    assert group.legs[0].until == until
+
+
+def test_intersection_suffix_needs_a_five_letter_fix():
+    assert signature_of("Rwy 18, climb direct ABC INT.") == 'unmatched phrase "<id>."'
+
+
 def test_all_other_courses_needs_a_heading_range_before_it():
     text = (
         "Rwy 8, climb heading 080° to 5000. All other courses: climbing left turn "

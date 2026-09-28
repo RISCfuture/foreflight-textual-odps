@@ -490,3 +490,18 @@ def test_runway_heading_after_a_vcoa_is_unsupported():
         draw(resolved(vcoa=(vcoa,)))
 
     assert raised.value.signature == "unsupported construction: RunwayHeading"
+
+
+@pytest.mark.parametrize(("fix_nm", "draws"), [(12.2, True), (13.0, False)])
+def test_dme_terminator_naming_a_fix_must_find_it_there(fix_nm, draws):
+    until = Dme(NavaidRef("VOR"), 12.0, FixRef("CARRO"))
+    leg = Radial(NavaidRef("VOR"), 360 - int(VARIATION), outbound=True, until=until)
+    points = (point("VOR", 0.0, 0.0, VARIATION), point("CARRO", 0.0, fix_nm))
+
+    if draws:
+        drawing = draw(resolved(group(leg), points=points))
+        assert route_vertices(drawing)[-1] == pytest.approx((0.0, 12.0), abs=1e-6)
+    else:
+        with pytest.raises(Degenerate) as raised:
+            draw(resolved(group(leg), points=points))
+        assert raised.value.signature == "DME fix mismatch"

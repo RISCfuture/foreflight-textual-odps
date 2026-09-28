@@ -102,10 +102,15 @@ class AtFix:
 
 @dataclasses.dataclass(frozen=True)
 class Dme:
-    """A leg ends at a DME distance from a navaid."""
+    """A leg ends at a DME distance from a navaid.
+
+    `fix` is the fix the text names at that distance ("to CARRO INT/OLM
+    19.43 DME"), which the drawing checks against the distance.
+    """
 
     navaid: NavaidRef
     nm: float
+    fix: FixRef | None = None
 
 
 @dataclasses.dataclass(frozen=True)

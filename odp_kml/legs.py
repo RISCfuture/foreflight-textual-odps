@@ -42,6 +42,7 @@ from .procedure import (
 from .tokens import NUMBER, ParseError, TokenStream, is_ident_word, phrase_signature
 
 _MAX_IDENT_LENGTH = 4
+INTERSECTION = "INT"
 MAX_HEADING = 360
 _MAX_DME_IDENT_LENGTH = 3
 FIX_LENGTH = 5
@@ -529,6 +530,8 @@ class LegParser(TokenStream):
             return self._cross_radial()
         if self._peek_dme():
             return self._dme()
+        if self._peek_fix_dme():
+            return self._fix_dme()
         self._expect("to")
         return AtFix(self._target())
 
@@ -553,6 +556,29 @@ class LegParser(TokenStream):
             and bool(NUMBER.fullmatch(distance.text))
             and self._peek("dme", offset=3)
         )
+
+    def _peek_fix_dme(self) -> bool:
+        fix = self._token(1)
+        slash = 3 if self._peek("int", offset=2) else 2
+        return (
+            fix is not None
+            and is_ident_word(fix.text)
+            and len(fix.text) == FIX_LENGTH
+            and self._peek("/", offset=slash)
+            and self._peek_navaid(slash + 1)
+        )
+
+    def _fix_dme(self) -> Dme:
+        """fix-dme := "to" FIX ["INT"] "/" navaid-ident [type] nn.n "DME" """
+        self._expect("to")
+        fix = FixRef(self._next().text)
+        self._accept("int")
+        self._expect("/")
+        ident = self._ident()
+        self._navaid_type()
+        nm = self._number()
+        self._expect("dme")
+        return Dme(NavaidRef(ident), nm, fix)
 
     def _dme(self) -> Dme:
         """dme := "to" navaid-ident nn.n "DME" """
@@ -708,7 +734,11 @@ class LegParser(TokenStream):
         return target
 
     def _target(self) -> NavaidRef | FixRef:
-        """target := NAME+ "(" IDENT ")" [type] | IDENT [type] | FIX | NAME+ type"""
+        """target := NAME+ "(" IDENT ")" [type] | IDENT [type] | FIX ["INT"]
+        | NAME+ type
+
+        "INT" (intersection) after a five-letter name marks it as a fix.
+        """
         start = self._position()
         words = self._uppercase_words()
         if not words:
@@ -717,6 +747,12 @@ class LegParser(TokenStream):
             ident = self._ident()
             self._expect(")")
             return NavaidRef(ident, self._navaid_type(), " ".join(words))
+        if words[-1] == INTERSECTION and len(words) == 2:
+            words.pop()
+            if len(words[0]) != FIX_LENGTH:
+                self._index -= 1
+                raise self._unmatched()
+            return FixRef(words[0])
         navaid_type = self._navaid_type()
         if len(words) == 1 and len(words[0]) <= _MAX_IDENT_LENGTH:
             return NavaidRef(words[0], navaid_type)
