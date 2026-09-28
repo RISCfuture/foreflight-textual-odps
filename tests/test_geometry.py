@@ -539,3 +539,36 @@ def test_unstated_radial_sense_with_an_altitude_terminator_is_degenerate():
         draw(resolved(group(leg), points=(point("VOR", 0.0, 0.0, VARIATION),)))
 
     assert raised.value.signature == 'radial without "inbound" or "outbound"'
+
+
+LEFT_INTO_TAIL = ClimbingTurn(Turn.LEFT, None)
+
+
+def turning_into(tail, second=LEFT_INTO_TAIL):
+    """RWY 36 turns right and RWY 18 flies `second` into a shared `tail`."""
+    return resolved(
+        group(ClimbingTurn(Turn.RIGHT, None), Thence()),
+        group(second, Thence(), runways=("18",)),
+        runways=(runway(), runway("18", course=180.0, der=(0.0, 3.0))),
+        points=(point("VOR", 6.0, 1.5),),
+        shared_tail=tail,
+    )
+
+
+def test_turn_without_a_route_flies_the_tail_first_leg_from_each_runway():
+    drawing = draw(turning_into((Direct(NavaidRef("VOR")),)))
+
+    names = [line.name for line in polylines(drawing) if line.name.endswith("VOR")]
+    assert names == [
+        "RWY 36: climbing right turn direct VOR",
+        "RWY 18: climbing left turn direct VOR",
+    ]
+    ends = [line.points[-1] for line in polylines(drawing) if line.name in names]
+    assert all(xy(p) == pytest.approx((6.0, 1.5), abs=1e-6) for p in ends)
+
+
+def test_turns_into_the_tail_must_be_every_group_or_none():
+    with pytest.raises(Degenerate) as raised:
+        draw(turning_into((Direct(NavaidRef("VOR")),), Direct(NavaidRef("VOR"))))
+
+    assert raised.value.signature == "shared tail start mismatch"

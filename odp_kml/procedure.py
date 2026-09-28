@@ -207,10 +207,15 @@ class HeadingAndRadial:
 
 @dataclasses.dataclass(frozen=True)
 class ClimbingTurn:
-    """Climb in a turn before flying the next leg."""
+    """Climb in a turn before flying the next leg.
+
+    `then` is ``None`` for a turn whose route is the shared tail's first leg
+    ("Rwy 20, climbing left turn, thence... ...direct ALS VORTAC"); such a
+    turn is a runway group's last leg.
+    """
 
     direction: Turn | None
-    then: Direct | HeadingAndRadial | Radial | ClimbHeading | HeadingRange
+    then: Direct | HeadingAndRadial | Radial | ClimbHeading | HeadingRange | None
 
 
 @dataclasses.dataclass(frozen=True)

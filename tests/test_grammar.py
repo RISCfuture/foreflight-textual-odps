@@ -37,6 +37,7 @@ from odp_kml.procedure import (
     RunwayGroup,
     RunwayHeading,
     SpeedRestriction,
+    Thence,
     Turn,
     VcoaGroup,
     from_dict,
@@ -556,6 +557,41 @@ def test_radial_sense_is_not_taken_from_a_different_radial():
     ).runway_groups
 
     assert group.legs[0].outbound is None
+
+
+def test_bare_turns_turn_onto_an_all_aircraft_tail():
+    text = (
+        "Rwy 9, turn right.\nRwy 27, climbing left turn.\n"
+        "All aircraft climb direct to LIN VOR/DME."
+    )
+
+    procedure = parse_departure_procedure(text, airport="E45", amendment=None)
+
+    assert procedure.runway_groups == (
+        RunwayGroup(("9",), (ClimbingTurn(Turn.RIGHT, None), Thence())),
+        RunwayGroup(("27",), (ClimbingTurn(Turn.LEFT, None), Thence())),
+    )
+    assert procedure.shared_tail == (Direct(NavaidRef("LIN", NavaidType.VOR_DME)),)
+
+
+def test_ellipsis_alone_leads_into_an_all_aircraft_tail():
+    text = (
+        "Rwy 11, climbing left turn heading 022° to intercept GLL VOR/DME R-221 to "
+        "7000...\nRwy 29, climbing right turn, thence...\n"
+        "...All aircraft proceed direct GLL VOR/DME."
+    )
+
+    procedure = parse_departure_procedure(text, airport="LMO", amendment=None)
+
+    assert [group.legs[-1] for group in procedure.runway_groups] == [Thence(), Thence()]
+    assert procedure.runway_groups[1].legs[0] == ClimbingTurn(Turn.RIGHT, None)
+    assert procedure.shared_tail == (Direct(NavaidRef("GLL", NavaidType.VOR_DME)),)
+
+
+def test_turn_with_no_route_needs_a_shared_tail():
+    text = "Rwy 6, climbing right turn direct ABC VOR. Rwy 24, turn left."
+
+    assert signature_of(text) == "turn without a route"
 
 
 def test_all_other_courses_needs_a_heading_range_before_it():

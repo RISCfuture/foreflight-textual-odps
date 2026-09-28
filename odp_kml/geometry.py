@@ -213,6 +213,8 @@ class _Pen:
     base_alt_ft: float
     gradient: float
     runway_course: float | None = None
+    turn_pending: bool = False
+    pending_direction: Turn | None = None
 
     def altitude_leg_nm(self, feet: int) -> float:
         """Along-track distance at which the climb reaches `feet`."""
@@ -264,9 +266,23 @@ def _continues_to_tail(runway_group: RunwayGroup) -> bool:
 
 def _draw_shared_tail(ctx: _Context, pens: list[_Pen], legs: tuple[Leg, ...]) -> None:
     """Draw the legs every runway group continues with, once, from where
-    the groups converge."""
+    the groups converge.
+
+    Groups that end in a turn with no route of their own ("climbing right
+    turn, thence ...") each fly the tail's first leg in that turn, and
+    converge where it ends; either every group does so or none.
+    """
     if not pens:
-        _unsupported(legs)
+        raise Degenerate("shared tail without a runway route", repr(legs))
+    pending = [pen.turn_pending for pen in pens]
+    if any(pending):
+        if not all(pending):
+            raise Degenerate("shared tail start mismatch", "turns into the tail")
+        for pen in pens:
+            _draw_legs(pen, legs[:1], pen.pending_direction)
+        legs = legs[1:]
+        if not legs:
+            return
     first = pens[0]
     for pen in pens[1:]:
         gap = distance(first.at, pen.at)
@@ -367,10 +383,11 @@ def _turn_start_nm(gradient: float) -> float:
     return max(MIN_TURN_START_NM, TURN_START_HEIGHT_FT / gradient)
 
 
-def _draw_legs(pen: _Pen, legs: tuple[Leg, ...]) -> None:
+def _draw_legs(pen: _Pen, legs: tuple[Leg, ...], direction: Turn | None = None) -> None:
+    """Draw `legs` in order; `direction` is a turn owed to the first of them."""
     for index, leg in enumerate(legs):
         start, course = pen.at, pen.course
-        _draw_leg(pen, leg, None)
+        _draw_leg(pen, leg, direction if index == 0 else None)
         if speed := _speed_restriction(leg):
             _label_speed(pen.ctx, speed, start, course)
         if _ends_in_heading_range(leg):
@@ -379,7 +396,8 @@ def _draw_legs(pen: _Pen, legs: tuple[Leg, ...]) -> None:
 
 
 def _ends_in_heading_range(leg: Leg) -> bool:
-    return isinstance(leg.then if isinstance(leg, ClimbingTurn) else leg, HeadingRange)
+    turned = leg.then if isinstance(leg, ClimbingTurn) else leg
+    return isinstance(turned, HeadingRange)
 
 
 def _require_only_on_course(legs: tuple[Leg, ...]) -> None:
@@ -392,7 +410,7 @@ def _require_only_on_course(legs: tuple[Leg, ...]) -> None:
 
 def _speed_restriction(leg: Leg) -> SpeedRestriction | None:
     if isinstance(leg, ClimbingTurn):
-        return getattr(leg.then, "speed", None)
+        return getattr(leg.then, "speed", None) if leg.then is not None else None
     return getattr(leg, "speed", None)
 
 
@@ -408,6 +426,8 @@ def _label_speed(
 
 def _draw_leg(pen: _Pen, leg: Leg, direction: Turn | None) -> None:
     match leg:
+        case ClimbingTurn(then=None):
+            pen.turn_pending, pen.pending_direction = True, leg.direction
         case ClimbingTurn():
             _draw_leg(pen, leg.then, leg.direction)
         case ClimbHeading():

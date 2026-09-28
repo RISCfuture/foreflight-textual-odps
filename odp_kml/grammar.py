@@ -220,11 +220,14 @@ class _Parser(LegParser):
             if self._peek(*VISUAL_CLIMB):
                 raise self._error("visual climb without a runway")
             if self._starts_shared_tail():
-                shared_tail = self._shared_tail(groups)
+                shared_tail, for_all = self._shared_tail(groups)
+                if for_all:
+                    groups = [_continued_to_tail(group) for group in groups]
                 break
             groups.extend(self._runway_groups())
         self._expect_end()
         self._require_tail_for_thence(groups, shared_tail)
+        _require_routes_for_turns(groups, shared_tail)
         return tuple(groups), shared_tail
 
     def _peek_graphic_departure(self) -> bool:
@@ -393,14 +396,26 @@ class _Parser(LegParser):
     def _starts_shared_tail(self) -> bool:
         return self._peek("...") or self._peek("all", "aircraft")
 
-    def _shared_tail(self, groups: list[RunwayGroup]) -> tuple[Leg, ...]:
-        """shared-tail := ("..." | "All aircraft") legs"""
+    def _shared_tail(self, groups: list[RunwayGroup]) -> tuple[tuple[Leg, ...], bool]:
+        """shared-tail := ("..." ["thence"] [all-aircraft] | all-aircraft) legs
+
+        all-aircraft := "All aircraft" ["," | ":"]
+
+        Returns the tail and whether it names "all aircraft", which every
+        flown runway group then continues into.
+        """
         if self._peek("...") and not _all_flown_end_with_thence(groups):
             raise self._error('"..." without a preceding "thence"')
-        if not self._accept("..."):
-            self._expect("all", "aircraft")
+        dotted = self._accept("...")
+        if dotted:
+            self._accept("thence")
+        for_all = self._accept("all", "aircraft")
+        if for_all:
+            self._accept_any(",", ":")
+        elif not dotted:
+            raise self._unmatched()
         self._last_fix = None
-        return self._legs([self._leg()])
+        return self._legs([self._leg()]), for_all
 
     def _require_tail_for_thence(
         self, groups: list[RunwayGroup], shared_tail: tuple[Leg, ...] | None
@@ -544,6 +559,33 @@ def _all_flown_end_with_thence(groups: list[RunwayGroup]) -> bool:
         if group.legs and not group.graphic and not _has_heading_range(group)
     ]
     return bool(flown) and all(_ends_with_thence(group.legs) for group in flown)
+
+
+def _continued_to_tail(group: RunwayGroup) -> RunwayGroup:
+    """A group flying a route that "all aircraft" continue from: it ends in
+    "thence" whether or not the text said so."""
+    if (
+        not group.legs
+        or group.graphic
+        or _has_heading_range(group)
+        or _ends_with_thence(group.legs)
+    ):
+        return group
+    return dataclasses.replace(group, legs=(*group.legs, Thence()))
+
+
+def _require_routes_for_turns(
+    groups: list[RunwayGroup], shared_tail: tuple[Leg, ...] | None
+) -> None:
+    """A turn with no route of its own must be its group's last leg before a
+    shared tail whose first leg it turns onto."""
+    for group in groups:
+        legs = [leg for leg in group.legs if not isinstance(leg, Thence)]
+        for index, leg in enumerate(legs):
+            if isinstance(leg, ClimbingTurn) and leg.then is None:
+                last = index == len(legs) - 1
+                if not (last and shared_tail and _ends_with_thence(group.legs)):
+                    raise ParseError("turn without a route", "", 0)
 
 
 def _has_heading_range(group: RunwayGroup) -> bool:

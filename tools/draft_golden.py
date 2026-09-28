@@ -747,14 +747,17 @@ Output: one Procedure object matching the response schema. Every object carries
   Direct (proceed direct to a navaid or fix), Radial (fly a navaid's radial,
   outbound true when the text says outbound, false for inbound or when flown
   to that navaid, null when the text says neither), HeadingAndRadial (fly a
-  heading until intercepting a radial), ClimbingTurn (a climbing turn onto its "then" leg;
-  direction null when the text gives none), ClimbInHold, ProceedOnCourse
+  heading until intercepting a radial), ClimbingTurn (a climbing turn, or "turn
+  right", onto its "then" leg; direction null when the text gives none; then
+  null for "climbing right turn, thence..." whose route is the shared tail's
+  first leg), ClimbInHold, ProceedOnCourse
   (turn_restriction L/R only for "before turning left/right"; null otherwise),
   and Thence (the "thence..." marker leading into a shared tail).
 - "All other courses: ..." (or "or climb on a heading between ...") after a
   HeadingRange is a further runway group for the same runways.
 - shared_tail: the legs after a leading "..." or "All aircraft" line that every
-  group continues with; null when there is none.
+  group continues with; null when there is none. Before an "All aircraft" tail
+  every group with legs ends in Thence, said or not.
 - until ends a leg: Altitude ("to 2000" is kind "to", "at 2000" is "at",
   "at or above 9300" is "at_or_above", "at or below" is "at_or_below"; phrase
   is the exact words),

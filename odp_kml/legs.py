@@ -60,6 +60,8 @@ COMPASS_WORDS = {
 }
 _TURN_WORDS = {"left": Turn.LEFT, "right": Turn.RIGHT}
 _TURN_ABBREVIATIONS = {"lt": Turn.LEFT, "rt": Turn.RIGHT}
+# What may follow a turn that has no route of its own.
+_ROUTE_ENDS = frozenset({",", ".", ";", "thence", "..."})
 _NAVAID_TYPES = (
     (("vor", "/", "dme"), NavaidType.VOR_DME),
     (("vortac",), NavaidType.VORTAC),
@@ -122,11 +124,20 @@ class LegParser(TokenStream):
         self._last_fix = _end_fix(leg)
 
     def _thence(self) -> bool:
-        """thence := [","] "thence" "..." """
-        if not (self._peek("thence") or self._peek(",", "thence")):
+        """thence := [","] "thence" "..." | [","] "..."
+
+        An ellipsis alone ("to 7000...") also leads into the shared tail.
+        """
+        if not (
+            self._peek("thence")
+            or self._peek(",", "thence")
+            or self._peek("...")
+            or self._peek(",", "...")
+        ):
             return False
         self._accept(",")
-        self._expect("thence", "...")
+        self._accept("thence")
+        self._expect("...")
         return True
 
     def _leg_separator(self, *, required: bool) -> None:
@@ -167,7 +178,8 @@ class LegParser(TokenStream):
             raise self._error(f'unsupported routing "then {bound.lower} on"')
 
     def _leg(self) -> Leg:
-        """leg := climbing-turn | climb | continue-climb | proceed | direct"""
+        """leg := climbing-turn | climb | continue-climb | proceed | direct
+        | bare-turn"""
         if self._peek("climbing"):
             return self._climbing_turn()
         if self._peek("climb"):
@@ -178,6 +190,8 @@ class LegParser(TokenStream):
             return self._proceed()
         if self._peek("direct"):
             return self._direct()
+        if self._peek_bare_turn():
+            return self._bare_turn()
         raise self._unmatched()
 
     def _peek_before(self) -> bool:
@@ -299,7 +313,7 @@ class LegParser(TokenStream):
         self._target()
 
     def _with_speed(self, leg: Leg, speed: SpeedRestriction) -> Leg:
-        if isinstance(leg, ClimbingTurn):
+        if isinstance(leg, ClimbingTurn) and leg.then is not None:
             return dataclasses.replace(leg, then=self._with_speed(leg.then, speed))
         if not any(field.name == "speed" for field in dataclasses.fields(leg)):
             raise self._error(f"speed restriction after {type(leg).__name__}")
@@ -308,9 +322,36 @@ class LegParser(TokenStream):
     # --- Climbs ------------------------------------------------------------
 
     def _climbing_turn(self) -> ClimbingTurn:
-        """climbing-turn := "climbing" [turn] "turn" [to-altitude ("via"|"on")] turn-leg"""
+        """climbing-turn := "climbing" [turn] "turn" ([to-altitude ("via"|"on")]
+        turn-leg | ↓)
+
+        ↓: a turn with no route of its own ("climbing right turn, thence...")
+        turns onto the shared tail's first leg.
+        """
         self._expect("climbing")
-        direction = self._turn_direction()
+        return self._turn(self._turn_direction())
+
+    def _bare_turn(self) -> ClimbingTurn:
+        """bare-turn := "turn" ("left" | "right") | ("left" | "right") "turn",
+        then as a climbing turn: "Rwy 9, turn right." """
+        if self._accept("turn"):
+            direction = _TURN_WORDS[self._next().lower]
+        else:
+            direction = _TURN_WORDS[self._next().lower]
+            self._expect("turn")
+        return self._turn(direction)
+
+    def _peek_bare_turn(self) -> bool:
+        token, following = self._token(), self._token(1)
+        if token is None or following is None:
+            return False
+        return (token.lower == "turn" and following.lower in _TURN_WORDS) or (
+            token.lower in _TURN_WORDS and following.lower == "turn"
+        )
+
+    def _turn(self, direction: Turn | None) -> ClimbingTurn:
+        if self._at_end() or self._peek_any_of(_ROUTE_ENDS):
+            return ClimbingTurn(direction, None)
         altitude = self._altitude_before_route()
         leg = self._turn_leg()
         if altitude is not None:
@@ -394,16 +435,19 @@ class LegParser(TokenStream):
         self._expect("continue", "climb")
         return self._climb_in_hold()
 
-    def _proceed(self) -> Radial:
-        """proceed := "proceed" ("on" | "via") radial-leg"""
+    def _proceed(self) -> Radial | Direct:
+        """proceed := "proceed" (("on" | "via") radial-leg | direct)"""
         self._expect("proceed")
+        if self._peek("direct"):
+            return self._direct()
         if not self._accept_any("on", "via"):
             raise self._unmatched()
         return self._radial_leg()
 
     def _direct(self) -> Direct:
-        """direct := "direct" target"""
+        """direct := "direct" ["to"] target"""
         self._expect("direct")
+        self._accept("to")
         return Direct(self._target())
 
     # --- Headings and radials ----------------------------------------------
@@ -811,7 +855,7 @@ RANGE_ALTERNATIVES = (
 )
 
 
-def _turned(leg: Leg) -> Leg:
+def _turned(leg: Leg) -> Leg | None:
     """The leg a climbing turn turns onto, else the leg itself."""
     return leg.then if isinstance(leg, ClimbingTurn) else leg
 
@@ -823,7 +867,7 @@ def _same_facility(target: NavaidRef | FixRef, navaid: NavaidRef | FixRef) -> bo
 def _end_fix(leg: Leg) -> NavaidRef | FixRef | None:
     """The fix a leg ends at, or ``None`` when it ends anywhere else."""
     if isinstance(leg, ClimbingTurn):
-        return _end_fix(leg.then)
+        return _end_fix(leg.then) if leg.then is not None else None
     if isinstance(leg, Direct):
         return leg.target
     if isinstance(leg, ClimbInHold):
