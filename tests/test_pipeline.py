@@ -80,6 +80,21 @@ def vcoa_only(block):
     return dataclasses.replace(block, text=head + vcoa)
 
 
+def with_unreadable_runway(block):
+    """`block` with a runway group ahead of its own that no rule reads."""
+    return dataclasses.replace(
+        block,
+        text=block.text.replace(
+            "DEPARTURE PROCEDURE:\n", "DEPARTURE PROCEDURE:\nRwy 6, climb banana.\n"
+        ),
+    )
+
+
+def tph_block():
+    blocks, _ = extract_blocks(FIXTURES / "pdf" / "SW4TO-excerpt.pdf", "SW4")
+    return next(block for block in blocks if block.lid == "TPH")
+
+
 class TestDrawings:
     def test_only_tph_is_drawn(self, result):
         assert [drawing.lid for drawing in result.drawings] == ["TPH"]
@@ -100,7 +115,7 @@ class TestDrawings:
             dataclasses.replace(tph, lid="KTPH"), fixture_nasr(), options
         )
 
-        assert outcome.finding is None
+        assert outcome.findings == ()
         assert outcome.drawing.lid == "TPH"
 
     def test_vcoa_only_block_draws_its_vcoa(self):
@@ -110,9 +125,23 @@ class TestDrawings:
 
         outcome = process_block(vcoa_only(tph), fixture_nasr(), options)
 
-        assert outcome.finding is None
+        assert outcome.findings == ()
         styles = {s.style for s in outcome.drawing.shapes if isinstance(s, Polyline)}
         assert styles == {Style.VCOA, Style.ROUTE, Style.HOLD}
+
+    def test_runways_that_draw_are_drawn_beside_one_that_does_not(self):
+        options = BuildOptions(cycle=CYCLE, cache_dir=Path("unused"))
+
+        outcome = process_block(
+            with_unreadable_runway(tph_block()), fixture_nasr(), options
+        )
+
+        (finding,) = outcome.findings
+        assert finding.kind == Kind.PARSE_FAILED
+        assert finding.detail.startswith("RWY 6: banana.")
+        assert "Not drawn: RWY 6" in label_texts(outcome.drawing)
+        full = process_block(tph_block(), fixture_nasr(), options).drawing
+        assert set(full.shapes) < set(outcome.drawing.shapes)
 
 
 class TestFindings:
@@ -146,6 +175,7 @@ class TestReport:
         labels = sum(len(label_texts(drawing)) for drawing in result.drawings)
         assert (report.cycle, report.airports_with_text) == ("2026-09-03", 7)
         assert report.drawn == len(result.drawings) == 1
+        assert report.partial == 0
         assert report.label_count == labels > 0
 
     def test_airport_subset_limits_blocks_and_findings(self):

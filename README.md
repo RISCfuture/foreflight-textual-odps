@@ -74,7 +74,7 @@ since ForeFlight charts graphic ODPs itself.
 
 ## How it decides what to draw
 
-A procedure is drawn only when the pipeline is certain of it: the text
+A route is drawn only when the pipeline is certain of it: its text
 parses completely, every navaid and fix reference resolves to exactly one
 match in NASR, and the geometry hits no degenerate case (a radial parallel
 to a course, a turn with no defined radius, and so on). Anything less
@@ -83,6 +83,14 @@ certain is never drawn; it becomes a `Finding` instead, listed in
 grouped by failure signature so one recurring problem across airports and
 cycles produces one issue. Coverage improves cycle by cycle as those
 findings get fixed.
+
+Certainty is judged one runway route at a time: each runway's route,
+together with the shared tail it continues into, and each VCOA. When some
+of an airport's routes are certain and others are not, the certain ones
+are drawn and a label just south of the airport names the rest
+(`Not drawn: RWY 17L/17R, VCOA`), so a missing line is never read as a
+runway without an ODP. A route is never drawn in part, and the report
+counts airports drawn in part separately.
 
 This pack is an educational aid, not a tool for navigation. The published
 FAA text and charts govern; always fly from those, not from this layer.

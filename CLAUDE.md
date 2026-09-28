@@ -5,9 +5,12 @@ ForeFlight content pack that draws FAA textual obstacle departure procedures
 
 ## Rules
 
-- A procedure is drawn only when the pipeline is certain of it. Any parse
-  failure, unresolved reference, or degenerate geometry becomes a `Finding`
-  and is reported (and filed as a GitHub issue by CI); it is never drawn.
+- A procedure is drawn only when the pipeline is certain of it, one runway
+  route (with any shared tail it flies) or VCOA at a time. Any parse
+  failure, unresolved reference, or degenerate geometry in a route becomes a
+  `Finding` and is reported (and filed as a GitHub issue by CI); that route
+  is never drawn, and the airport's other routes are drawn beside a
+  "Not drawn: RWY …" label. A route is never drawn truncated.
 - The grammar has no "skip unknown words" rule.
 - No machine learning in the runtime pipeline. `tools/draft_golden.py` is an
   offline aid for drafting test fixtures that a human reviews.

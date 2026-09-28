@@ -157,6 +157,21 @@ class TestReportCounts:
             "715 findings in 1 signatures"
         )
 
+    def test_summary_line_counts_airports_drawn_in_part(self):
+        report = Report(
+            cycle="2026-09-03",
+            airports_with_text=1678,
+            drawn=1186,
+            findings=[make_finding() for _ in range(480)],
+            label_count=0,
+            graphic_only=199,
+            partial=187,
+        )
+        assert report.summary_line() == (
+            "Drew 1,186 of 1,479 ODPs (80%, 187 in part); 199 airports use only "
+            "charted DPs; 480 findings in 1 signatures"
+        )
+
     def test_summary_line_handles_zero_airports_without_dividing_by_zero(self):
         report = Report(
             cycle="2026-09-03",

@@ -18,15 +18,16 @@ from . import dtpp, nasr
 from .cycle import Cycle
 from .extract import AirportBlock, check_against_metafile, extract_blocks
 from .findings import Finding, Kind, Report
+from .geo import destination
 from .geometry import DEFAULT_PARAMS, Degenerate, DisplayParams, draw
-from .grammar import ParseError, parse_procedure
+from .grammar import ParseError, Unparsed, parse_procedure_in_part
 from .minimums import parse_takeoff_minimums
 from .normalize import normalize
 from .palette import assign_palettes
-from .procedure import Procedure
+from .procedure import Procedure, Thence
 from .resolve import ResolveError, resolve
 from .sections import Sections, split_sections
-from .shapes import AirportDrawing, Label
+from .shapes import AirportDrawing, Label, Polyline
 
 LOG = logging.getLogger(__name__)
 
@@ -42,6 +43,9 @@ _NO_METAFILE_AIRPORT = re.compile(
     r"\S+: block (?P<airport>\S+) has no metafile airport"
 )
 _ICAO_LENGTH = 4
+VCOA_PART = "VCOA"
+UNNAMED_PART = "other runways"
+NOT_DRAWN_LABEL_OFFSET_NM = 1.0
 
 type SectionsEntry = dict[str, str | None]
 
@@ -68,12 +72,13 @@ class BuildResult:
 
 @dataclasses.dataclass(frozen=True)
 class BlockOutcome:
-    """One airport block's sections entry and either its drawing, its finding,
-    or `graphic_only` when every runway flies a charted DP instead."""
+    """One airport block's sections entry, its drawing (of all or part of the
+    procedure) and its findings, or `graphic_only` when every runway flies a
+    charted DP instead."""
 
     sections: SectionsEntry
     drawing: AirportDrawing | None = None
-    finding: Finding | None = None
+    findings: tuple[Finding, ...] = ()
     graphic_only: bool = False
 
 
@@ -101,7 +106,7 @@ def build_from_sources(
     drawings = assign_palettes(
         outcome.drawing for outcome in outcomes if outcome.drawing
     )
-    findings += [outcome.finding for outcome in outcomes if outcome.finding]
+    findings += [finding for outcome in outcomes for finding in outcome.findings]
     report = Report(
         cycle=options.cycle.iso,
         airports_with_text=len(outcomes),
@@ -109,6 +114,7 @@ def build_from_sources(
         findings=findings,
         label_count=_label_count(drawings),
         graphic_only=sum(outcome.graphic_only for outcome in outcomes),
+        partial=sum(bool(outcome.drawing and outcome.findings) for outcome in outcomes),
     )
     return BuildResult(drawings, report, [outcome.sections for outcome in outcomes])
 
@@ -118,7 +124,11 @@ def process_block(
 ) -> BlockOutcome | None:
     """Parse, resolve and draw one block; ``None`` when it has no procedure text.
 
-    A parse, resolve or geometry failure becomes the outcome's finding. A
+    Each runway route and VCOA is drawn when it is certain on its own, so a
+    parse, resolve or geometry failure in one of them becomes a finding for
+    that part while the rest are drawn, beside a label naming what was
+    not. When nothing can be drawn the airport has a single finding, as
+    does a failure that no part escapes (the airport missing from NASR). A
     procedure whose every runway flies a charted DP is neither drawn nor a
     finding.
     """
@@ -128,15 +138,30 @@ def process_block(
     sections = _normalized(raw)
     entry = _sections_entry(block.lid, sections)
     try:
-        procedure = parse_procedure(sections, airport=block.lid)
-        if procedure.graphic_only:
-            return BlockOutcome(entry, graphic_only=True)
-        drawing = _draw_procedure(
+        procedure, unparsed = parse_procedure_in_part(sections, airport=block.lid)
+    except ParseError as error:
+        return BlockOutcome(entry, findings=(_finding(error, block.lid, raw, options),))
+    if procedure.graphic_only and not unparsed:
+        return BlockOutcome(entry, graphic_only=True)
+    unread = [(_unparsed_part(part), part.error) for part in unparsed]
+    try:
+        drawing, failed = _draw_in_part(
             block.lid, procedure, sections, nasr_data, options.params
         )
-    except (ParseError, ResolveError, Degenerate) as error:
-        return BlockOutcome(entry, finding=_finding(error, block.lid, raw, options))
-    return BlockOutcome(entry, drawing=drawing)
+    except (ResolveError, Degenerate) as error:
+        drawing, failed = None, [("", error)]
+    failed = [*unread, *failed]
+    if drawing is None and not failed:
+        return BlockOutcome(entry)
+    if drawing is None:
+        _, error = failed[0]
+        return BlockOutcome(entry, findings=(_finding(error, block.lid, raw, options),))
+    findings = tuple(
+        _finding(error, block.lid, raw, options, part) for part, error in failed
+    )
+    if failed:
+        drawing = _with_not_drawn_label(drawing, [part for part, _ in failed])
+    return BlockOutcome(entry, drawing=drawing, findings=findings)
 
 
 def find_airport(data: nasr.NasrData, ident: str) -> nasr.Airport:
@@ -242,16 +267,97 @@ def _sections_entry(lid: str, sections: Sections) -> SectionsEntry:
     }
 
 
-def _draw_procedure(
+type Failure = tuple[str, ParseError | ResolveError | Degenerate]
+
+
+def _draw_in_part(
     lid: str,
     procedure: Procedure,
     sections: Sections,
     nasr_data: nasr.NasrData,
     params: DisplayParams,
-) -> AirportDrawing:
+) -> tuple[AirportDrawing | None, list[Failure]]:
+    """The whole procedure drawn; failing that, each part drawn on its own
+    and the drawable ones merged, with the parts that failed.
+
+    Raises the whole procedure's error when it has at most one part or no
+    part draws. ``None`` when there is no part to draw.
+    """
     airport = find_airport(nasr_data, lid)
     min_climb = parse_takeoff_minimums(sections.takeoff_minimums or "")
-    return draw(resolve(procedure, airport, nasr_data, min_climb=min_climb), params)
+
+    def drawn(part: Procedure) -> AirportDrawing:
+        return draw(resolve(part, airport, nasr_data, min_climb=min_climb), params)
+
+    parts = _parts(procedure)
+    if not parts:
+        return None, []
+    try:
+        return drawn(procedure), []
+    except (ResolveError, Degenerate) as error:
+        if len(parts) == 1:
+            raise
+        whole_error = error
+    drawings, failed = [], []
+    for name, part in parts:
+        try:
+            drawings.append(drawn(part))
+        except (ResolveError, Degenerate) as error:
+            failed.append((name, error))
+    if not drawings:
+        raise whole_error
+    return _merged(drawings), failed
+
+
+def _parts(procedure: Procedure) -> list[tuple[str, Procedure]]:
+    """Each runway group that flies a route, with the shared tail when it
+    continues into it, and each VCOA group, as a procedure of its own."""
+    parts = []
+    for group in procedure.runway_groups:
+        if not group.legs or group.graphic:
+            continue
+        tail = procedure.shared_tail if isinstance(group.legs[-1], Thence) else None
+        part = dataclasses.replace(
+            procedure, runway_groups=(group,), shared_tail=tail, vcoa=()
+        )
+        parts.append((_runways_part(group.runways), part))
+    for vcoa in procedure.vcoa:
+        part = dataclasses.replace(
+            procedure, runway_groups=(), shared_tail=None, vcoa=(vcoa,)
+        )
+        parts.append((VCOA_PART, part))
+    return parts
+
+
+def _merged(drawings: list[AirportDrawing]) -> AirportDrawing:
+    """One drawing of every part's shapes, keeping one of any that coincide:
+    parts sharing a tail each draw it."""
+    seen: set = set()
+    shapes: list[Polyline | Label] = []
+    for drawing in drawings:
+        for shape in drawing.shapes:
+            key = (shape.style, shape.points) if isinstance(shape, Polyline) else shape
+            if key not in seen:
+                seen.add(key)
+                shapes.append(shape)
+    return dataclasses.replace(drawings[0], shapes=tuple(shapes))
+
+
+def _with_not_drawn_label(drawing: AirportDrawing, parts: list[str]) -> AirportDrawing:
+    """Name the parts left undrawn just south of the airport, so a missing
+    line is not read as a runway without an ODP."""
+    text = f"Not drawn: {', '.join(dict.fromkeys(parts))}"
+    at = destination(drawing.position, 180.0, NOT_DRAWN_LABEL_OFFSET_NM)
+    return dataclasses.replace(drawing, shapes=(*drawing.shapes, Label(text, at)))
+
+
+def _runways_part(runways: tuple[str, ...]) -> str:
+    """``RWY 11`` or ``RWY 16L/16R``; ``other runways`` when none was read."""
+    return f"RWY {'/'.join(runways)}" if runways else UNNAMED_PART
+
+
+def _unparsed_part(unparsed: Unparsed) -> str:
+    return VCOA_PART if unparsed.vcoa else _runways_part(unparsed.runways)
 
 
 def _finding(
@@ -259,7 +365,10 @@ def _finding(
     lid: str,
     raw: Sections,
     options: BuildOptions,
+    part: str | None = None,
 ) -> Finding:
+    """The finding for `error`; `part` names the runways or VCOA it kept
+    from being drawn when the rest of the procedure was."""
     kind, signature = _kind_and_signature(error)
     return Finding(
         kind=kind,
@@ -268,7 +377,7 @@ def _finding(
         cycle=options.cycle.iso,
         amendment=raw.amendment,
         verbatim_text="\n".join(filter(None, (raw.departure_procedure, raw.vcoa))),
-        detail=error.detail,
+        detail=f"{part}: {error.detail}" if part else error.detail,
     )
 
 

@@ -9,6 +9,7 @@ from odp_kml.grammar import (
     ParseError,
     parse_departure_procedure,
     parse_procedure,
+    parse_procedure_in_part,
     parse_vcoa,
 )
 from odp_kml.procedure import (
@@ -952,3 +953,90 @@ def test_golden_set_parses_to_its_reviewed_ast_or_is_refused(path):
         return
 
     assert parsed == from_dict(golden["procedure"])
+
+
+def sections_of(departure_procedure, vcoa=None):
+    return Sections(
+        amendment=None,
+        takeoff_minimums=None,
+        departure_procedure=departure_procedure,
+        vcoa=vcoa,
+        obstacle_notes=None,
+        dva=None,
+    )
+
+
+def read_in_part(departure_procedure, vcoa=None):
+    procedure, unparsed = parse_procedure_in_part(
+        sections_of(departure_procedure, vcoa), airport="XXX"
+    )
+    return procedure, [(u.runways, u.error.signature, u.vcoa) for u in unparsed]
+
+
+HEADING_150 = RunwayGroup(("15",), (ClimbHeading(150, to(5000)), ProceedOnCourse()))
+
+
+def test_in_part_keeps_the_runways_it_reads():
+    text = (
+        "Rwy 6, climb banana.\nRwy 15, climb heading 150° to 5000 before proceeding "
+        "on course."
+    )
+
+    procedure, unparsed = read_in_part(text)
+
+    assert procedure.runway_groups == (HEADING_150,)
+    assert unparsed == [(("6",), 'unmatched phrase "banana. rwy <n>"', False)]
+    with pytest.raises(ParseError):
+        parse_procedure(sections_of(text), airport="XXX")
+
+
+@pytest.mark.parametrize(
+    ("text", "dropped"),
+    [
+        pytest.param(
+            "Rwy 1, climb direct ABC VOR, thence...\n"
+            "Rwy 2, climb direct ABC VOR, thence...\n"
+            "Rwy 15, climb heading 150° to 5000 before proceeding on course.\n"
+            "All aircraft banana.",
+            [("1",), ("2",), ("15",)],
+            id="thence into an all-aircraft tail",
+        ),
+        pytest.param(
+            "Rwy 1, climb direct ABC VOR.\n"
+            "Rwy 15, climb heading 150° to 5000 before proceeding on course.\n"
+            "All aircraft banana.",
+            [("1",), ("15",)],
+            id="every runway into an all-aircraft tail",
+        ),
+    ],
+)
+def test_in_part_drops_the_runways_that_continue_into_an_unread_tail(text, dropped):
+    procedure, unparsed = read_in_part(text)
+
+    kept = [group.runways for group in procedure.runway_groups]
+    assert (procedure.shared_tail, [runways for runways, _, _ in unparsed]) == (
+        None,
+        dropped,
+    )
+    assert not set(kept) & set(dropped)
+
+
+def test_in_part_never_leaves_text_after_the_tail_unread():
+    text = (
+        "All aircraft, climbing right turn direct EHF VORTAC. Aircraft departing EHF "
+        "R-180 CW R-350 climb on course."
+    )
+
+    procedure, unparsed = read_in_part(text)
+
+    assert (procedure.runway_groups, procedure.shared_tail) == ((), None)
+    assert [runways for runways, _, _ in unparsed] == [()]
+
+
+def test_in_part_keeps_the_procedure_when_the_vcoa_section_is_unread():
+    procedure, unparsed = read_in_part(
+        "Rwy 15, climb heading 150° to 5000 before proceeding on course.", "Banana."
+    )
+
+    assert (procedure.runway_groups, procedure.vcoa) == ((HEADING_150,), ())
+    assert [(runways, vcoa) for runways, _, vcoa in unparsed] == [((), True)]

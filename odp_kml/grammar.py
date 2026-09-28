@@ -42,6 +42,19 @@ from .sections import Sections
 from .tokens import ParseError, Token, is_ident_word
 
 
+@dataclasses.dataclass(frozen=True)
+class Unparsed:
+    """Text for some runways that the grammar could not read.
+
+    `runways` are those its runway header named, empty when it named none
+    the grammar could read; `vcoa` marks the VCOA section.
+    """
+
+    runways: tuple[str, ...]
+    error: ParseError
+    vcoa: bool = False
+
+
 def parse_departure_procedure(
     text: str, *, airport: str, amendment: str | None
 ) -> Procedure:
@@ -51,13 +64,21 @@ def parse_departure_procedure(
     conditions: cross ...") becomes one of the procedure's VCOA groups.
     Raises `ParseError` unless every token is consumed by a grammar rule.
     """
-    parser = _Parser(text)
-    runway_groups, shared_tail = parser.departure_procedure()
-    return _carry_radial_senses(
-        Procedure(
-            airport, amendment, runway_groups, shared_tail, vcoa=parser.inline_vcoa
-        )
+    procedure, _ = _parse_departure_procedure(
+        text, airport=airport, amendment=amendment, in_part=False
     )
+    return procedure
+
+
+def _parse_departure_procedure(
+    text: str, *, airport: str, amendment: str | None, in_part: bool
+) -> tuple[Procedure, list[Unparsed]]:
+    parser = _Parser(text, in_part=in_part)
+    runway_groups, shared_tail = parser.departure_procedure()
+    procedure = Procedure(
+        airport, amendment, runway_groups, shared_tail, vcoa=parser.inline_vcoa
+    )
+    return _carry_radial_senses(procedure), parser.unparsed
 
 
 def parse_vcoa(
@@ -84,30 +105,57 @@ def parse_procedure(sections: Sections, *, airport: str) -> Procedure:
     only a VCOA section has no runway groups. Raises `ParseError` when
     neither section is present or either fails to parse.
     """
-    procedure = _departure_procedure(sections, airport)
+    procedure, _ = _parse_procedure(sections, airport, in_part=False)
+    return procedure
+
+
+def parse_procedure_in_part(
+    sections: Sections, *, airport: str
+) -> tuple[Procedure, list[Unparsed]]:
+    """`parse_procedure`, keeping every runway group the grammar can read.
+
+    A runway group, the shared tail or the VCOA section that fails to parse
+    is left out and reported as `Unparsed` rather than failing the whole
+    procedure; so are the groups that continue into a tail that failed.
+    Raises `ParseError` only when neither section is present.
+    """
+    return _parse_procedure(sections, airport, in_part=True)
+
+
+def _parse_procedure(
+    sections: Sections, airport: str, *, in_part: bool
+) -> tuple[Procedure, list[Unparsed]]:
+    procedure, unparsed = _departure_procedure(sections, airport, in_part=in_part)
     if sections.vcoa is None:
-        return procedure
-    vcoa = parse_vcoa(normalize(sections.vcoa), known_navaids=_named_navaids(procedure))
+        return procedure, unparsed
+    known = _named_navaids(procedure)
+    try:
+        vcoa = parse_vcoa(normalize(sections.vcoa), known_navaids=known)
+    except ParseError as error:
+        if not in_part:
+            raise
+        return procedure, [*unparsed, Unparsed((), error, vcoa=True)]
     repeated = set(procedure.vcoa)
-    return _carry_radial_senses(
-        dataclasses.replace(
-            procedure,
-            vcoa=procedure.vcoa + tuple(g for g in vcoa if g not in repeated),
-        )
+    procedure = dataclasses.replace(
+        procedure, vcoa=procedure.vcoa + tuple(g for g in vcoa if g not in repeated)
     )
+    return _carry_radial_senses(procedure), unparsed
 
 
-def _departure_procedure(sections: Sections, airport: str) -> Procedure:
+def _departure_procedure(
+    sections: Sections, airport: str, *, in_part: bool
+) -> tuple[Procedure, list[Unparsed]]:
     """The DEPARTURE PROCEDURE section's procedure, or an empty one beside a VCOA."""
     if sections.departure_procedure is not None:
-        return parse_departure_procedure(
+        return _parse_departure_procedure(
             normalize(sections.departure_procedure),
             airport=airport,
             amendment=sections.amendment,
+            in_part=in_part,
         )
     if sections.vcoa is None:
         raise ParseError("no departure procedure section")
-    return Procedure(airport, sections.amendment, (), None, vcoa=())
+    return Procedure(airport, sections.amendment, (), None, vcoa=()), []
 
 
 def _carry_radial_senses(procedure: Procedure) -> Procedure:
@@ -193,9 +241,17 @@ _AIRPORT_NAME_CONNECTORS = frozenset({"at", "du"})
 class _Parser(LegParser):
     """The procedure-level rules: runway groups, the shared tail, and VCOA."""
 
-    def __init__(self, text: str, known_navaids: Mapping[str, NavaidRef] | None = None):
+    def __init__(
+        self,
+        text: str,
+        known_navaids: Mapping[str, NavaidRef] | None = None,
+        *,
+        in_part: bool = False,
+    ):
         super().__init__(text, known_navaids)
         self._inline_vcoa: list[VcoaGroup] = []
+        self._in_part = in_part
+        self.unparsed: list[Unparsed] = []
 
     @property
     def inline_vcoa(self) -> tuple[VcoaGroup, ...]:
@@ -217,24 +273,134 @@ class _Parser(LegParser):
         if self._peek_graphic_departure():
             groups.append(RunwayGroup((), (self._graphic_departure(),)))
         shared_tail = None
+        tail_error = None
         while not self._at_end():
-            if self._peek(*VISUAL_CLIMB):
-                raise self._error("visual climb without a runway")
-            if self._starts_shared_tail():
-                shared_tail, for_all = self._shared_tail(groups)
-                if for_all:
-                    groups = [_continued_to_tail(group) for group in groups]
-                break
-            groups.extend(self._runway_groups())
-            while self._peek_continuation() and self._may_continue(groups):
-                last = groups[-1]
-                groups[-1] = dataclasses.replace(
-                    last, legs=last.legs + self._continuation()
-                )
+            start, kept, inline = self._index, len(groups), len(self._inline_vcoa)
+            try:
+                if self._peek(*VISUAL_CLIMB):
+                    raise self._error("visual climb without a runway")
+                if self._starts_shared_tail():
+                    shared_tail, for_all = self._shared_tail(groups)
+                    if for_all:
+                        groups = [_continued_to_tail(group) for group in groups]
+                    break
+                groups.extend(self._runway_groups())
+                while self._peek_continuation() and self._may_continue(groups):
+                    last = groups[-1]
+                    groups[-1] = dataclasses.replace(
+                        last, legs=last.legs + self._continuation()
+                    )
+            except ParseError as error:
+                if not self._in_part:
+                    raise
+                del groups[kept:]
+                del self._inline_vcoa[inline:]
+                if self._starts_shared_tail_at(start):
+                    tail_error = error
+                    if self._names_all_aircraft_at(start):
+                        groups = [_continued_to_tail(group) for group in groups]
+                    break
+                self.unparsed.append(Unparsed(self._runways_at(start), error))
+                self._skip_to_next_group(start)
+        if self._in_part:
+            if tail_error is None and not self._at_end():
+                tail_error, shared_tail = self._unmatched(), None
+            return self._readable(groups, shared_tail, tail_error)
         self._expect_end()
         self._require_tail_for_thence(groups, shared_tail)
         _require_routes_for_turns(groups, shared_tail)
         return tuple(groups), shared_tail
+
+    def _readable(
+        self,
+        groups: list[RunwayGroup],
+        shared_tail: tuple[Leg, ...] | None,
+        tail_error: ParseError | None,
+    ) -> tuple[tuple[RunwayGroup, ...], tuple[Leg, ...] | None]:
+        """The groups whose whole route was read: a group continuing into a
+        tail that failed, or into none, or ending in a turn with no route
+        of its own and no tail to take one from, joins `unparsed`."""
+        if shared_tail is not None and _ends_with_thence(shared_tail):
+            tail_error = ParseError('"thence" inside the shared tail')
+            shared_tail = None
+        if tail_error is not None and not any(
+            _ends_with_thence(group.legs) for group in groups
+        ):
+            self.unparsed.append(Unparsed((), tail_error))
+        readable = []
+        for group in groups:
+            error = None
+            if _ends_with_thence(group.legs) and shared_tail is None:
+                error = tail_error or ParseError('"thence" without a shared tail')
+            else:
+                try:
+                    _require_routes_for_turns([group], shared_tail)
+                except ParseError as routeless:
+                    error = routeless
+            if error is None:
+                readable.append(group)
+            else:
+                self.unparsed.append(Unparsed(group.runways, error))
+        return tuple(readable), shared_tail
+
+    def _runways_at(self, index: int) -> tuple[str, ...]:
+        """The runways a header at token `index` names, or none if it names
+        none the grammar can read."""
+        resume = self._index
+        self._index = index
+        try:
+            return self._runway_header()
+        except ParseError:
+            return ()
+        finally:
+            self._index = resume
+
+    def _names_all_aircraft_at(self, index: int) -> bool:
+        """Whether the tail at token `index` is for "all aircraft", which
+        every flown runway group continues into."""
+        words = [token.lower for token in self._tokens[index : index + 4]]
+        while words and words[0] in ("...", "thence"):
+            words.pop(0)
+        return words[:2] == ["all", "aircraft"]
+
+    def _starts_shared_tail_at(self, index: int) -> bool:
+        resume = self._index
+        self._index = index
+        try:
+            return self._starts_shared_tail()
+        finally:
+            self._index = resume
+
+    def _skip_to_next_group(self, start: int) -> None:
+        """Resume at the next runway header or shared tail that opens a line
+        or sentence after `start`, or at the end."""
+        for index in range(start + 1, len(self._tokens)):
+            if self._opens_group(index):
+                self._index = index
+                return
+        self._index = len(self._tokens)
+
+    def _opens_group(self, index: int) -> bool:
+        token = self._tokens[index]
+        previous = self._tokens[index - 1]
+        at_boundary = (
+            previous.text in (".", "...", ":", ";")
+            or "\n" in (self._text[previous.end : token.start])
+        )
+        following = self._tokens[index + 1] if index + 1 < len(self._tokens) else None
+        return at_boundary and (
+            (
+                token.lower in ("rwy", "rwys")
+                and following is not None
+                and bool(_RUNWAY.fullmatch(following.text))
+            )
+            or (token.text == "..." and "\n" in self._text[previous.end : token.start])
+            or (
+                token.lower == "all"
+                and following is not None
+                and following.lower in ("aircraft", "rwys", "runways")
+            )
+        )
 
     def _peek_graphic_departure(self) -> bool:
         return (self._peek("use") or self._peek("see")) and any(
