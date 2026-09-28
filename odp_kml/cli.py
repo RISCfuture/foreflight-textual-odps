@@ -154,7 +154,9 @@ def _build_odp_layer(
 ) -> None:
     result = build(_build_options(args, cycle))
     out = _output_path(args, ODP_LAYER)
-    _write_layer(result.drawings, out, ODP_LAYER, cycle, args.kml_only)
+    _write_layer(
+        [*result.drawings, *result.markers], out, ODP_LAYER, cycle, args.kml_only
+    )
     _write_report(result, args.report or out.with_name("report.json"))
     if args.dump_sections is not None:
         _write_json(result.sections_dump, args.dump_sections)

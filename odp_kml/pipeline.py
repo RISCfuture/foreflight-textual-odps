@@ -46,6 +46,7 @@ _ICAO_LENGTH = 4
 VCOA_PART = "VCOA"
 UNNAMED_PART = "other runways"
 NOT_DRAWN_LABEL_OFFSET_NM = 1.0
+NOT_SHOWN_LABEL = "ODP NOT SHOWN"
 
 type SectionsEntry = dict[str, str | None]
 
@@ -63,23 +64,27 @@ class BuildOptions:
 
 @dataclasses.dataclass
 class BuildResult:
-    """Drawings sorted by LID, the build report, and each block's sections."""
+    """Drawings sorted by LID, the build report, each block's sections, and
+    the "ODP NOT SHOWN" markers for airports with text none of which drew."""
 
     drawings: list[AirportDrawing]
     report: Report
     sections_dump: list[SectionsEntry]
+    markers: list[AirportDrawing] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass(frozen=True)
 class BlockOutcome:
     """One airport block's sections entry, its drawing (of all or part of the
     procedure) and its findings, or `graphic_only` when every runway flies a
-    charted DP instead."""
+    charted DP instead. `marker` labels an airport whose procedure could not
+    be drawn at all."""
 
     sections: SectionsEntry
     drawing: AirportDrawing | None = None
     findings: tuple[Finding, ...] = ()
     graphic_only: bool = False
+    marker: AirportDrawing | None = None
 
 
 def build(options: BuildOptions) -> BuildResult:
@@ -106,17 +111,23 @@ def build_from_sources(
     drawings = assign_palettes(
         outcome.drawing for outcome in outcomes if outcome.drawing
     )
+    markers = sorted(
+        (outcome.marker for outcome in outcomes if outcome.marker),
+        key=lambda marker: marker.lid,
+    )
     findings += [finding for outcome in outcomes for finding in outcome.findings]
     report = Report(
         cycle=options.cycle.iso,
         airports_with_text=len(outcomes),
         drawn=len(drawings),
         findings=findings,
-        label_count=_label_count(drawings),
+        label_count=_label_count([*drawings, *markers]),
         graphic_only=sum(outcome.graphic_only for outcome in outcomes),
         partial=sum(bool(outcome.drawing and outcome.findings) for outcome in outcomes),
     )
-    return BuildResult(drawings, report, [outcome.sections for outcome in outcomes])
+    return BuildResult(
+        drawings, report, [outcome.sections for outcome in outcomes], markers
+    )
 
 
 def process_block(
@@ -140,7 +151,7 @@ def process_block(
     try:
         procedure, unparsed = parse_procedure_in_part(sections, airport=block.lid)
     except ParseError as error:
-        return BlockOutcome(entry, findings=(_finding(error, block.lid, raw, options),))
+        return _not_drawn(entry, _finding(error, block.lid, raw, options), nasr_data)
     if procedure.graphic_only and not unparsed:
         return BlockOutcome(entry, graphic_only=True)
     unread = [(_unparsed_part(part), part.error) for part in unparsed]
@@ -155,13 +166,34 @@ def process_block(
         return BlockOutcome(entry)
     if drawing is None:
         _, error = failed[0]
-        return BlockOutcome(entry, findings=(_finding(error, block.lid, raw, options),))
+        return _not_drawn(entry, _finding(error, block.lid, raw, options), nasr_data)
     findings = tuple(
         _finding(error, block.lid, raw, options, part) for part, error in failed
     )
     if failed:
-        drawing = _with_not_drawn_label(drawing, [part for part, _ in failed])
+        drawing = _with_not_shown_label(drawing, [part for part, _ in failed])
     return BlockOutcome(entry, drawing=drawing, findings=findings)
+
+
+def _not_drawn(
+    entry: SectionsEntry, finding: Finding, nasr_data: nasr.NasrData
+) -> BlockOutcome:
+    """The outcome of a procedure none of which could be drawn: its finding,
+    and an "ODP NOT SHOWN" label at the airport so its empty map is not read
+    as an airport without an ODP. An airport missing from NASR has nowhere to
+    put the label."""
+    try:
+        airport = find_airport(nasr_data, finding.airport)
+    except ResolveError:
+        return BlockOutcome(entry, findings=(finding,))
+    at = destination(airport.position, 180.0, NOT_DRAWN_LABEL_OFFSET_NM)
+    marker = AirportDrawing(
+        airport.lid,
+        airport.name,
+        (Label(NOT_SHOWN_LABEL, at),),
+        position=airport.position,
+    )
+    return BlockOutcome(entry, findings=(finding,), marker=marker)
 
 
 def find_airport(data: nasr.NasrData, ident: str) -> nasr.Airport:
@@ -343,10 +375,10 @@ def _merged(drawings: list[AirportDrawing]) -> AirportDrawing:
     return dataclasses.replace(drawings[0], shapes=tuple(shapes))
 
 
-def _with_not_drawn_label(drawing: AirportDrawing, parts: list[str]) -> AirportDrawing:
+def _with_not_shown_label(drawing: AirportDrawing, parts: list[str]) -> AirportDrawing:
     """Name the parts left undrawn just south of the airport, so a missing
     line is not read as a runway without an ODP."""
-    text = f"Not drawn: {', '.join(dict.fromkeys(parts))}"
+    text = f"{NOT_SHOWN_LABEL}: {', '.join(dict.fromkeys(parts))}"
     at = destination(drawing.position, 180.0, NOT_DRAWN_LABEL_OFFSET_NM)
     return dataclasses.replace(drawing, shapes=(*drawing.shapes, Label(text, at)))
 

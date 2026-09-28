@@ -9,8 +9,9 @@ ForeFlight content pack that draws FAA textual obstacle departure procedures
   route (with any shared tail it flies) or VCOA at a time. Any parse
   failure, unresolved reference, or degenerate geometry in a route becomes a
   `Finding` and is reported (and filed as a GitHub issue by CI); that route
-  is never drawn, and the airport's other routes are drawn beside a
-  "Not drawn: RWY …" label. A route is never drawn truncated.
+  is never drawn, and the airport's other routes are drawn beside an
+  "ODP NOT SHOWN: RWY …" label; an airport none of whose routes draw gets
+  an "ODP NOT SHOWN" label alone. A route is never drawn truncated.
 - The grammar has no "skip unknown words" rule.
 - No machine learning in the runtime pipeline. `tools/draft_golden.py` is an
   offline aid for drafting test fixtures that a human reviews.

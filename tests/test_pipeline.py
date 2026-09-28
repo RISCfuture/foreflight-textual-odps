@@ -139,9 +139,29 @@ class TestDrawings:
         (finding,) = outcome.findings
         assert finding.kind == Kind.PARSE_FAILED
         assert finding.detail.startswith("RWY 6: banana.")
-        assert "Not drawn: RWY 6" in label_texts(outcome.drawing)
+        assert "ODP NOT SHOWN: RWY 6" in label_texts(outcome.drawing)
         full = process_block(tph_block(), fixture_nasr(), options).drawing
         assert set(full.shapes) < set(outcome.drawing.shapes)
+
+    def test_airport_whose_procedure_draws_nowhere_is_marked_not_shown(self):
+        unknown = dataclasses.replace(
+            tph_block(), text=tph_block().text.replace("(TPH) VORTAC", "(ZZZ) VORTAC")
+        )
+        options = BuildOptions(cycle=CYCLE, cache_dir=Path("unused"))
+
+        outcome = process_block(unknown, fixture_nasr(), options)
+
+        assert outcome.drawing is None
+        assert [finding.signature for finding in outcome.findings] == [
+            "navaid not found"
+        ]
+        (label,) = outcome.marker.shapes
+        assert label.text == "ODP NOT SHOWN"
+        assert label.at.lat < outcome.marker.position.lat
+        assert outcome.marker.lid == "TPH"
+
+    def test_airport_missing_from_nasr_has_no_marker(self, result):
+        assert "JTC" not in [marker.lid for marker in result.markers]
 
 
 class TestFindings:

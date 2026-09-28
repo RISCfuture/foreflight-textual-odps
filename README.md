@@ -88,8 +88,10 @@ Certainty is judged one runway route at a time: each runway's route,
 together with the shared tail it continues into, and each VCOA. When some
 of an airport's routes are certain and others are not, the certain ones
 are drawn and a label just south of the airport names the rest
-(`Not drawn: RWY 17L/17R, VCOA`), so a missing line is never read as a
-runway without an ODP. A route is never drawn in part, and the report
+(`ODP NOT SHOWN: RWY 17L/17R, VCOA`), so a missing line is never read as a
+runway without an ODP. An airport whose ODP text draws nothing at all gets
+the label alone (`ODP NOT SHOWN`), so its empty map is never read as an
+airport without an ODP. A route is never drawn in part, and the report
 counts airports drawn in part separately.
 
 This pack is an educational aid, not a tool for navigation. The published
