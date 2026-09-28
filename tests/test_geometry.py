@@ -401,3 +401,15 @@ def test_arrowhead_stands_back_from_the_leg_end():
     tip = xy(arrow.points[1])
     assert distance(tip, end) == pytest.approx(ARROW_SETBACK_NM, abs=1e-6)
     assert tip[1] < end[1]
+
+
+def test_identical_shapes_are_drawn_once():
+    """Two runways' VCOA groups circle the same airport: one label, not two."""
+    groups = tuple(
+        VcoaGroup((rwy,), None, 7000, (ProceedOnCourse(),)) for rwy in ("36", "18")
+    )
+
+    drawing = draw(resolved(vcoa=groups))
+
+    assert len(labels(drawing)) == 1
+    assert len(drawing.shapes) == len(set(drawing.shapes))

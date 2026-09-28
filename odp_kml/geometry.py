@@ -171,13 +171,20 @@ class _Context:
 
     def polyline(self, name: str, style: Style, points: list[Vec]) -> None:
         latlons = tuple(self.plane.to_latlon(*p) for p in points)
-        self.shapes.append(Polyline(name, style, latlons))
+        self._emit(Polyline(name, style, latlons))
 
     def arc(self, centre: Vec, radius: float, start: float, sweep: float) -> list[Vec]:
         return arc(centre, radius, start, sweep, self.params.arc_step_deg)
 
     def label(self, text: str, p: Vec) -> None:
-        self.shapes.append(Label(text, self.plane.to_latlon(*p)))
+        self._emit(Label(text, self.plane.to_latlon(*p)))
+
+    def _emit(self, shape: Polyline | Label) -> None:
+        """Keep one of identical shapes: routes that reach the same hold draw
+        it identically, and VCOA groups for several runways label the same
+        circle at the same point."""
+        if shape not in self.shapes:
+            self.shapes.append(shape)
 
 
 @dataclasses.dataclass
