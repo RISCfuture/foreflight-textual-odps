@@ -1070,3 +1070,73 @@ def test_in_part_keeps_the_procedure_when_the_vcoa_section_is_unread():
 
     assert (procedure.runway_groups, procedure.vcoa) == ((HEADING_150,), ())
     assert [(runways, vcoa) for runways, _, vcoa in unparsed] == [((), True)]
+
+
+HEADING_010 = RunwayGroup(("1",), (ClimbHeading(10, to(5000)), ProceedOnCourse()))
+ROUTE_1 = "Rwy 1, climb heading 010° to 5000 before proceeding on course."
+ROUTE_19 = "Rwy 19, climb heading 190° to 5000 before proceeding on course."
+
+
+@pytest.mark.parametrize(
+    ("text", "kept", "withheld"),
+    [
+        pytest.param(
+            f"{ROUTE_1}\n{ROUTE_19}\nAircraft departing ABC R-160 CW R-329 climb on "
+            "course.",
+            (),
+            [("1",), ("19",)],
+            id="after the last runway, every route",
+        ),
+        pytest.param(
+            f"{ROUTE_1} Maintain 5000 or as assigned.\n{ROUTE_19}",
+            (RunwayGroup(("19",), (ClimbHeading(190, to(5000)), ProceedOnCourse())),),
+            [("1",)],
+            id="between runways, the one before",
+        ),
+        pytest.param(
+            f"Diverse departures NA.\n{ROUTE_1}",
+            (HEADING_010,),
+            [()],
+            id="before any runway, none",
+        ),
+    ],
+)
+def test_unreadable_sentence_naming_no_runway_withholds_routes_it_may_modify(
+    text, kept, withheld
+):
+    procedure, unparsed = read_in_part(text)
+
+    assert procedure.runway_groups == kept
+    assert [runways for runways, _, _ in unparsed] == withheld
+
+
+def test_sentence_repeated_for_each_runway_joins_the_last_one_too():
+    hold = (
+        "Continue climb in RSK VORTAC holding pattern (hold east, left turn, 252° "
+        "inbound) to 9000 before proceeding on course."
+    )
+    text = f"Rwy 5, climb direct RSK VORTAC. {hold}\nRwy 7, climb direct RSK VORTAC. {hold}"
+
+    groups = parse_departure_procedure(
+        text, airport="FMN", amendment=None
+    ).runway_groups
+
+    assert [type(group.legs[-2]) for group in groups] == [ClimbInHold, ClimbInHold]
+
+
+def test_notify_atc_sentence_reads_without_its_comma():
+    text = (
+        "Rwy 36, for climb in visual conditions: cross Test airport at or above 1700 "
+        "before proceeding on course. When executing the VCOA notify ATC prior to "
+        "departure."
+    )
+
+    assert parse_departure_procedure(text, airport="X", amendment=None).vcoa
+
+
+def test_unreadable_trailing_sentence_withholds_heading_ranges_too():
+    text = "Rwy 2, climb on heading between 040° CW to 200° from DER. Banana."
+
+    procedure, unparsed = read_in_part(text)
+
+    assert (procedure.runway_groups, [r for r, _, _ in unparsed]) == ((), [("2",)])

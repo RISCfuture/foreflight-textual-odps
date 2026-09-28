@@ -252,6 +252,7 @@ class _Parser(LegParser):
         self._inline_vcoa: list[VcoaGroup] = []
         self._in_part = in_part
         self.unparsed: list[Unparsed] = []
+        self._continuations: set[str] = set()
 
     @property
     def inline_vcoa(self) -> tuple[VcoaGroup, ...]:
@@ -289,6 +290,7 @@ class _Parser(LegParser):
                     self._peek_continuation() or self._peek_speed_sentence()
                 ) and self._may_continue(groups):
                     last = groups[-1]
+                    self._continuations.add(self._sentence())
                     if self._peek_speed_sentence():
                         legs = self._with_speed_sentence(last.legs)
                     else:
@@ -304,7 +306,13 @@ class _Parser(LegParser):
                     if self._names_all_aircraft_at(start):
                         groups = [_continued_to_tail(group) for group in groups]
                     break
-                self.unparsed.append(Unparsed(self._runways_at(start), error))
+                runways = self._runways_at(start)
+                if runways or not any(map(_withholdable, groups)):
+                    self.unparsed.append(Unparsed(runways, error))
+                else:
+                    self._withhold(
+                        groups, error, trailing=not self._header_after(start)
+                    )
                 self._skip_to_next_group(start)
         if self._in_part:
             if tail_error is None and not self._at_end():
@@ -358,6 +366,31 @@ class _Parser(LegParser):
             return ()
         finally:
             self._index = resume
+
+    def _withhold(
+        self, groups: list[RunwayGroup], error: ParseError, *, trailing: bool
+    ) -> None:
+        """Leave out the routes an unreadable sentence naming no runway may
+        modify: after the last runway header, every route and the visual
+        climbs written into the section; between headers, the runways just
+        before it. A route is never drawn without a sentence it may have."""
+        flown = [group for group in groups if _withholdable(group)]
+        runways = None if trailing else flown[-1].runways
+        for group in flown:
+            if trailing or group.runways == runways:
+                groups.remove(group)
+                self.unparsed.append(Unparsed(group.runways, error))
+        for vcoa in list(self._inline_vcoa):
+            if trailing or vcoa.runways == runways:
+                self._inline_vcoa.remove(vcoa)
+                self.unparsed.append(Unparsed(vcoa.runways, error, vcoa=True))
+
+    def _header_after(self, index: int) -> bool:
+        """Whether a runway header opens a line or sentence after `index`."""
+        return any(
+            self._tokens[later].lower in ("rwy", "rwys") and self._opens_group(later)
+            for later in range(index + 1, len(self._tokens))
+        )
 
     def _names_all_aircraft_at(self, index: int) -> bool:
         """Whether the tail at token `index` is for "all aircraft", which
@@ -474,9 +507,10 @@ class _Parser(LegParser):
         """Whether a new sentence continues the last runway group's route.
 
         It does when another runway header follows it, when that is the only
-        route, or when every route ends at the same fix it starts from; after
-        the last of several routes that end apart it could mean all of them,
-        so it is left unread.
+        route, when every route ends at the same fix it starts from, or when
+        it repeats word for word a sentence read for an earlier runway; after
+        the last of several routes that end apart it could otherwise mean all
+        of them, so it is left unread.
         """
         last = groups[-1] if groups else None
         if last is None or not _flies_route(last) or _ends_with_thence(last.legs):
@@ -485,7 +519,23 @@ class _Parser(LegParser):
             return True
         routes = [group for group in groups if _flies_route(group)]
         ends = {end_fix(group.legs[-1]) for group in routes}
-        return len(routes) == 1 or (len(ends) == 1 and None not in ends)
+        return (
+            len(routes) == 1
+            or (len(ends) == 1 and None not in ends)
+            or self._sentence() in self._continuations
+        )
+
+    def _sentence(self) -> str:
+        """The words from here to the end of the sentence, spaced as one line."""
+        end = next(
+            (
+                index
+                for index in range(self._index, len(self._tokens))
+                if self._tokens[index].text == "."
+            ),
+            len(self._tokens) - 1,
+        )
+        return " ".join(token.text for token in self._tokens[self._index : end + 1])
 
     def _later_runway_header(self) -> bool:
         return any(
@@ -757,8 +807,12 @@ class _Parser(LegParser):
         )
 
     def _notify_atc(self) -> None:
-        """notify-atc := "When executing VCOA, notify ATC prior to departure." """
-        if self._accept("when", "executing", "vcoa", ","):
+        """notify-atc := "When executing" ["the"] "VCOA" [","] "notify ATC prior
+        to departure." """
+        if self._accept("when", "executing"):
+            self._accept("the")
+            self._expect("vcoa")
+            self._accept(",")
             self._expect("notify", "atc", "prior", "to", "departure", ".")
 
 
@@ -771,6 +825,11 @@ def _all_flown_end_with_thence(groups: list[RunwayGroup]) -> bool:
         if group.legs and not group.graphic and not _has_heading_range(group)
     ]
     return bool(flown) and all(_ends_with_thence(group.legs) for group in flown)
+
+
+def _withholdable(group: RunwayGroup) -> bool:
+    """Whether the group draws anything a later sentence could change."""
+    return bool(group.legs) and not group.graphic
 
 
 def _flies_route(group: RunwayGroup) -> bool:
