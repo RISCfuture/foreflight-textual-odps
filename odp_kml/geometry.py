@@ -13,12 +13,14 @@ import math
 
 from .geo import LocalPlane, heading_to_unit, magnetic_to_true
 from .labels import (
+    dme_label,
     format_altitude,
     heading_label,
     heading_phrase,
     hold_label,
-    radial_label,
+    navaid_radial_label,
     radial_phrase,
+    speed_label,
     turn_phrase,
     vcoa_label,
 )
@@ -49,6 +51,7 @@ from .procedure import (
     ProceedOnCourse,
     Radial,
     RunwayGroup,
+    SpeedRestriction,
     Thence,
     Turn,
     VcoaGroup,
@@ -337,7 +340,26 @@ def _turn_start_nm(gradient: float) -> float:
 
 def _draw_legs(pen: _Pen, legs: tuple[Leg, ...]) -> None:
     for leg in legs:
+        start, course = pen.at, pen.course
         _draw_leg(pen, leg, None)
+        if speed := _speed_restriction(leg):
+            _label_speed(pen.ctx, speed, start, course)
+
+
+def _speed_restriction(leg: Leg) -> SpeedRestriction | None:
+    if isinstance(leg, ClimbingTurn):
+        return leg.then.speed
+    return getattr(leg, "speed", None)
+
+
+def _label_speed(
+    ctx: _Context, speed: SpeedRestriction, start: Vec, course: float
+) -> None:
+    """Label a speed limit where its leg begins, left of the course so it
+    clears the heading label on the right."""
+    ctx.label(
+        speed_label(speed), offset(start, course - 90, ctx.params.label_offset_nm)
+    )
 
 
 def _draw_leg(pen: _Pen, leg: Leg, direction: Turn | None) -> None:
@@ -380,6 +402,7 @@ def _climb_heading(pen: _Pen, leg: ClimbHeading, direction: Turn | None) -> None
             if len(points) > 1:
                 ctx.polyline(name, Style.ROUTE, points)
                 _arrowhead(ctx, name, Style.ROUTE, pen.at, pen.course)
+            _offset_label(pen, heading_label(leg.heading), pen.at, side)
             return
         case Altitude():
             _require_climb(pen, leg.until)
@@ -462,7 +485,7 @@ def _heading_and_radial(
     _require_intercept_angle(heading, radial_course, leg)
     name = _leg_name(pen, direction, f"heading {leg.heading:03d} to intercept ")
     name += radial_phrase(leg)
-    points, _ = pen.turn_onto(heading, direction)
+    points, heading_side = pen.turn_onto(heading, direction)
     track = _tracking_course(leg, radial_course)
     corner = _intercept(pen.at, heading, ctx.xy(leg.navaid.ident), radial_course, leg)
     turn = _signed_turn(heading, track, None)
@@ -471,7 +494,10 @@ def _heading_and_radial(
         raise Degenerate(
             "radial intercept behind", f"turn needs {lead:.2f} NM: {leg!r}"
         )
+    heading_start = pen.at
     pen.straight_to(offset(corner, heading + 180, lead))
+    heading_middle = midpoint(heading_start, pen.at)
+    _offset_label(pen, heading_label(leg.heading), heading_middle, heading_side)
     rounding, side = pen.turn_onto(track, _turn(sign(turn)))
     _track_radial(pen, leg, name, [*points, *rounding], side)
 
@@ -523,10 +549,21 @@ def _track_radial(
     pen.straight_to(end)
     ctx.polyline(name, Style.ROUTE, [*points, end])
     _arrowhead(ctx, name, Style.ROUTE, end, pen.course)
-    if isinstance(leg.until, Altitude):
-        ctx.label(format_altitude(leg.until, ctx.params.label_style), end)
+    if terminator := _terminator_label(ctx, leg.until):
+        ctx.label(terminator, end)
     far = max(joined, end, key=lambda p: distance(navaid, p))
     _draw_radial(ctx, leg, navaid, far)
+
+
+def _terminator_label(ctx: _Context, until) -> str | None:
+    """The altitude or DME distance ending a radial leg; a fix is already
+    named on ForeFlight's own chart."""
+    match until:
+        case Altitude():
+            return format_altitude(until, ctx.params.label_style)
+        case Dme():
+            return dme_label(until)
+    return None
 
 
 def _tracking_end(pen: _Pen, leg: Radial | HeadingAndRadial, navaid: Vec) -> Vec:
@@ -555,8 +592,8 @@ def _tracking_end(pen: _Pen, leg: Radial | HeadingAndRadial, navaid: Vec) -> Vec
 
 
 def _draw_radial(ctx: _Context, leg, navaid: Vec, far: Vec) -> None:
-    ident, radial = leg.navaid.ident, radial_label(leg.radial)
-    ctx.polyline(f"{ident} {radial}", Style.RADIAL, [navaid, far])
+    radial = navaid_radial_label(leg.navaid, leg.radial)
+    ctx.polyline(radial, Style.RADIAL, [navaid, far])
     anchor = midpoint(navaid, far)
     ctx.label(
         radial, offset(anchor, bearing(navaid, far) + 90, ctx.params.label_offset_nm)
@@ -611,7 +648,7 @@ def _climb_in_hold(pen: _Pen, leg: ClimbInHold) -> None:
     _arrowhead(ctx, name, Style.HOLD, fix, inbound)
     inbound_middle = offset(fix, inbound + 180, length / 2)
     label_at = offset(inbound_middle, inbound - 90 * side, ctx.params.label_offset_nm)
-    ctx.label(hold_label(leg.until, ctx.params.label_style), label_at)
+    ctx.label(hold_label(spec, leg.until, ctx.params.label_style), label_at)
     pen.at, pen.course = fix, inbound
     if isinstance(leg.until, Altitude):
         pen.base_alt_ft, pen.along_nm = leg.until.feet, 0.0

@@ -2,24 +2,30 @@
 and the human phrases that name polylines.
 
 Labels are plain text: ForeFlight renders neither combining characters nor
-rich text, so a constraint is spelled out ("at or above 9300'") rather than
-drawn with the chart's underline/overline marks."""
+rich text, so a constraint takes a precomposed sign ("≥9300'") rather than
+the chart's underline/overline marks."""
 
 from __future__ import annotations
+
+import re
 
 from .procedure import (
     Altitude,
     AltitudeKind,
     ClimbHeading,
+    Dme,
     HeadingAndRadial,
+    HoldSpec,
+    NavaidRef,
     Radial,
+    SpeedRestriction,
     Turn,
     Until,
 )
 
 PLAIN_PREFIXES = {
-    AltitudeKind.AT_OR_ABOVE: "at or above ",
-    AltitudeKind.AT_OR_BELOW: "at or below ",
+    AltitudeKind.AT_OR_ABOVE: "≥",
+    AltitudeKind.AT_OR_BELOW: "≤",
     AltitudeKind.AT: "at ",
     AltitudeKind.TO: "",
 }
@@ -32,7 +38,7 @@ FMS_SUFFIXES = {
 
 
 def format_altitude(alt: Altitude, style: str) -> str:
-    """Render an altitude spelled out ("plain": at or above 7000') or as an
+    """Render an altitude in plain text ("plain": ≥7000', ≤7000') or as an
     FMS constraint ("fms": 7000A, 7000B, 7000).
 
     A climb-to altitude (`AltitudeKind.TO`) is the bare figure in both styles.
@@ -50,8 +56,8 @@ def format_feet(feet: int, kind: AltitudeKind, style: str) -> str:
 
 
 def heading_label(magnetic: int) -> str:
-    """A heading as printed, e.g. ``077°``."""
-    return f"{magnetic:03d}°"
+    """A heading to fly, e.g. ``hdg 077°``."""
+    return f"hdg {magnetic:03d}°"
 
 
 def radial_label(radial: int) -> str:
@@ -59,11 +65,43 @@ def radial_label(radial: int) -> str:
     return f"R-{radial:03d}"
 
 
-def hold_label(until: Until | None, style: str) -> str:
-    """``Hold`` plus, in parentheses, the altitude to climb to in the hold."""
+def navaid_radial_label(navaid: NavaidRef, radial: int) -> str:
+    """A radial with the navaid it belongs to, e.g. ``SAU R-035``."""
+    return f"{navaid.ident} {radial_label(radial)}"
+
+
+def dme_label(dme: Dme) -> str:
+    """A DME distance with its navaid, e.g. ``BAM 10 DME``."""
+    return f"{dme.navaid.ident} {dme.nm:g} DME"
+
+
+def hold_label(spec: HoldSpec, until: Until | None, style: str) -> str:
+    """The hold's inbound course, turn direction in the ODP's own ``RT``/``LT``
+    abbreviation, and the altitude to climb to in it, e.g. ``Hold 246° RT
+    ≥9300'``.
+
+    ForeFlight elides long labels, so the fix (named on its own chart) and
+    the word "inbound" (implied by a hold's course) are left out.
+    """
+    label = f"Hold {spec.inbound_course:03d}° {spec.turns}T"
     if isinstance(until, Altitude):
-        return f"Hold ({format_altitude(until, style)})"
-    return "Hold"
+        label += f" {format_altitude(until, style)}"
+    return label
+
+
+REACHING_ALTITUDE = re.compile(r"reaching (\d+)(?: MSL)?", re.IGNORECASE)
+
+
+def speed_label(speed: SpeedRestriction) -> str:
+    """e.g. ``max 200 KIAS until 9000'`` for "until reaching 9000 MSL", or
+    ``max 200 KIAS until established on course``."""
+    return f"max {speed.kias} KIAS until {_speed_until(speed.until_phrase)}"
+
+
+def _speed_until(phrase: str) -> str:
+    if altitude := REACHING_ALTITUDE.fullmatch(phrase):
+        return f"{altitude[1]}'"
+    return phrase
 
 
 def vcoa_label(at_or_above: int, style: str) -> str:

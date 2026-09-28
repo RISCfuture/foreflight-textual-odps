@@ -19,6 +19,7 @@ from odp_kml.procedure import (
     ClimbingTurn,
     ClimbInHold,
     Direct,
+    Dme,
     FixRef,
     HeadingAndRadial,
     HoldSpec,
@@ -27,6 +28,7 @@ from odp_kml.procedure import (
     ProceedOnCourse,
     Radial,
     RunwayGroup,
+    SpeedRestriction,
     Thence,
     Turn,
     VcoaGroup,
@@ -138,7 +140,23 @@ def test_climb_heading_ends_where_gradient_reaches_altitude():
         lbl for lbl in labels(drawing) if distance(xy(lbl.at), end) < 1e-6
     )
     assert altitude_label.text == "7000'"
-    assert any(lbl.text == f"{magnetic(0):03d}°" for lbl in labels(drawing))
+    assert any(lbl.text == f"hdg {magnetic(0):03d}°" for lbl in labels(drawing))
+
+
+def test_open_heading_and_speed_limit_are_labelled_beside_the_turn():
+    speed = SpeedRestriction(200, "reaching 9000")
+    leg = ClimbingTurn(Turn.RIGHT, ClimbHeading(magnetic(90), speed=speed))
+
+    drawing = draw(resolved(group(leg)))
+
+    placed = {lbl.text: xy(lbl.at) for lbl in labels(drawing)}
+    heading, speed_limit = placed.values()
+    assert list(placed) == [
+        f"hdg {magnetic(90):03d}°",
+        "max 200 KIAS until 9000'",
+    ]
+    assert heading == pytest.approx((R, 2.0 + R + 0.35), abs=1e-6)
+    assert speed_limit == pytest.approx((-0.35, 2.0), abs=1e-6)
 
 
 def test_climbing_right_turn_direct_arcs_tangentially_onto_the_fix():
@@ -184,6 +202,8 @@ def test_heading_intercepts_radial_inbound_and_tracks_to_the_vor():
     assert radial.name == "VOR R-180"
     ends = [coordinate for p in radial.points for coordinate in xy(p)]
     assert ends == pytest.approx([10.0, 10.0, 10.0, R])
+    texts = {lbl.text for lbl in labels(drawing)}
+    assert texts == {f"hdg {magnetic(90):03d}°", "VOR R-180"}
 
 
 def test_heading_colinear_with_radial_is_degenerate():
@@ -195,15 +215,20 @@ def test_heading_colinear_with_radial_is_degenerate():
     assert raised.value.signature == "radial colinear"
 
 
-def test_radial_outbound_climbs_along_the_radial_to_altitude():
-    leg = Radial(
-        NavaidRef("VOR"), 360 - int(VARIATION), outbound=True, until=feet(7000)
-    )
+@pytest.mark.parametrize(
+    ("until", "end_nm", "terminator"),
+    [(feet(7000), 9.825, "7000'"), (Dme(NavaidRef("VOR"), 12.0), 12.0, "VOR 12 DME")],
+)
+def test_radial_outbound_tracks_the_radial_to_its_terminator(until, end_nm, terminator):
+    leg = Radial(NavaidRef("VOR"), 360 - int(VARIATION), outbound=True, until=until)
 
     drawing = draw(resolved(group(leg), points=(point("VOR", 0.0, 0.0, VARIATION),)))
 
-    assert route_vertices(drawing)[-1] == pytest.approx((0.0, 9.825), abs=1e-6)
-    assert any(lbl.text == f"R-{360 - int(VARIATION):03d}" for lbl in labels(drawing))
+    end = (0.0, end_nm)
+    assert route_vertices(drawing)[-1] == pytest.approx(end, abs=1e-6)
+    placed = {lbl.text: xy(lbl.at) for lbl in labels(drawing)}
+    assert placed[terminator] == pytest.approx(end, abs=1e-6)
+    assert f"VOR R-{360 - int(VARIATION):03d}" in placed
 
 
 @pytest.mark.parametrize(("turns", "side"), [(Turn.RIGHT, 1), (Turn.LEFT, -1)])
@@ -222,7 +247,7 @@ def test_hold_racetrack_extends_two_radii_to_the_turning_side(turns, side):
     assert max(xs) == pytest.approx(2 * R, abs=1e-3)
     assert min(y for _, y in racetrack) == pytest.approx(6.0 - leg_nm - R, abs=1e-3)
     assert route_vertices(drawing)[-1] == pytest.approx((0.0, 6.0), abs=1e-6)
-    assert any(lbl.text.startswith("Hold (") for lbl in labels(drawing))
+    assert any(lbl.text.startswith("Hold ") for lbl in labels(drawing))
 
 
 def test_hold_falls_back_to_the_published_hold_else_is_degenerate():
