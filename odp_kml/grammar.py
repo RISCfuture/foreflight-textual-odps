@@ -15,9 +15,10 @@ import dataclasses
 import re
 from collections.abc import Iterator, Mapping
 
-from .legs import FIX_LENGTH, NAVAID_TYPE_WORDS, VISUAL_CLIMB, LegParser
+from .legs import COMPASS_WORDS, FIX_LENGTH, NAVAID_TYPE_WORDS, VISUAL_CLIMB, LegParser
 from .normalize import normalize
 from .procedure import (
+    Compass8,
     FixRef,
     GraphicDeparture,
     Leg,
@@ -36,10 +37,15 @@ def parse_departure_procedure(
 ) -> Procedure:
     """Parse normalized DEPARTURE PROCEDURE text into a `Procedure` with no VCOA.
 
+    A visual climb written into the section ("..., or for climb in visual
+    conditions: cross ...") becomes one of the procedure's VCOA groups.
     Raises `ParseError` unless every token is consumed by a grammar rule.
     """
-    runway_groups, shared_tail = _Parser(text).departure_procedure()
-    return Procedure(airport, amendment, runway_groups, shared_tail, vcoa=())
+    parser = _Parser(text)
+    runway_groups, shared_tail = parser.departure_procedure()
+    return Procedure(
+        airport, amendment, runway_groups, shared_tail, vcoa=parser.inline_vcoa
+    )
 
 
 def parse_vcoa(
@@ -60,7 +66,9 @@ def parse_procedure(sections: Sections, *, airport: str) -> Procedure:
     `Procedure`.
 
     A VCOA navaid named without an ident resolves to the navaid the
-    DEPARTURE PROCEDURE section named with that ident. A procedure with
+    DEPARTURE PROCEDURE section named with that ident. VCOA groups written
+    into the DEPARTURE PROCEDURE section come before the VCOA section's, and
+    a VCOA section group repeating one of them is dropped. A procedure with
     only a VCOA section has no runway groups. Raises `ParseError` when
     neither section is present or either fails to parse.
     """
@@ -68,7 +76,10 @@ def parse_procedure(sections: Sections, *, airport: str) -> Procedure:
     if sections.vcoa is None:
         return procedure
     vcoa = parse_vcoa(normalize(sections.vcoa), known_navaids=_named_navaids(procedure))
-    return dataclasses.replace(procedure, vcoa=vcoa)
+    repeated = set(procedure.vcoa)
+    return dataclasses.replace(
+        procedure, vcoa=procedure.vcoa + tuple(g for g in vcoa if g not in repeated)
+    )
 
 
 def _departure_procedure(sections: Sections, airport: str) -> Procedure:
@@ -108,6 +119,12 @@ _RUNWAY = re.compile(r"\d{1,2}[LRC]?")
 _DP_NAME_WORD = re.compile(r"[A-Z][A-Z0-9]*")
 _DP_NAME_PUNCTUATION = frozenset("()'")
 _DP_NAME_MAX_TOKENS = 8
+# Lowercase words inside an airport name: "Augusta Rgnl at Bush Fld",
+# "Prairie du Chien Muni".
+_AIRPORT_NAME_CONNECTORS = frozenset({"at", "du"})
+_BOUND = {
+    f"{word}bound": point for word, point in COMPASS_WORDS.items() if len(word) > 2
+}
 
 
 class _Parser(LegParser):
@@ -115,6 +132,12 @@ class _Parser(LegParser):
 
     def __init__(self, text: str, known_navaids: Mapping[str, NavaidRef] | None = None):
         super().__init__(text, known_navaids)
+        self._inline_vcoa: list[VcoaGroup] = []
+
+    @property
+    def inline_vcoa(self) -> tuple[VcoaGroup, ...]:
+        """VCOA groups the DEPARTURE PROCEDURE section wrote in, in text order."""
+        return tuple(self._inline_vcoa)
 
     # --- Departure procedure -----------------------------------------------
 
@@ -132,11 +155,13 @@ class _Parser(LegParser):
             groups.append(RunwayGroup((), (self._graphic_departure(),)))
         shared_tail = None
         while not self._at_end():
-            self._reject_visual_climb_sentence()
+            if self._peek(*VISUAL_CLIMB):
+                raise self._error("visual climb without a runway")
             if self._starts_shared_tail():
                 shared_tail = self._shared_tail(groups)
                 break
-            groups.append(self._runway_group())
+            if (group := self._runway_group()) is not None:
+                groups.append(group)
         self._expect_end()
         self._require_tail_for_thence(groups, shared_tail)
         return tuple(groups), shared_tail
@@ -179,26 +204,65 @@ class _Parser(LegParser):
             or token.text in _DP_NAME_PUNCTUATION
         )
 
-    def _reject_visual_climb_sentence(self) -> None:
-        if self._peek(*VISUAL_CLIMB):
-            raise self._error(f'unsupported inline VCOA "{" ".join(VISUAL_CLIMB)}"')
+    def _runway_group(self) -> RunwayGroup | None:
+        """runway-group := runway-header (not-available | graphic-dp | vcoa-only
+                           | legs [vcoa-alternative])
+                         | all-runways (graphic-dp | vcoa-only)
 
-    def _runway_group(self) -> RunwayGroup:
-        """runway-group := runway-header (not-available | graphic-dp | legs)
-        | all-runways graphic-dp"""
+        A runway whose only procedure is a visual climb yields no runway group;
+        its VCOA group joins `inline_vcoa`.
+        """
         if self._accept("all", "rwys") or self._accept("all", "runways"):
             self._expect(",")
-            if not self._peek_graphic_departure():
-                raise self._error('unsupported "all runways" group')
-            return RunwayGroup((), (self._graphic_departure(),))
+            return self._all_runways_group()
         runways = self._runway_header()
         if self._not_available():
             return RunwayGroup(runways, ())
         if self._peek_graphic_departure():
             return RunwayGroup(runways, (self._graphic_departure(),))
-        self._reject_visual_climb_sentence()
+        if self._vcoa_only(runways):
+            return None
         self._last_fix = None
-        return RunwayGroup(runways, self._legs([self._leg()]))
+        group = RunwayGroup(runways, self._legs([self._leg()]))
+        self._vcoa_alternative(runways)
+        return group
+
+    def _all_runways_group(self) -> RunwayGroup | None:
+        if self._peek_graphic_departure():
+            return RunwayGroup((), (self._graphic_departure(),))
+        if self._vcoa_only(()):
+            return None
+        raise self._error('unsupported "all runways" group')
+
+    def _vcoa_only(self, runways: tuple[str, ...]) -> bool:
+        """vcoa-only := inline-vcoa | atc-approval visual-climb [notify-atc]"""
+        if self._peek(*VISUAL_CLIMB):
+            self._inline_vcoa.append(self._inline_visual_climb(runways))
+            return True
+        if self._peek("obtain", "atc"):
+            self._inline_vcoa.append(self._vcoa_group(runways))
+            return True
+        return False
+
+    def _vcoa_alternative(self, runways: tuple[str, ...]) -> None:
+        """vcoa-alternative := ["," | ";"] ["or"] inline-vcoa, after the legs."""
+        for lead in ((), (",",), (";",)):
+            for conjunction in ((), ("or",)):
+                if self._peek(*lead, *conjunction, *VISUAL_CLIMB):
+                    self._index += len(lead) + len(conjunction)
+                    self._inline_vcoa.append(self._inline_visual_climb(runways))
+                    return
+
+    def _inline_visual_climb(self, runways: tuple[str, ...]) -> VcoaGroup:
+        """inline-vcoa := "for climb in visual conditions" [":" | ","] ["to"]
+        "cross" crossing [notify-atc]"""
+        self._expect(*VISUAL_CLIMB)
+        self._accept_any(":", ",")
+        self._accept("to")
+        self._expect("cross")
+        group = self._crossing(runways)
+        self._notify_atc()
+        return group
 
     def _runway_header(self) -> tuple[str, ...]:
         """runway-header := ("Rwy" | "Rwys") runway ("," runway)* ("," | ":")"""
@@ -272,9 +336,13 @@ class _Parser(LegParser):
             groups.append(self._vcoa_group())
         return tuple(groups)
 
-    def _vcoa_group(self) -> VcoaGroup:
-        """vcoa-group := [vcoa-runways] atc-approval visual-climb [notify-atc]"""
-        runways = self._vcoa_runways()
+    def _vcoa_group(self, runways: tuple[str, ...] | None = None) -> VcoaGroup:
+        """vcoa-group := [vcoa-runways] atc-approval visual-climb [notify-atc]
+
+        ``runways`` is the runway header already read, if any.
+        """
+        if runways is None:
+            runways = self._vcoa_runways()
         self._atc_approval()
         group = self._visual_climb(runways)
         self._notify_atc()
@@ -300,15 +368,48 @@ class _Parser(LegParser):
         self._expect("when", "requesting", "ifr", "clearance", ".")
 
     def _visual_climb(self, runways: tuple[str, ...]) -> VcoaGroup:
-        """visual-climb := "climb in visual conditions to cross" crossing
-        "at or above" nnnn ["MSL"] legs"""
+        """visual-climb := "climb in visual conditions to cross" crossing"""
         self._expect("climb", "in", "visual", "conditions", "to", "cross")
+        return self._crossing(runways)
+
+    def _crossing(self, runways: tuple[str, ...]) -> VcoaGroup:
+        """crossing := (FIX | airport-name) [bound] "at or above" nnnn ["MSL"] legs
+
+        Legs that continue into the DEPARTURE PROCEDURE's shared tail
+        ("..., thence ...") are refused: the tail is drawn from the runways.
+        """
         cross = self._vcoa_crossing()
+        bound = self._bound()
         self._expect("at", "or", "above")
         feet = self._integer()
         self._accept("msl")
         self._last_fix = None
-        return VcoaGroup(runways, cross, feet, self._legs([]))
+        legs = self._legs([])
+        if legs and isinstance(legs[-1], Thence):
+            raise ParseError("visual climb into the shared tail", "", self._position())
+        return VcoaGroup(runways, cross, feet, legs, bound)
+
+    def _peek_bound(self, offset: int = 0) -> bool:
+        token = self._token(offset)
+        if token is None:
+            return False
+        if token.lower in _BOUND:
+            return True
+        return (
+            token.lower in COMPASS_WORDS
+            and len(token.text) > 2
+            and self._peek("bound", offset=offset + 1)
+        )
+
+    def _bound(self) -> Compass8 | None:
+        """bound := compass "bound" | "northbound" | "southeastbound" | …"""
+        if not self._peek_bound():
+            return None
+        token = self._next()
+        if token.lower in _BOUND:
+            return _BOUND[token.lower]
+        self._expect("bound")
+        return COMPASS_WORDS[token.lower]
 
     def _vcoa_crossing(self) -> FixRef | None:
         """crossing := FIX | airport-name — ``None`` means the departure airport."""
@@ -317,7 +418,7 @@ class _Parser(LegParser):
             token is not None
             and is_ident_word(token.text)
             and len(token.text) == FIX_LENGTH
-            and self._peek("at", offset=1)
+            and (self._peek("at", offset=1) or self._peek_bound(offset=1))
         ):
             self._index += 1
             return FixRef(token.text)
@@ -330,15 +431,32 @@ class _Parser(LegParser):
         """airport-name := (Capitalized-word | "/" | "(" | ")" | "-")+ ["airport"]
 
         The name has at least one mixed-case word and no navaid type, so a
-        navaid or fix is never mistaken for the airport.
+        navaid or fix is never mistaken for the airport. A lowercase "at" or
+        "du" joins two capitalized words ("Augusta Rgnl at Bush Fld"); the
+        name ends before "at or" and before a direction such as
+        "southeast bound".
         """
         start = self._index
-        while not self._peek("at") and self._is_airport_name_token(self._token()):
+        while not self._peek("at", "or") and not self._peek_bound():
+            if not (
+                self._is_airport_name_token(self._token())
+                or self._peek_name_connector()
+            ):
+                break
             self._index += 1
         name = self._tokens[start : self._index]
         if not any(token.text[1:].islower() for token in name):
             self._index = start
             raise self._unmatched()
+
+    def _peek_name_connector(self) -> bool:
+        token, following = self._token(), self._token(1)
+        return (
+            token is not None
+            and token.text in _AIRPORT_NAME_CONNECTORS
+            and following is not None
+            and following.text[0].isupper()
+        )
 
     @staticmethod
     def _is_airport_name_token(token: Token | None) -> bool:

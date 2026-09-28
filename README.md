@@ -40,7 +40,9 @@ with certainty:
   course draws just its circle.
 - Climb-in-hold racetracks.
 - VCOA (visual climb over airport) circles, including airports whose only
-  procedure is a VCOA.
+  procedure is a VCOA and visual climbs written into the departure
+  procedure itself ("..., or for climb in visual conditions: cross ...").
+  A published crossing direction joins the label: `VCOA (≥8200' SE bound)`.
 - Altitude labels in plain text (ForeFlight renders neither rich text nor
   combining marks): `7000'` for "climb to," `≥7000'` for "at or above,"
   `≤7000'` for "at or below," and `at 7000'` for a mandatory altitude;

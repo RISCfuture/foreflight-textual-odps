@@ -759,16 +759,18 @@ Output: one Procedure object matching the response schema. Every object carries
   same procedure.
 - Headings, radials, and inbound courses are integers (R-009 is 9, 070° is 70).
 - vcoa: one group per VCOA runway list; cross is the fix crossed, or null when
-  climbing over the airport; at_or_above is the crossing altitude; then is the
-  legs that follow.
+  climbing over the airport; at_or_above is the crossing altitude; bound is the
+  direction to cross in ("southeast bound" is SE), null when not given; then is
+  the legs that follow. A visual climb written into the DEPARTURE PROCEDURE
+  section ("..., or for climb in visual conditions: cross ...") is a vcoa group
+  for that runway, listed before the VCOA section's groups.
 - source_span on every leg and until node: the exact words of the input the node
   came from, copied character for character (including °, parentheses, and
   capitalization). Together the spans must cover every word of the DEPARTURE
   PROCEDURE text except runway headers, "and", "the", "then", and "thence".
 - Never guess a turn direction, altitude, heading, or navaid that the text does
   not state. When a phrase has no faithful representation in the schema (airway
-  routings, inline VCOA alternatives, a leg with
-  two terminating conditions), leave it out rather than force-fitting it; the
+  routings, a leg with two terminating conditions), leave it out rather than force-fitting it; the
   uncovered words flag the draft for review.
 
 Worked examples follow.

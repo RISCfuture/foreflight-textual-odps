@@ -271,7 +271,7 @@ def _draw_vcoa(ctx: _Context, vcoa: VcoaGroup) -> None:
         dash = ctx.arc(centre, radius, start, 180 / VCOA_DASHES)
         ctx.polyline(name, Style.VCOA, dash)
     ctx.label(
-        vcoa_label(vcoa.at_or_above, ctx.params.label_style),
+        vcoa_label(vcoa.at_or_above, ctx.params.label_style, vcoa.bound),
         offset(centre, 0.0, radius),
     )
     if _departs_toward_something(vcoa.then):

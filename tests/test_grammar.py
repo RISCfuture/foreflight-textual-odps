@@ -14,6 +14,7 @@ from odp_kml.grammar import (
 from odp_kml.procedure import (
     Altitude,
     AltitudeKind,
+    AtFix,
     ClimbHeading,
     ClimbingTurn,
     ClimbInHold,
@@ -29,6 +30,7 @@ from odp_kml.procedure import (
     NavaidType,
     Procedure,
     ProceedOnCourse,
+    Radial,
     RunwayGroup,
     SpeedRestriction,
     Turn,
@@ -188,11 +190,15 @@ def test_parses_leg_shapes(text, groups, shared_tail):
         (fixture_text("3u3"), 'unsupported "to <alt>" with fix terminator'),
         (
             (
-                "Rwy 15, climb heading 148° to 1100 before proceeding on course or "
-                "for climb in visual conditions: cross Central Maine/ Norridgewock "
-                "at or above 1500 before proceeding on course."
+                "Rwy 7, climb direct CHE VOR/DME, or for climb in visual "
+                "conditions, cross Craig-Moffat Airport at or above 8500 then proceed "
+                "on CHE R-247 to CHE VOR/DME, thence ... ...climb on course."
             ),
-            'unsupported inline VCOA "or for climb in visual conditions"',
+            "visual climb into the shared tail",
+        ),
+        (
+            "For climb in visual conditions: cross Central Airport at or above 3700.",
+            "visual climb without a runway",
         ),
         (
             "All runways, climb heading 360° to 5000.",
@@ -201,13 +207,6 @@ def test_parses_leg_shapes(text, groups, shared_tail):
         (
             "Use published departure procedures.",
             'unmatched phrase "published departure procedures."',
-        ),
-        (
-            (
-                "Rwys 8, 26, for climb in visual conditions, cross Central Airport "
-                "at or above 3700 before proceeding on course."
-            ),
-            'unsupported inline VCOA "for climb in visual conditions"',
         ),
         ("Rwy 15, climb direct", 'unexpected end after "direct"'),
         ("Rwy 15, climb direct TPH", 'unexpected end after "<id>"'),
@@ -304,6 +303,154 @@ def test_parses_charted_dp_references(text, groups):
 
     assert procedure.runway_groups == tuple(groups)
     assert procedure.graphic_only == all(group.graphic for group in groups)
+
+
+def _vcoa(runways, feet, then=None, cross=None, bound=None):
+    return VcoaGroup(runways, cross, feet, then or (ProceedOnCourse(),), bound)
+
+
+@pytest.mark.parametrize(
+    ("text", "groups", "vcoa"),
+    [
+        pytest.param(
+            "Rwy 15, climb heading 148° to 1100 before proceeding on course or "
+            "for climb in visual conditions: cross Central Maine/ Norridgewock "
+            "at or above 1500 before proceeding on course.",
+            [RunwayGroup(("15",), (ClimbHeading(148, to(1100)), ProceedOnCourse()))],
+            [_vcoa(("15",), 1500)],
+            id="or-alternative after the legs",
+        ),
+        pytest.param(
+            "Rwy 10, climbing right turn heading 120° to 2000 before turning north, "
+            "or for climb in visual conditions, cross Cyril E King airport at or "
+            "above 2000 before proceeding on course. When executing VCOA, notify "
+            "ATC prior to departure.\nRwy 28, climb heading 280° to 2000 before "
+            "turning north.",
+            [
+                RunwayGroup(
+                    ("10",),
+                    (
+                        ClimbingTurn(Turn.RIGHT, ClimbHeading(120, to(2000))),
+                        ProceedOnCourse(),
+                    ),
+                ),
+                RunwayGroup(("28",), (ClimbHeading(280, to(2000)), ProceedOnCourse())),
+            ],
+            [_vcoa(("10",), 2000)],
+            id="comma-or alternative and notify ATC",
+        ),
+        pytest.param(
+            "Rwys 8, 26, for climb in visual conditions, cross Central Airport "
+            "at or above 3700 before proceeding on course.",
+            [],
+            [_vcoa(("8", "26"), 3700)],
+            id="visual climb as the runway's only procedure",
+        ),
+        pytest.param(
+            "Rwy 10, climb on heading 147° to 12200 before proceeding on course.\n"
+            "Rwys 10, 28, for climb in visual conditions: cross Yampa Valley "
+            "airport at or above 9700 before proceeding on course.",
+            [RunwayGroup(("10",), (ClimbHeading(147, to(12200)), ProceedOnCourse()))],
+            [_vcoa(("10", "28"), 9700)],
+            id="separate sentence per runway list",
+        ),
+        pytest.param(
+            "Rwy 36, climb heading 360° to 1200 before proceeding on course. For "
+            "climb in visual conditions: cross Augusta Rgnl at Bush Fld airport at "
+            "or above 1700 MSL, before proceeding on course.",
+            [RunwayGroup(("36",), (ClimbHeading(360, to(1200)), ProceedOnCourse()))],
+            [_vcoa(("36",), 1700)],
+            id="sentence alternative, connector in the name, comma before",
+        ),
+        pytest.param(
+            "Rwy 3, climbing right turn heading 160° to 9000 before proceeding on "
+            "course, or for climb in visual conditions: Cross Durango-La Plata "
+            "County Airport Southeast bound at or above 8200 MSL, then proceed on "
+            "DRO VOR/DME R-125 outbound to RESER.",
+            [
+                RunwayGroup(
+                    ("3",),
+                    (
+                        ClimbingTurn(Turn.RIGHT, ClimbHeading(160, to(9000))),
+                        ProceedOnCourse(),
+                    ),
+                )
+            ],
+            [
+                _vcoa(
+                    ("3",),
+                    8200,
+                    (
+                        Radial(
+                            NavaidRef("DRO", NavaidType.VOR_DME),
+                            125,
+                            True,
+                            AtFix(FixRef("RESER")),
+                        ),
+                    ),
+                    bound=Compass8.SE,
+                )
+            ],
+            id="crossing direction",
+        ),
+        pytest.param(
+            "All runways, obtain ATC approval for VCOA when requesting IFR "
+            "clearance. Climb in visual conditions to cross ADKIN westbound at or "
+            "above 5600 before proceeding on course.",
+            [],
+            [_vcoa((), 5600, cross=FixRef("ADKIN"), bound=Compass8.W)],
+            id="full VCOA wording inside the section, crossing a fix",
+        ),
+    ],
+)
+def test_parses_visual_climbs_written_into_the_departure_procedure(text, groups, vcoa):
+    procedure = parse_departure_procedure(text, airport="XXX", amendment=None)
+
+    assert procedure.runway_groups == tuple(groups)
+    assert procedure.vcoa == tuple(vcoa)
+
+
+def test_inline_visual_climbs_come_before_the_vcoa_section():
+    sections = Sections(
+        amendment=None,
+        takeoff_minimums=None,
+        departure_procedure=(
+            "Rwy 4, climb heading 040° to 3000 before proceeding on course, or for "
+            "climb in visual conditions: cross Test airport at or above 2500 before "
+            "proceeding on course."
+        ),
+        vcoa=(
+            "Rwy 22, obtain ATC approval for VCOA when requesting IFR clearance. "
+            "Climb in visual conditions to cross Test airport at or above 2600 "
+            "before proceeding on course."
+        ),
+        obstacle_notes=None,
+        dva=None,
+    )
+
+    procedure = parse_procedure(sections, airport="XXX")
+
+    assert procedure.vcoa == (_vcoa(("4",), 2500), _vcoa(("22",), 2600))
+
+
+def test_vcoa_section_repeating_an_inline_visual_climb_is_drawn_once():
+    sections = Sections(
+        amendment=None,
+        takeoff_minimums=None,
+        departure_procedure=(
+            "Rwy 10, for climb in visual conditions, cross Test airport at or above "
+            "1400 before proceeding on course."
+        ),
+        vcoa=(
+            "Rwy 10, obtain ATC approval for VCOA when requesting IFR clearance. "
+            "Climb in visual conditions to cross Test airport at or above 1400 "
+            "before proceeding on course."
+        ),
+        obstacle_notes=None,
+        dva=None,
+    )
+
+    assert parse_procedure(sections, airport="XXX").vcoa == (_vcoa(("10",), 1400),)
 
 
 @pytest.mark.parametrize(

@@ -13,6 +13,7 @@ from .procedure import (
     Altitude,
     AltitudeKind,
     ClimbHeading,
+    Compass8,
     Dme,
     HeadingAndRadial,
     HoldSpec,
@@ -104,9 +105,11 @@ def _speed_until(phrase: str) -> str:
     return phrase
 
 
-def vcoa_label(at_or_above: int, style: str) -> str:
-    """``VCOA`` plus, in parentheses, the altitude to cross the airport at."""
-    return f"VCOA ({format_feet(at_or_above, AltitudeKind.AT_OR_ABOVE, style)})"
+def vcoa_label(at_or_above: int, style: str, bound: Compass8 | None = None) -> str:
+    """``VCOA`` plus, in parentheses, the altitude to cross the airport at and
+    any direction to cross it in, e.g. ``VCOA (≥8200' SE bound)``."""
+    altitude = format_feet(at_or_above, AltitudeKind.AT_OR_ABOVE, style)
+    return f"VCOA ({altitude} {bound} bound)" if bound else f"VCOA ({altitude})"
 
 
 def turn_phrase(direction: Turn | None) -> str:

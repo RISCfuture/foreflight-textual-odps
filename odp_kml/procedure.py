@@ -237,13 +237,15 @@ class RunwayGroup:
 class VcoaGroup:
     """A visual climb over airport: climb over the airport or a fix, then proceed.
 
-    An empty ``runways`` means every runway.
+    An empty ``runways`` means every runway. ``bound`` is the direction to
+    cross in ("cross … southeast bound at or above 8200"), if the text gives one.
     """
 
     runways: tuple[str, ...]
     cross: FixRef | None
     at_or_above: int
     then: tuple[Leg, ...]
+    bound: Compass8 | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -304,7 +306,9 @@ def _serialize(value):
 def from_dict(data: dict):
     """Reconstruct a node from a dict produced by `to_dict`.
 
-    Raises `ValueError` if `data["node"]` names no known node class.
+    A field missing from `data` takes its default, so JSON written before a
+    defaulted field was added still loads. Raises `ValueError` if
+    `data["node"]` names no known node class.
     """
     cls = _NODE_CLASSES.get(data.get("node"))
     if cls is None:
@@ -313,6 +317,7 @@ def from_dict(data: dict):
     kwargs = {
         field.name: _deserialize(data[field.name], hints[field.name])
         for field in dataclasses.fields(cls)
+        if field.name in data
     }
     return cls(**kwargs)
 

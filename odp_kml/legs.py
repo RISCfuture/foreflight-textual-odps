@@ -41,7 +41,7 @@ _MAX_IDENT_LENGTH = 4
 _MAX_DME_IDENT_LENGTH = 3
 FIX_LENGTH = 5
 
-_COMPASS_WORDS = {
+COMPASS_WORDS = {
     "north": Compass8.N,
     "northeast": Compass8.NE,
     "east": Compass8.E,
@@ -80,22 +80,24 @@ class LegParser(TokenStream):
     # --- Leg sequences -----------------------------------------------------
 
     def _legs(self, legs: list[Leg]) -> tuple[Leg, ...]:
-        """legs := leg ((separator leg) | before | speed)* ("." | thence)
+        """legs := leg ((separator leg) | before | speed)* ("." | thence | ↓)
 
-        Tracks the fix each leg ends at, for a hold that names none.
+        ↓: the legs also end, unconsumed, where an inline VCOA alternative
+        ("..., or for climb in visual conditions") begins. Tracks the fix
+        each leg ends at, for a hold that names none.
         """
         self._last_fix = _end_fix(legs[-1]) if legs else None
         while True:
-            if self._peek("before"):
+            if self._peek("before") or self._peek(",", "before"):
+                self._accept(",")
                 self._append(legs, self._before())
-            elif self._accept("."):
+            elif legs and self._peek_vcoa_alternative() or self._accept("."):
                 return tuple(legs)
             elif self._thence():
                 return (*legs, Thence())
             elif legs and self._peek_speed_restriction():
                 legs[-1] = self._with_speed(legs[-1], self._speed_restriction())
             else:
-                self._reject_inline_vcoa()
                 self._reject_airway_routing()
                 self._leg_separator(required=bool(legs))
                 self._append(legs, self._leg())
@@ -119,13 +121,12 @@ class LegParser(TokenStream):
         elif not self._accept_any("then", "and") and required:
             raise self._unmatched()
 
-    def _reject_inline_vcoa(self) -> None:
-        for lead in ((), (",",), (";",)):
-            if self._peek(*lead, "or", *VISUAL_CLIMB):
-                self._index += len(lead)
-                raise self._error(
-                    f'unsupported inline VCOA "or {" ".join(VISUAL_CLIMB)}"'
-                )
+    def _peek_vcoa_alternative(self) -> bool:
+        """``, or for climb in visual conditions``, ``; or for …``, ``, for …``"""
+        return any(
+            self._peek(*lead, *VISUAL_CLIMB)
+            for lead in (("or",), (",", "or"), (";", "or"), (",",))
+        )
 
     def _reject_airway_routing(self) -> None:
         """``then westbound on V326 to GINNA`` routes along an airway."""
@@ -164,7 +165,7 @@ class LegParser(TokenStream):
         if token is not None and token.lower in _TURN_WORDS:
             self._index += 1
             return ProceedOnCourse(_TURN_WORDS[token.lower])
-        if token is not None and token.lower in _COMPASS_WORDS:
+        if token is not None and token.lower in COMPASS_WORDS:
             self._index += 1
         return ProceedOnCourse()
 
@@ -478,10 +479,10 @@ class LegParser(TokenStream):
 
     def _compass(self) -> Compass8:
         token = self._token()
-        if token is None or token.lower not in _COMPASS_WORDS:
+        if token is None or token.lower not in COMPASS_WORDS:
             raise self._unmatched()
         self._index += 1
-        return _COMPASS_WORDS[token.lower]
+        return COMPASS_WORDS[token.lower]
 
     def _hold_turns(self) -> Turn:
         """hold-turns := "RT" | "LT" | ("left" | "right") ("turn" | "turns")"""
