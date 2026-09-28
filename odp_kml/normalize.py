@@ -48,6 +48,22 @@ def _join_navaid_slash(text: str) -> str:
     return re.sub(r"\b(VOR|NDB)/\s+DME\b", r"\1/DME", text)
 
 
+def _spell_speed_limits(text: str) -> str:
+    """``exceed 180K``, ``exceed 180 knots`` and ``exceed 250 KTS`` read
+    ``exceed 180 KIAS``."""
+    return re.sub(
+        r"\b(exceed \d+) ?(?:K|KT|KTS|kts|knots)\b",
+        r"\1 KIAS",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
+def _single_periods(text: str) -> str:
+    """A doubled period (``course..``) is one; an ellipsis is left alone."""
+    return re.sub(r"(?<!\.)\.\.(?!\.)", ".", text)
+
+
 def _drop_thousands_separators(text: str) -> str:
     """``10,000`` becomes ``10000``; a list such as ``1,200,300`` is left alone."""
     return re.sub(r"(?<![\d,])(\d{1,2}),(\d{3})(?![\d,])", r"\1\2", text)
@@ -96,6 +112,8 @@ _SUBSTITUTIONS: tuple[Callable[[str], str], ...] = (
     _spell_radials,
     _join_navaid_slash,
     _drop_thousands_separators,
+    _spell_speed_limits,
+    _single_periods,
     _spell_out_min_climb,
     _expand_fractions,
     _drop_foot_marks,
