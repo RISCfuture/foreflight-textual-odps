@@ -228,13 +228,6 @@ def test_parses_leg_shapes(text, groups, shared_tail):
         ("Rwy 15, climb direct TPH", 'unexpected end after "<id>"'),
         (
             (
-                "Rwy 17, climbing left turn heading 100° to intercept TRM VORTAC R-136 "
-                "to MECCA, thence... ...climb on course."
-            ),
-            'radial without "inbound" or "outbound"',
-        ),
-        (
-            (
                 "Rwy 16, climb heading 154° to 2500, do not exceed 200 KIAS until "
                 "turning left direct ABC VOR."
             ),
@@ -257,10 +250,6 @@ def test_parses_leg_shapes(text, groups, shared_tail):
         (
             "Rwy 8, climb heading 080° and ABC VOR R-080 outbound to MECCA 12.0 DME.",
             "DME from a fix",
-        ),
-        (
-            "Rwy 20, climb on ALW VOR/DME R-201 to 2500.",
-            'radial without "inbound" or "outbound"',
         ),
         (
             "Rwy 15, climbing left turn direct TPH VORTAC thence...",
@@ -531,6 +520,42 @@ def test_parses_fix_terminators_named_as_intersections_and_dme(until_text, until
 
 def test_intersection_suffix_needs_a_five_letter_fix():
     assert signature_of("Rwy 18, climb direct ABC INT.") == 'unmatched phrase "<id>."'
+
+
+def test_radial_without_a_sense_is_left_for_the_drawing():
+    text = "Rwy 20, climb on ALW VOR/DME R-201 to 2500."
+
+    (group,) = parse_departure_procedure(
+        text, airport="X", amendment=None
+    ).runway_groups
+
+    assert group.legs[0].outbound is None
+
+
+def test_radial_takes_the_sense_of_the_same_radial_flown_next():
+    text = (
+        "Rwy 11, climbing left turn heading 022° to intercept GLL VOR/DME R-221 to "
+        "7000, thence...\n...proceed on GLL VOR/DME R-221 to GLL VOR/DME."
+    )
+
+    procedure = parse_departure_procedure(text, airport="LMO", amendment=None)
+
+    (turn, _) = procedure.runway_groups[0].legs
+    assert turn.then.outbound is False
+    assert procedure.shared_tail[0].outbound is False
+
+
+def test_radial_sense_is_not_taken_from_a_different_radial():
+    text = (
+        "Rwy 11, climb heading 022° to intercept GLL VOR/DME R-221 to 7000, then "
+        "proceed on GLL VOR/DME R-220 to GLL VOR/DME."
+    )
+
+    (group,) = parse_departure_procedure(
+        text, airport="X", amendment=None
+    ).runway_groups
+
+    assert group.legs[0].outbound is None
 
 
 def test_all_other_courses_needs_a_heading_range_before_it():

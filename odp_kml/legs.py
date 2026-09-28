@@ -507,13 +507,14 @@ class LegParser(TokenStream):
 
     def _outbound(
         self, direction: bool | None, navaid: NavaidRef, until: Until | None
-    ) -> bool:
-        """A radial flown to its own navaid is inbound; any other needs the word."""
+    ) -> bool | None:
+        """As printed; a radial flown to its own navaid is inbound; otherwise
+        ``None``, for the grammar or the drawing to settle."""
         if direction is not None:
             return direction
         if isinstance(until, AtFix) and _same_facility(until.target, navaid):
             return False
-        raise self._error('radial without "inbound" or "outbound"')
+        return None
 
     # --- Leg terminators ---------------------------------------------------
 

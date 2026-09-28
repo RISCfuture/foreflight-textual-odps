@@ -27,10 +27,12 @@ from .procedure import (
     ClimbingTurn,
     FixRef,
     GraphicDeparture,
+    HeadingAndRadial,
     HeadingRange,
     Leg,
     NavaidRef,
     Procedure,
+    Radial,
     RunwayGroup,
     Thence,
     VcoaGroup,
@@ -50,8 +52,10 @@ def parse_departure_procedure(
     """
     parser = _Parser(text)
     runway_groups, shared_tail = parser.departure_procedure()
-    return Procedure(
-        airport, amendment, runway_groups, shared_tail, vcoa=parser.inline_vcoa
+    return _carry_radial_senses(
+        Procedure(
+            airport, amendment, runway_groups, shared_tail, vcoa=parser.inline_vcoa
+        )
     )
 
 
@@ -84,8 +88,11 @@ def parse_procedure(sections: Sections, *, airport: str) -> Procedure:
         return procedure
     vcoa = parse_vcoa(normalize(sections.vcoa), known_navaids=_named_navaids(procedure))
     repeated = set(procedure.vcoa)
-    return dataclasses.replace(
-        procedure, vcoa=procedure.vcoa + tuple(g for g in vcoa if g not in repeated)
+    return _carry_radial_senses(
+        dataclasses.replace(
+            procedure,
+            vcoa=procedure.vcoa + tuple(g for g in vcoa if g not in repeated),
+        )
     )
 
 
@@ -100,6 +107,57 @@ def _departure_procedure(sections: Sections, airport: str) -> Procedure:
     if sections.vcoa is None:
         raise ParseError("no departure procedure section")
     return Procedure(airport, sections.amendment, (), None, vcoa=())
+
+
+def _carry_radial_senses(procedure: Procedure) -> Procedure:
+    """Give a radial printed without "inbound" or "outbound" the sense of the
+    leg after it when that leg flies the same navaid's same radial, e.g.
+    "heading 022° to intercept GLL VOR/DME R-221 to 7000... ...proceed on GLL
+    VOR/DME R-221 to GLL VOR/DME" (inbound). A runway group's last leg
+    before "thence" is followed by the shared tail's first leg.
+    """
+    tail = procedure.shared_tail
+    return dataclasses.replace(
+        procedure,
+        runway_groups=tuple(
+            dataclasses.replace(group, legs=_carried(group.legs, tail))
+            for group in procedure.runway_groups
+        ),
+        shared_tail=_carried(tail, None) if tail is not None else None,
+        vcoa=tuple(
+            dataclasses.replace(group, then=_carried(group.then, None))
+            for group in procedure.vcoa
+        ),
+    )
+
+
+def _carried(
+    legs: tuple[Leg, ...], shared_tail: tuple[Leg, ...] | None
+) -> tuple[Leg, ...]:
+    carried = list(legs)
+    for index in reversed(range(len(carried))):
+        following = carried[index + 1] if index + 1 < len(carried) else None
+        if isinstance(following, Thence) and shared_tail:
+            following = shared_tail[0]
+        carried[index] = _with_sense_of(carried[index], following)
+    return tuple(carried)
+
+
+def _with_sense_of(leg: Leg, following: Leg | None) -> Leg:
+    if isinstance(leg, ClimbingTurn):
+        return dataclasses.replace(leg, then=_with_sense_of(leg.then, following))
+    if isinstance(following, ClimbingTurn):
+        following = following.then
+    if (
+        isinstance(leg, Radial | HeadingAndRadial)
+        and leg.outbound is None
+        and isinstance(following, Radial | HeadingAndRadial)
+        and following.outbound is not None
+        and following.navaid.ident == leg.navaid.ident
+        and following.radial == leg.radial
+    ):
+        return dataclasses.replace(leg, outbound=following.outbound)
+    return leg
 
 
 def _named_navaids(procedure: Procedure) -> dict[str, NavaidRef]:

@@ -15,6 +15,7 @@ from odp_kml.geometry import (
 from odp_kml.procedure import (
     Altitude,
     AltitudeKind,
+    AtFix,
     ClimbHeading,
     ClimbingTurn,
     ClimbInHold,
@@ -505,3 +506,36 @@ def test_dme_terminator_naming_a_fix_must_find_it_there(fix_nm, draws):
         with pytest.raises(Degenerate) as raised:
             draw(resolved(group(leg), points=points))
         assert raised.value.signature == "DME fix mismatch"
+
+
+@pytest.mark.parametrize(
+    ("until", "outbound"),
+    [
+        (AtFix(FixRef("FAR")), True),
+        (AtFix(FixRef("NEAR")), False),
+        (Dme(NavaidRef("VOR"), 15.0), True),
+        (Dme(NavaidRef("VOR"), 2.0), False),
+    ],
+)
+def test_unstated_radial_sense_is_toward_where_the_leg_ends(until, outbound):
+    """Heading east, the aircraft joins R-360 (true) about 9 NM north of the VOR."""
+    leg = HeadingAndRadial(magnetic(90), NavaidRef("VOR"), magnetic(0), None, until)
+    points = (
+        point("VOR", 3.0, -6.0, VARIATION),
+        point("FAR", 3.0, 9.0),
+        point("NEAR", 3.0, -3.0),
+    )
+
+    drawing = draw(resolved(group(leg), points=points))
+
+    sense = "outbound" if outbound else "inbound"
+    assert any(line.name.endswith(sense) for line in polylines(drawing))
+
+
+def test_unstated_radial_sense_with_an_altitude_terminator_is_degenerate():
+    leg = Radial(NavaidRef("VOR"), 360 - int(VARIATION), None, feet(7000))
+
+    with pytest.raises(Degenerate) as raised:
+        draw(resolved(group(leg), points=(point("VOR", 0.0, 0.0, VARIATION),)))
+
+    assert raised.value.signature == 'radial without "inbound" or "outbound"'

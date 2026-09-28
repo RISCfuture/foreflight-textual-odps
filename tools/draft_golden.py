@@ -745,8 +745,9 @@ Output: one Procedure object matching the response schema. Every object carries
   HeadingSector per range joined by "or", start and end as printed, clockwise
   false for CCW; nothing but ProceedOnCourse follows it),
   Direct (proceed direct to a navaid or fix), Radial (fly a navaid's radial,
-  outbound true when flying away from it), HeadingAndRadial (fly a heading until
-  intercepting a radial), ClimbingTurn (a climbing turn onto its "then" leg;
+  outbound true when the text says outbound, false for inbound or when flown
+  to that navaid, null when the text says neither), HeadingAndRadial (fly a
+  heading until intercepting a radial), ClimbingTurn (a climbing turn onto its "then" leg;
   direction null when the text gives none), ClimbInHold, ProceedOnCourse
   (turn_restriction L/R only for "before turning left/right"; null otherwise),
   and Thence (the "thence..." marker leading into a shared tail).

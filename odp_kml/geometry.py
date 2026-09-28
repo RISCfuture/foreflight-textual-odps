@@ -91,6 +91,7 @@ ARROW_ARM_NM = 0.25
 ARROW_SETBACK_NM = 0.5
 ARROW_SPLAY_DEG = 30.0
 RUNWAY_HEADING_LABEL = "rwy hdg"
+UNSTATED_SENSE = 'radial without "inbound" or "outbound"'
 
 
 @dataclasses.dataclass(frozen=True)
@@ -584,6 +585,7 @@ def _tangent_point(centre: Vec, radius: float, target: Vec, side: int, leg) -> V
 def _radial(pen: _Pen, leg: Radial, direction: Turn | None) -> None:
     """Turn onto the radial's course from a position already on it, then track it."""
     ctx = pen.ctx
+    leg = _with_sense(ctx, leg, pen.at)
     radial_course = _radial_true(ctx, leg)
     name = _leg_name(pen, direction, radial_phrase(leg))
     points, side = pen.turn_onto(_tracking_course(leg, radial_course), direction)
@@ -599,11 +601,12 @@ def _heading_and_radial(
     heading = ctx.heading_true(leg.heading)
     radial_course = _radial_true(ctx, leg)
     _require_intercept_angle(heading, radial_course, leg)
+    points, heading_side = pen.turn_onto(heading, direction)
+    corner = _intercept(pen.at, heading, ctx.xy(leg.navaid.ident), radial_course, leg)
+    leg = _with_sense(ctx, leg, corner)
     name = _leg_name(pen, direction, f"heading {leg.heading:03d} to intercept ")
     name += radial_phrase(leg)
-    points, heading_side = pen.turn_onto(heading, direction)
     track = _tracking_course(leg, radial_course)
-    corner = _intercept(pen.at, heading, ctx.xy(leg.navaid.ident), radial_course, leg)
     turn = _signed_turn(heading, track, None)
     lead = ctx.radius * math.tan(math.radians(abs(turn)) / 2)
     if distance(pen.at, corner) < lead:
@@ -616,6 +619,31 @@ def _heading_and_radial(
     _offset_label(pen, heading_label(leg.heading), heading_middle, heading_side)
     rounding, side = pen.turn_onto(track, _turn(sign(turn)))
     _track_radial(pen, leg, name, [*points, *rounding], side)
+
+
+def _with_sense[L: (Radial, HeadingAndRadial)](ctx: _Context, leg: L, joined: Vec) -> L:
+    """`leg` with its sense settled: as printed, else toward where it ends.
+
+    A radial printed without "inbound" or "outbound" that ends at a fix or a
+    DME distance on that radial is flown whichever way along it reaches that
+    point from `joined`, where the aircraft joins the radial. Any other, or
+    one whose end is within `MIN_LEG_NM` of the join, is refused.
+    """
+    if leg.outbound is not None:
+        return leg
+    navaid = ctx.xy(leg.navaid.ident)
+    course = _radial_true(ctx, leg)
+    match leg.until:
+        case AtFix(target=target):
+            end = along_across(sub(ctx.xy(target.ident), navaid), course)[0]
+        case Dme(navaid=dme, nm=nm) if dme.ident == leg.navaid.ident:
+            end = nm
+        case _:
+            raise Degenerate(UNSTATED_SENSE, repr(leg))
+    start = along_across(sub(joined, navaid), course)[0]
+    if abs(end - start) < MIN_LEG_NM:
+        raise Degenerate(UNSTATED_SENSE, repr(leg))
+    return dataclasses.replace(leg, outbound=end > start)
 
 
 def _require_intercept_angle(heading: float, radial_course: float, leg) -> None:

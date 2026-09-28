@@ -180,11 +180,15 @@ class Direct:
 
 @dataclasses.dataclass(frozen=True)
 class Radial:
-    """Fly a navaid's radial, inbound or outbound."""
+    """Fly a navaid's radial, inbound or outbound.
+
+    `outbound` is ``None`` when the text prints neither; the drawing then
+    takes it from where the leg ends, or refuses the leg.
+    """
 
     navaid: NavaidRef
     radial: int
-    outbound: bool
+    outbound: bool | None
     until: Until | None = None
     speed: SpeedRestriction | None = None
 
@@ -196,7 +200,7 @@ class HeadingAndRadial:
     heading: int
     navaid: NavaidRef
     radial: int
-    outbound: bool
+    outbound: bool | None
     until: Until | None = None
     speed: SpeedRestriction | None = None
 
