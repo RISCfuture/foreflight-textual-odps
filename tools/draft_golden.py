@@ -750,7 +750,8 @@ Output: one Procedure object matching the response schema. Every object carries
   heading until intercepting a radial), ClimbingTurn (a climbing turn, or "turn
   right", onto its "then" leg; direction null when the text gives none; then
   null for "climbing right turn, thence..." whose route is the shared tail's
-  first leg), ClimbInHold, ProceedOnCourse
+  first leg), ClimbInHold, CrossAt ("Cross LIN VOR/DME at or above 5000" after
+  reaching LIN), ProceedOnCourse
   (turn_restriction L/R only for "before turning left/right"; null otherwise),
   and Thence (the "thence..." marker leading into a shared tail).
 - "All other courses: ..." (or "or climb on a heading between ...") after a

@@ -44,6 +44,7 @@ from .procedure import (
     ClimbHeading,
     ClimbingTurn,
     ClimbInHold,
+    CrossAt,
     Direct,
     Dme,
     EnrouteAltitude,
@@ -446,6 +447,8 @@ def _draw_leg(pen: _Pen, leg: Leg, direction: Turn | None) -> None:
             _climb_in_hold(pen, leg)
         case ProceedOnCourse():
             _proceed_on_course(pen, leg)
+        case CrossAt():
+            _cross_at(pen, leg)
         case Thence():
             pass
         case _:
@@ -798,6 +801,15 @@ def _proceed_on_course(pen: _Pen, leg: ProceedOnCourse) -> None:
         )
     pen.straight_to(offset(pen.at, course, ON_COURSE_STUB_NM))
     _arrowhead(ctx, name, Style.ROUTE, pen.at, pen.course)
+
+
+def _cross_at(pen: _Pen, leg: CrossAt) -> None:
+    """Label the altitude to cross the fix the route has just reached."""
+    ctx = pen.ctx
+    fix = ctx.xy(leg.fix.ident)
+    if distance(pen.at, fix) > ARRIVAL_TOLERANCE_NM:
+        raise Degenerate("crossing off the route", repr(leg))
+    _offset_label(pen, format_altitude(leg.altitude, ctx.params.label_style), fix, 0)
 
 
 def _climb_in_hold(pen: _Pen, leg: ClimbInHold) -> None:

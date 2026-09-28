@@ -19,6 +19,7 @@ from odp_kml.procedure import (
     ClimbingTurn,
     ClimbInHold,
     Compass8,
+    CrossAt,
     CrossRadial,
     Direct,
     Dme,
@@ -645,6 +646,52 @@ def test_hold_fixes_named_twice_must_agree():
     )
 
     assert signature_of(text) == "hold crossing names a different fix"
+
+
+RSK = NavaidRef("RSK", NavaidType.VORTAC)
+RSK_HOLD = ClimbInHold(RSK, HoldSpec(Compass8.E, Turn.LEFT, 252), to(9000))
+
+
+def test_sentence_continuing_a_route_before_the_next_runway_joins_its_group():
+    text = (
+        "Rwys 5, 23, climbing right turn direct RSK VORTAC. Continue climb in RSK "
+        "VORTAC holding pattern (hold east, left turn, 252° inbound) to 9000.\n"
+        "Rwy 7, climb direct RSK VORTAC. Continue climb in RSK VORTAC holding "
+        "pattern (hold east, left turn, 252° inbound) to 9000."
+    )
+
+    groups = parse_departure_procedure(
+        text, airport="FMN", amendment=None
+    ).runway_groups
+
+    assert groups == (
+        RunwayGroup(("5", "23"), (ClimbingTurn(Turn.RIGHT, Direct(RSK)), RSK_HOLD)),
+        RunwayGroup(("7",), (Direct(RSK), RSK_HOLD)),
+    )
+
+
+def test_sentence_after_the_last_of_routes_that_end_apart_is_not_read():
+    text = (
+        "Rwy 5, climb direct RSK VORTAC.\nRwy 7, climb direct ABC VOR. Continue "
+        "climb in holding pattern (hold east, left turn, 252° inbound) to 9000."
+    )
+
+    assert signature_of(text).startswith("unmatched phrase")
+
+
+def test_crossing_sentence_labels_the_fix_just_reached():
+    text = (
+        "Rwy 9, turn right.\nAll aircraft climb direct LIN VOR/DME. Cross LIN "
+        "VOR/DME at or above 5000."
+    )
+
+    tail = parse_departure_procedure(text, airport="E45", amendment=None).shared_tail
+
+    lin = NavaidRef("LIN", NavaidType.VOR_DME)
+    assert tail == (
+        Direct(lin),
+        CrossAt(lin, Altitude(5000, AltitudeKind.AT_OR_ABOVE, "at or above 5000")),
+    )
 
 
 def test_all_other_courses_needs_a_heading_range_before_it():

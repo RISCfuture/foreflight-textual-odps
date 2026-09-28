@@ -19,6 +19,7 @@ from .procedure import (
     ClimbingTurn,
     ClimbInHold,
     Compass8,
+    CrossAt,
     CrossRadial,
     Direct,
     Dme,
@@ -72,6 +73,9 @@ _NAVAID_TYPES = (
 NAVAID_TYPE_WORDS = frozenset(words[0] for words, _ in _NAVAID_TYPES)
 VISUAL_CLIMB = ("for", "climb", "in", "visual", "conditions")
 ENROUTE_MINIMUMS = frozenset({"mea", "mca"})
+CONTINUATION_WORDS = frozenset(
+    {"climb", "climbing", "continue", "proceed", "direct", "cross"}
+)
 ENROUTE_LEADS = frozenset({"the", "airway", "appropriate"})
 BOUND_WORDS = {
     f"{word}bound": point for word, point in COMPASS_WORDS.items() if len(word) > 2
@@ -141,8 +145,8 @@ class LegParser(TokenStream):
         return True
 
     def _leg_separator(self, *, required: bool) -> None:
-        """separator := "," ["then"] | "then" | "and" """
-        if self._accept(","):
+        """separator := ("," | ";") ["then"] | "then" | "and" """
+        if self._accept_any(",", ";"):
             self._accept("then")
         elif not self._accept_any("then", "and") and required:
             raise self._unmatched()
@@ -179,7 +183,7 @@ class LegParser(TokenStream):
 
     def _leg(self) -> Leg:
         """leg := climbing-turn | climb | continue-climb | proceed | direct
-        | bare-turn"""
+        | bare-turn | cross-at"""
         if self._peek("climbing"):
             return self._climbing_turn()
         if self._peek("climb"):
@@ -192,7 +196,27 @@ class LegParser(TokenStream):
             return self._direct()
         if self._peek_bare_turn():
             return self._bare_turn()
+        if self._peek("cross") and self._peek_navaid(1):
+            return self._cross_at()
         raise self._unmatched()
+
+    def _cross_at(self) -> CrossAt:
+        """cross-at := "cross" target altitude-constraint"""
+        self._expect("cross")
+        return CrossAt(self._target(), self._altitude_constraint())
+
+    def _peek_continuation(self) -> bool:
+        """A new sentence that goes on flying the route: "... direct RSK VORTAC.
+        Continue climb in RSK VORTAC holding pattern ..."."""
+        return (
+            self._index > 0
+            and self._tokens[self._index - 1].text == "."
+            and self._peek_any_of(CONTINUATION_WORDS)
+            and not self._peek(*VISUAL_CLIMB[1:])
+        )
+
+    def _continuation(self) -> tuple[Leg, ...]:
+        return self._legs([self._leg()])
 
     def _peek_before(self) -> bool:
         return self._peek_before_at(0)
@@ -910,7 +934,7 @@ def end_fix(leg: Leg) -> NavaidRef | FixRef | None:
         return end_fix(leg.then) if leg.then is not None else None
     if isinstance(leg, Direct):
         return leg.target
-    if isinstance(leg, ClimbInHold):
+    if isinstance(leg, ClimbInHold | CrossAt):
         return leg.fix
     until = getattr(leg, "until", None)
     return until.target if isinstance(until, AtFix) else None

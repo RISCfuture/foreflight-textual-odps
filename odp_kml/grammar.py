@@ -226,6 +226,11 @@ class _Parser(LegParser):
                     groups = [_continued_to_tail(group) for group in groups]
                 break
             groups.extend(self._runway_groups())
+            while self._peek_continuation() and self._may_continue(groups):
+                last = groups[-1]
+                groups[-1] = dataclasses.replace(
+                    last, legs=last.legs + self._continuation()
+                )
         self._expect_end()
         self._require_tail_for_thence(groups, shared_tail)
         _require_routes_for_turns(groups, shared_tail)
@@ -294,6 +299,31 @@ class _Parser(LegParser):
             groups.append(RunwayGroup(runways, self._flown_legs()))
         self._vcoa_alternative(runways)
         return groups
+
+    def _may_continue(self, groups: list[RunwayGroup]) -> bool:
+        """Whether a new sentence continues the last runway group's route.
+
+        It does when another runway header follows it, when that is the only
+        route, or when every route ends at the same fix it starts from; after
+        the last of several routes that end apart it could mean all of them,
+        so it is left unread.
+        """
+        last = groups[-1] if groups else None
+        if last is None or not _flies_route(last) or _ends_with_thence(last.legs):
+            return False
+        if self._later_runway_header():
+            return True
+        routes = [group for group in groups if _flies_route(group)]
+        ends = {end_fix(group.legs[-1]) for group in routes}
+        return len(routes) == 1 or (len(ends) == 1 and None not in ends)
+
+    def _later_runway_header(self) -> bool:
+        return any(
+            token.lower in ("rwy", "rwys")
+            and (following := self._tokens[index + 1 : index + 2])
+            and _RUNWAY.fullmatch(following[0].text)
+            for index, token in enumerate(self._tokens[self._index :], self._index)
+        )
 
     def _flown_legs(self) -> tuple[Leg, ...]:
         self._last_fix = None
@@ -421,7 +451,10 @@ class _Parser(LegParser):
             if _ends_with_thence(group.legs)
         ]
         self._last_fix = _common_end_fix(entering)
-        return self._legs([self._leg()]), for_all
+        legs = self._legs([self._leg()])
+        while self._peek_continuation():
+            legs += self._continuation()
+        return legs, for_all
 
     def _require_tail_for_thence(
         self, groups: list[RunwayGroup], shared_tail: tuple[Leg, ...] | None
@@ -565,6 +598,10 @@ def _all_flown_end_with_thence(groups: list[RunwayGroup]) -> bool:
         if group.legs and not group.graphic and not _has_heading_range(group)
     ]
     return bool(flown) and all(_ends_with_thence(group.legs) for group in flown)
+
+
+def _flies_route(group: RunwayGroup) -> bool:
+    return bool(group.legs) and not group.graphic and not _has_heading_range(group)
 
 
 def _continued_to_tail(group: RunwayGroup) -> RunwayGroup:

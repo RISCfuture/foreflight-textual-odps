@@ -249,6 +249,15 @@ class ProceedOnCourse:
 
 
 @dataclasses.dataclass(frozen=True)
+class CrossAt:
+    """Cross the fix the route has just reached at an altitude, e.g. "Cross
+    LIN VOR/DME at or above 5000"."""
+
+    fix: NavaidRef | FixRef
+    altitude: Altitude | EnrouteAltitude
+
+
+@dataclasses.dataclass(frozen=True)
 class Thence:
     """A no-op leg marking a transition to the shared tail."""
 
@@ -274,6 +283,7 @@ Leg = (
     | ClimbingTurn
     | ClimbInHold
     | ProceedOnCourse
+    | CrossAt
     | Thence
     | GraphicDeparture
 )

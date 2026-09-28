@@ -19,6 +19,7 @@ from odp_kml.procedure import (
     ClimbHeading,
     ClimbingTurn,
     ClimbInHold,
+    CrossAt,
     Direct,
     Dme,
     FixRef,
@@ -572,3 +573,17 @@ def test_turns_into_the_tail_must_be_every_group_or_none():
         draw(turning_into((Direct(NavaidRef("VOR")),), Direct(NavaidRef("VOR"))))
 
     assert raised.value.signature == "shared tail start mismatch"
+
+
+def test_crossing_is_labelled_at_the_fix_the_route_reached():
+    vor = NavaidRef("VOR")
+    crossing = CrossAt(vor, feet(9000, AltitudeKind.AT_OR_ABOVE))
+    points = (point("VOR", 0.0, 12.0),)
+
+    drawing = draw(resolved(group(Direct(vor), crossing), points=points))
+
+    texts = [lbl.text for lbl in labels(drawing)]
+    assert format_altitude(feet(9000, AltitudeKind.AT_OR_ABOVE), "plain") in texts
+    with pytest.raises(Degenerate) as raised:
+        draw(resolved(group(crossing), points=points))
+    assert raised.value.signature == "crossing off the route"
