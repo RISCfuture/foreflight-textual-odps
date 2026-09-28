@@ -34,6 +34,7 @@ from odp_kml.procedure import (
     ProceedOnCourse,
     Radial,
     RunwayGroup,
+    RunwayHeading,
     SpeedRestriction,
     Turn,
     VcoaGroup,
@@ -174,6 +175,18 @@ def test_parses_fixture_procedures(name):
             ],
             None,
             id="hold at the preceding fix",
+        ),
+        pytest.param(
+            "Rwys 18, 36, climb runway heading to 500 before turning left.\n"
+            "Rwy 10, climb on runway heading to 1000 before proceeding on course.",
+            [
+                RunwayGroup(
+                    ("18", "36"), (RunwayHeading(to(500)), ProceedOnCourse(Turn.LEFT))
+                ),
+                RunwayGroup(("10",), (RunwayHeading(to(1000)), ProceedOnCourse())),
+            ],
+            None,
+            id="runway heading",
         ),
     ],
 )

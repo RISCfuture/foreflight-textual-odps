@@ -740,6 +740,7 @@ Output: one Procedure object matching the response schema. Every object carries
   the word DEPARTURE ("ELIM (RNAV)"); with no runway header, or "All Rwys,",
   the group's runways are empty.
 - Legs, in the order flown: ClimbHeading (climb on a magnetic heading),
+  RunwayHeading ("climb runway heading", whatever its number),
   HeadingRange (climb on any heading "between 350° CW to 162°": one
   HeadingSector per range joined by "or", start and end as printed, clockwise
   false for CCW; nothing but ProceedOnCourse follows it),

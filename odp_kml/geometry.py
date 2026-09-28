@@ -54,6 +54,7 @@ from .procedure import (
     ProceedOnCourse,
     Radial,
     RunwayGroup,
+    RunwayHeading,
     SpeedRestriction,
     Thence,
     Turn,
@@ -88,6 +89,7 @@ VCOA_DASHES = 36
 ARROW_ARM_NM = 0.25
 ARROW_SETBACK_NM = 0.5
 ARROW_SPLAY_DEG = 30.0
+RUNWAY_HEADING_LABEL = "rwy hdg"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -208,6 +210,7 @@ class _Pen:
     along_nm: float
     base_alt_ft: float
     gradient: float
+    runway_course: float | None = None
 
     def altitude_leg_nm(self, feet: int) -> float:
         """Along-track distance at which the climb reaches `feet`."""
@@ -350,6 +353,7 @@ def _start_runway(ctx: _Context, start: RunwayStart) -> _Pen:
         0.0,
         start.der_elevation_ft + DER_CROSSING_HEIGHT_FT,
         gradient,
+        runway_course=start.course_true,
     )
     turn_start = offset(der, start.course_true, _turn_start_nm(gradient))
     ctx.polyline(f"{pen.name}: initial climb", Style.ROUTE, [der, turn_start])
@@ -406,6 +410,8 @@ def _draw_leg(pen: _Pen, leg: Leg, direction: Turn | None) -> None:
             _draw_leg(pen, leg.then, leg.direction)
         case ClimbHeading():
             _climb_heading(pen, leg, direction)
+        case RunwayHeading():
+            _runway_heading(pen, leg, direction)
         case HeadingRange():
             _heading_range(pen, leg, direction)
         case Direct():
@@ -429,20 +435,41 @@ def _unsupported(leg) -> None:
 
 
 def _climb_heading(pen: _Pen, leg: ClimbHeading, direction: Turn | None) -> None:
-    """Turn onto the heading, then (with an altitude) climb straight to it.
+    course = pen.ctx.heading_true(leg.heading)
+    name = _leg_name(pen, direction, heading_phrase(leg))
+    _climb_course(pen, leg, direction, course, name, heading_label(leg.heading))
+
+
+def _runway_heading(pen: _Pen, leg: RunwayHeading, direction: Turn | None) -> None:
+    """Climb along the runway's own course, from the runway's NASR ends; a
+    route that starts over the airport (a VCOA's) has no runway to follow."""
+    if pen.runway_course is None:
+        _unsupported(leg)
+    name = _leg_name(pen, direction, "runway heading")
+    _climb_course(pen, leg, direction, pen.runway_course, name, RUNWAY_HEADING_LABEL)
+
+
+def _climb_course(
+    pen: _Pen,
+    leg: ClimbHeading | RunwayHeading,
+    direction: Turn | None,
+    course: float,
+    name: str,
+    heading_text: str,
+) -> None:
+    """Turn onto the true `course`, then (with an altitude) climb straight on it.
 
     An altitude the climb already reached before the turn ends the leg
     where the turn ends.
     """
     ctx = pen.ctx
-    name = _leg_name(pen, direction, heading_phrase(leg))
-    points, side = pen.turn_onto(ctx.heading_true(leg.heading), direction)
+    points, side = pen.turn_onto(course, direction)
     match leg.until:
         case None:
             if len(points) > 1:
                 ctx.polyline(name, Style.ROUTE, points)
                 _arrowhead(ctx, name, Style.ROUTE, pen.at, pen.course)
-            _offset_label(pen, heading_label(leg.heading), pen.at, side)
+            _offset_label(pen, heading_text, pen.at, side)
             return
         case Altitude():
             _require_climb(pen, leg.until)
@@ -455,7 +482,7 @@ def _climb_heading(pen: _Pen, leg: ClimbHeading, direction: Turn | None) -> None
     if len(route) > 1:
         ctx.polyline(name, Style.ROUTE, route)
     _arrowhead(ctx, name, Style.ROUTE, pen.at, pen.course)
-    _offset_label(pen, heading_label(leg.heading), midpoint(turn_end, pen.at), side)
+    _offset_label(pen, heading_text, midpoint(turn_end, pen.at), side)
     ctx.label(format_altitude(leg.until, ctx.params.label_style), pen.at)
 
 

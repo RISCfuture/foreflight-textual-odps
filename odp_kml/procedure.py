@@ -123,6 +123,15 @@ class ClimbHeading:
 
 
 @dataclasses.dataclass(frozen=True)
+class RunwayHeading:
+    """Climb on the departure runway's own heading ("climb runway heading to
+    1400"), whatever its magnetic value."""
+
+    until: Until | None = None
+    speed: SpeedRestriction | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class HeadingSector:
     """Headings from `start` sweeping `clockwise` (or counterclockwise) to
     `end`, magnetic, as printed: "between 213° CCW to 353°"."""
@@ -229,6 +238,7 @@ class GraphicDeparture:
 
 Leg = (
     ClimbHeading
+    | RunwayHeading
     | HeadingRange
     | Direct
     | Radial

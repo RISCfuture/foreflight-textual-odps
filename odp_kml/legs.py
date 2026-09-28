@@ -32,6 +32,7 @@ from .procedure import (
     NavaidType,
     ProceedOnCourse,
     Radial,
+    RunwayHeading,
     SpeedRestriction,
     Thence,
     Turn,
@@ -290,7 +291,11 @@ class LegParser(TokenStream):
         return self._radial_leg()
 
     def _climb(self) -> Leg:
-        """climb := "climb" ("on course" | direct | in-hold | ["on"|"via"] (heading-leg | radial-leg))"""
+        """climb := "climb" ("on course" | direct | in-hold
+        | ["on"|"via"] (runway-heading | heading-range | heading-leg | radial-leg))
+
+        runway-heading := "runway heading" [until]
+        """
         self._expect("climb")
         if self._accept("on", "course"):
             return ProceedOnCourse()
@@ -299,6 +304,8 @@ class LegParser(TokenStream):
         if self._peek("in") or self._peek("-", "in", "-", "hold"):
             return self._climb_in_hold()
         self._accept_any("on", "via")
+        if self._accept("runway", "heading"):
+            return RunwayHeading(self._until())
         if self._peek_heading_range():
             return self._heading_range()
         if self._peek_heading():

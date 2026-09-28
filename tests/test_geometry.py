@@ -30,6 +30,7 @@ from odp_kml.procedure import (
     ProceedOnCourse,
     Radial,
     RunwayGroup,
+    RunwayHeading,
     SpeedRestriction,
     Thence,
     Turn,
@@ -467,3 +468,25 @@ def test_empty_heading_sector_is_degenerate():
         draw(resolved(group(HeadingRange((sector,)))))
 
     assert raised.value.signature == "empty heading sector"
+
+
+def test_runway_heading_follows_the_runway_course_not_a_printed_number():
+    rwy = runway("33", course=327.5)
+
+    drawing = draw(
+        resolved(group(RunwayHeading(feet(7000)), runways=("33",)), runways=(rwy,))
+    )
+
+    route = route_vertices(drawing)
+    bearing = math.degrees(math.atan2(route[-1][0], route[-1][1])) % 360
+    assert bearing == pytest.approx(327.5, abs=1e-6)
+    assert "rwy hdg" in [lbl.text for lbl in labels(drawing)]
+
+
+def test_runway_heading_after_a_vcoa_is_unsupported():
+    vcoa = VcoaGroup((), None, 7000, (RunwayHeading(feet(9000)),))
+
+    with pytest.raises(Degenerate) as raised:
+        draw(resolved(vcoa=(vcoa,)))
+
+    assert raised.value.signature == "unsupported construction: RunwayHeading"

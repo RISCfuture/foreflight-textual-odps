@@ -32,7 +32,9 @@ For each airport with a DEPARTURE PROCEDURE or VCOA section that resolves
 with certainty:
 
 - Initial climb, climbing turns, and turns at a fix or altitude.
-- Direct-to-navaid and heading legs flown to an altitude.
+- Direct-to-navaid and heading legs flown to an altitude, including
+  "climb runway heading", which follows the runway's own course
+  (`rwy hdg`).
 - Radial intercepts and tracking to an altitude, fix, DME distance, or
   the navaid.
 - "Proceed on course" after a runway's legs as a short dashed stub, bent
