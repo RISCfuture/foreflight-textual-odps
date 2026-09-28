@@ -695,6 +695,36 @@ def test_crossing_sentence_labels_the_fix_just_reached():
     )
 
 
+@pytest.mark.parametrize(
+    ("sentence", "until"),
+    [
+        ("Do not exceed 150 KIAS until reaching 1700 MSL.", "reaching 1700 MSL"),
+        (
+            "Do not exceed 210 KIAS until established on heading 245°.",
+            "established on heading 245°",
+        ),
+        (
+            "Do not exceed 240 KIAS until established on the LKV VORTAC R-158.",
+            "established on the LKV VORTAC R-158",
+        ),
+        ("Do not exceed 180 KIAS until passing BGQ VORTAC.", "passing BGQ VORTAC"),
+    ],
+)
+def test_speed_limit_sentence_applies_to_the_last_leg_flown(sentence, until):
+    text = (
+        "Rwy 6, climbing left turn heading 245° to 3000 before proceeding on course. "
+        f"{sentence}\nRwy 24, climb heading 245° to 2400 before proceeding on course."
+    )
+
+    groups = parse_departure_procedure(
+        text, airport="CRQ", amendment=None
+    ).runway_groups
+
+    turn, on_course = groups[0].legs
+    assert turn.then.speed.until_phrase == until
+    assert on_course == ProceedOnCourse()
+
+
 def test_all_other_courses_needs_a_heading_range_before_it():
     text = (
         "Rwy 8, climb heading 080° to 5000. All other courses: climbing left turn "

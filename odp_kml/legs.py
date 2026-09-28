@@ -320,9 +320,16 @@ class LegParser(TokenStream):
         return SpeedRestriction(kias, self._slice_from(start))
 
     def _speed_until(self) -> None:
-        """speed-until := "established on course" | "reaching" nnnn ["MSL"]
-        | nn.n "DME" | ["crossing"] target"""
-        if self._accept("established", "on", "course"):
+        """speed-until := "established on" ("course" | heading | radial-course)
+        | "reaching" nnnn ["MSL"] | nn.n "DME" | ["crossing" | "passing"] target"""
+        if self._accept("established", "on"):
+            self._accept("the")
+            if self._accept("course"):
+                return
+            if self._peek_heading():
+                self._heading()
+                return
+            self._radial_course()
             return
         if self._accept("reaching"):
             self._integer()
@@ -333,8 +340,28 @@ class LegParser(TokenStream):
             self._number()
             self._expect("dme")
             return
-        self._accept("crossing")
+        self._accept_any("crossing", "passing")
         self._target()
+
+    def _peek_speed_sentence(self) -> bool:
+        """ "... on course. Do not exceed 150 KIAS until reaching 1700 MSL." """
+        return (
+            self._index > 0
+            and self._tokens[self._index - 1].text == "."
+            and self._peek("do", "not", "exceed")
+        )
+
+    def _with_speed_sentence(self, legs: tuple[Leg, ...]) -> tuple[Leg, ...]:
+        """`legs` with a speed-limit sentence applied to the last leg flown."""
+        speed = self._speed_restriction()
+        self._expect(".")
+        for index in reversed(range(len(legs))):
+            if not isinstance(legs[index], ProceedOnCourse | Thence | CrossAt):
+                leg = legs[index]
+                if _speed_restriction_of(leg) is not None:
+                    raise self._error("two speed restrictions on one leg")
+                return (*legs[:index], self._with_speed(leg, speed), *legs[index + 1 :])
+        raise self._error("speed restriction without a leg")
 
     def _with_speed(self, leg: Leg, speed: SpeedRestriction) -> Leg:
         if isinstance(leg, ClimbingTurn) and leg.then is not None:
@@ -917,6 +944,11 @@ RANGE_ALTERNATIVES = (
     ("or", "climb"),
     ("or", "climbing"),
 )
+
+
+def _speed_restriction_of(leg: Leg) -> SpeedRestriction | None:
+    turned = leg.then if isinstance(leg, ClimbingTurn) else leg
+    return getattr(turned, "speed", None)
 
 
 def _turned(leg: Leg) -> Leg | None:

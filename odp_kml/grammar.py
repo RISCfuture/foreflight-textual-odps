@@ -285,11 +285,15 @@ class _Parser(LegParser):
                         groups = [_continued_to_tail(group) for group in groups]
                     break
                 groups.extend(self._runway_groups())
-                while self._peek_continuation() and self._may_continue(groups):
+                while (
+                    self._peek_continuation() or self._peek_speed_sentence()
+                ) and self._may_continue(groups):
                     last = groups[-1]
-                    groups[-1] = dataclasses.replace(
-                        last, legs=last.legs + self._continuation()
-                    )
+                    if self._peek_speed_sentence():
+                        legs = self._with_speed_sentence(last.legs)
+                    else:
+                        legs = last.legs + self._continuation()
+                    groups[-1] = dataclasses.replace(last, legs=legs)
             except ParseError as error:
                 if not self._in_part:
                     raise
@@ -618,8 +622,11 @@ class _Parser(LegParser):
         ]
         self._last_fix = _common_end_fix(entering)
         legs = self._legs([self._leg()])
-        while self._peek_continuation():
-            legs += self._continuation()
+        while self._peek_continuation() or self._peek_speed_sentence():
+            if self._peek_speed_sentence():
+                legs = self._with_speed_sentence(legs)
+            else:
+                legs += self._continuation()
         return legs, for_all
 
     def _require_tail_for_thence(
