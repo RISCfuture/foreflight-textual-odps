@@ -587,3 +587,43 @@ def test_crossing_is_labelled_at_the_fix_the_route_reached():
     with pytest.raises(Degenerate) as raised:
         draw(resolved(group(crossing), points=points))
     assert raised.value.signature == "crossing off the route"
+
+
+def test_altitude_reached_before_joining_a_radial_ends_the_leg_at_the_join():
+    """At 200 ft/NM, 5500 ft comes about 2.3 NM out, before R-180 is joined."""
+    leg = HeadingAndRadial(
+        magnetic(90), NavaidRef("VOR"), magnetic(180), False, feet(5500)
+    )
+
+    drawing = draw(resolved(group(leg), points=(point("VOR", 3.0, 20.0, VARIATION),)))
+
+    end = route_vertices(drawing)[-1]
+    assert end[0] == pytest.approx(3.0, abs=1e-6)
+    assert "5500'" in [lbl.text for lbl in labels(drawing)]
+
+
+def test_tail_along_a_radial_starts_where_the_first_route_joined_it():
+    """RWY 36 joins R-180 (true) south of where RWY 18 does; both fly it north."""
+    vor = NavaidRef("VOR")
+    radial = magnetic(180)
+    procedure = resolved(
+        group(HeadingAndRadial(magnetic(90), vor, radial, False, feet(5500)), Thence()),
+        group(
+            HeadingAndRadial(magnetic(90), vor, radial, False, feet(5500)),
+            Thence(),
+            runways=("18",),
+        ),
+        runways=(runway(), runway("18", course=180.0, der=(0.0, 6.0))),
+        points=(point("VOR", 3.0, 20.0, VARIATION),),
+        shared_tail=(Radial(vor, radial, False, AtFix(vor)),),
+    )
+
+    drawing = draw(procedure)
+
+    (tail,) = [
+        line
+        for line in polylines(drawing)
+        if line.name.startswith("RWY 36/18") and not line.name.endswith("arrow")
+    ]
+    assert xy(tail.points[0])[1] < 4.0
+    assert xy(tail.points[-1]) == pytest.approx((3.0, 20.0), abs=1e-6)

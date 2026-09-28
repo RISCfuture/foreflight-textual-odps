@@ -78,6 +78,7 @@ MIN_LEG_NM = 0.5
 ANGLE_EPSILON_DEG = 1e-6
 MIN_INTERCEPT_DEG = 15.0
 ON_RADIAL_TOLERANCE_NM = 0.5
+ON_TRACK_DEG = 1.0
 ARRIVAL_TOLERANCE_NM = 0.01
 HOLD_HIGH_ALTITUDE_FT = 14000
 HOLD_LEG_MINUTES_LOW = 1.0
@@ -284,13 +285,7 @@ def _draw_shared_tail(ctx: _Context, pens: list[_Pen], legs: tuple[Leg, ...]) ->
         legs = legs[1:]
         if not legs:
             return
-    first = pens[0]
-    for pen in pens[1:]:
-        gap = distance(first.at, pen.at)
-        if gap > SHARED_TAIL_TOLERANCE_NM:
-            raise Degenerate(
-                "shared tail start mismatch", f"{pen.name} {gap:.2f} NM away"
-            )
+    first = _shared_radial_start(ctx, pens, legs[0]) or _converged(pens)
     runways = (
         runway
         for group in ctx.resolved.procedure.runway_groups
@@ -299,6 +294,43 @@ def _draw_shared_tail(ctx: _Context, pens: list[_Pen], legs: tuple[Leg, ...]) ->
     )
     first.name = f"RWY {'/'.join(runways)}"
     _draw_legs(first, legs)
+
+
+def _converged(pens: list[_Pen]) -> _Pen:
+    """The first route, provided every other ends within tolerance of it."""
+    first = pens[0]
+    for pen in pens[1:]:
+        gap = distance(first.at, pen.at)
+        if gap > SHARED_TAIL_TOLERANCE_NM:
+            raise Degenerate(
+                "shared tail start mismatch", f"{pen.name} {gap:.2f} NM away"
+            )
+    return first
+
+
+def _shared_radial_start(ctx: _Context, pens: list[_Pen], leg: Leg) -> _Pen | None:
+    """When the tail goes on along a radial every route is already tracking,
+    the route that joined it farthest back, since the others fly part of it.
+
+    ``None`` unless every route is on that radial, flying it the same way.
+    """
+    if not isinstance(leg, Radial) or leg.outbound is None:
+        return None
+    navaid = ctx.xy(leg.navaid.ident)
+    radial_course = _radial_true(ctx, leg)
+    track = _tracking_course(leg, radial_course)
+    placed = []
+    for pen in pens:
+        along, across = along_across(sub(pen.at, navaid), radial_course)
+        if (
+            along < 0
+            or abs(across) > ON_RADIAL_TOLERANCE_NM
+            or abs(wrap180(pen.course - track)) > ON_TRACK_DEG
+        ):
+            return None
+        placed.append((along, pen))
+    pick = min if leg.outbound else max
+    return pick(placed, key=lambda item: item[0])[1]
 
 
 def _draw_vcoa(ctx: _Context, vcoa: VcoaGroup) -> None:
@@ -707,12 +739,17 @@ def _track_radial(
     pen: _Pen, leg: Radial | HeadingAndRadial, name: str, points: list[Vec], side: int
 ) -> None:
     """Track the radial from the current position to the leg's end, drawing
-    the route and the radial itself."""
+    the route and the radial itself.
+
+    An altitude the climb already reached before joining the radial ends the
+    leg where it joins, as a heading leg's does where its turn ends.
+    """
     ctx = pen.ctx
     navaid = ctx.xy(leg.navaid.ident)
     joined = pen.at
     end = _tracking_end(pen, leg, navaid)
-    _require_length(along_across(sub(end, joined), pen.course)[0], leg)
+    if end != joined or not isinstance(leg.until, Altitude):
+        _require_length(along_across(sub(end, joined), pen.course)[0], leg)
     pen.straight_to(end)
     ctx.polyline(name, Style.ROUTE, [*points, end])
     _arrowhead(ctx, name, Style.ROUTE, end, pen.course)
@@ -754,6 +791,8 @@ def _tracking_end(pen: _Pen, leg: Radial | HeadingAndRadial, navaid: Vec) -> Vec
             return end
         case Altitude(feet=feet):
             remaining = pen.altitude_leg_nm(feet) - pen.along_nm
+            if remaining <= 0:
+                return pen.at
             end = offset(pen.at, pen.course, remaining)
             if not leg.outbound and along_across(sub(navaid, end), pen.course)[0] < 0:
                 _unsupported(leg)
