@@ -594,6 +594,59 @@ def test_turn_with_no_route_needs_a_shared_tail():
     assert signature_of(text) == "turn without a route"
 
 
+BRK = NavaidRef("BRK", NavaidType.VOR_DME)
+HOLD_NW = HoldSpec(Compass8.NW, Turn.LEFT, 159)
+MEA_MCA = EnrouteAltitude(
+    ("MEA", "MCA"), AltitudeKind.AT_OR_ABOVE, "at or above MEA/MCA for route of flight"
+)
+
+
+@pytest.mark.parametrize(
+    ("tail", "hold"),
+    [
+        pytest.param(
+            "...continue climb in holding pattern (hold NW, LT, 159° inbound) to "
+            "cross BRK VOR/DME at or above MEA/MCA for route of flight.",
+            ClimbInHold(BRK, HOLD_NW, MEA_MCA),
+            id="fix named by the crossing",
+        ),
+        pytest.param(
+            "...climb in holding pattern (BRK VOR/DME hold NW, LT, 159° inbound) to "
+            "cross BRK VOR/DME at or above MEA/MCA for route of flight.",
+            ClimbInHold(BRK, HOLD_NW, MEA_MCA),
+            id="fix named inside the parentheses",
+        ),
+        pytest.param(
+            "...continue climb to 13000 in BRK VOR/DME holding pattern (hold NW, LT, "
+            "159° inbound).",
+            ClimbInHold(BRK, HOLD_NW, to(13000)),
+            id="altitude before the hold",
+        ),
+        pytest.param(
+            "...climb-in-holding pattern (NW, LT, 159° inbound) to 13000.",
+            ClimbInHold(NavaidRef("BRK", NavaidType.VOR_DME), HOLD_NW, to(13000)),
+            id="hyphenated, at the tail's only fix",
+        ),
+    ],
+)
+def test_hold_fix_may_be_named_anywhere_in_the_hold(tail, hold):
+    text = f"Rwy 13, climbing left turn direct BRK VOR/DME, thence...\n{tail}"
+
+    procedure = parse_departure_procedure(text, airport="COS", amendment=None)
+
+    assert procedure.shared_tail == (hold,)
+
+
+def test_hold_fixes_named_twice_must_agree():
+    text = (
+        "Rwy 13, climbing left turn direct BRK VOR/DME, continue climb in BRK "
+        "holding pattern (hold NW, LT, 159° inbound) to cross ABC VOR at or above "
+        "9000."
+    )
+
+    assert signature_of(text) == "hold crossing names a different fix"
+
+
 def test_all_other_courses_needs_a_heading_range_before_it():
     text = (
         "Rwy 8, climb heading 080° to 5000. All other courses: climbing left turn "

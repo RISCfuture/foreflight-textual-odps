@@ -99,7 +99,7 @@ class LegParser(TokenStream):
         ("..., or for climb in visual conditions") begins. Tracks the fix
         each leg ends at, for a hold that names none.
         """
-        self._last_fix = _end_fix(legs[-1]) if legs else None
+        self._last_fix = end_fix(legs[-1]) if legs else None
         while True:
             if self._peek_before() or (self._peek(",") and self._peek_before_at(1)):
                 self._accept(",")
@@ -121,7 +121,7 @@ class LegParser(TokenStream):
 
     def _append(self, legs: list[Leg], leg: Leg) -> None:
         legs.append(leg)
-        self._last_fix = _end_fix(leg)
+        self._last_fix = end_fix(leg)
 
     def _thence(self) -> bool:
         """thence := [","] "thence" "..." | [","] "..."
@@ -419,7 +419,7 @@ class LegParser(TokenStream):
             return ProceedOnCourse()
         if self._peek("direct"):
             return self._direct()
-        if self._peek("in") or self._peek("-", "in", "-", "hold"):
+        if self._peek("in") or self._peek("-", "in", "-"):
             return self._climb_in_hold()
         self._accept_any("on", "via")
         if self._accept("runway", "heading"):
@@ -431,9 +431,16 @@ class LegParser(TokenStream):
         return self._radial_leg()
 
     def _continue_climb(self) -> ClimbInHold:
-        """continue-climb := "continue climb" in-hold"""
+        """continue-climb := "continue climb" [hold-until] in-hold
+
+        e.g. "Continue climb to 13000 in RLG holding pattern (...)".
+        """
         self._expect("continue", "climb")
-        return self._climb_in_hold()
+        leading, crossed = self._hold_until()
+        if crossed is not None:
+            self._index -= 1
+            raise self._error('unsupported crossing before "in holding pattern"')
+        return self._climb_in_hold(leading)
 
     def _proceed(self) -> Radial | Direct:
         """proceed := "proceed" (("on" | "via") radial-leg | direct)"""
@@ -637,54 +644,80 @@ class LegParser(TokenStream):
 
     # --- Holding -----------------------------------------------------------
 
-    def _climb_in_hold(self) -> ClimbInHold:
-        """in-hold := hold-fix [hold-until] [hold-spec] [hold-until]"""
-        fix = self._hold_fix()
-        until = self._hold_until(fix)
-        hold = self._hold_spec() if self._peek("(") else None
+    def _climb_in_hold(
+        self, leading: Altitude | EnrouteAltitude | None = None
+    ) -> ClimbInHold:
+        """in-hold := hold-fix [hold-until] [hold-spec] [hold-until]
+
+        The hold's fix is whichever of these the text names, and they must
+        agree: before "holding pattern", inside the hold-spec ("(GKN VOR/DME
+        hold northwest, ...)"), the fix crossed ("to cross BRK VOR/DME at or
+        above ..."), or else the fix the previous leg reached.
+        `leading` is an altitude read before "in", as after "continue climb".
+        """
+        named = self._hold_fix()
+        until, crossed = self._hold_until()
+        spec_fix, hold = self._hold_spec() if self._peek("(") else (None, None)
         if until is None:
-            until = self._hold_until(fix)
+            until, crossed = self._hold_until()
+        if leading is not None:
+            if until is not None:
+                raise self._error("hold with two altitudes")
+            until = leading
+        fix = self._one_hold_fix(named, spec_fix, crossed)
         return ClimbInHold(fix, hold, until)
 
-    def _hold_fix(self) -> NavaidRef | FixRef:
-        """hold-fix := "-in-hold" | "in holding pattern" | "in" target "holding pattern"
+    def _hold_fix(self) -> NavaidRef | FixRef | None:
+        """hold-fix := "-in-hold" | "-in-holding pattern" | "in holding pattern"
+        | "in" ["the"] target "holding pattern"
 
-        The first two hold at the fix the previous leg reached.
+        ``None`` when the text names no fix here.
         """
-        if self._accept("-", "in", "-", "hold") or self._accept(
-            "in", "holding", "pattern"
+        if (
+            self._accept("-", "in", "-", "hold")
+            or self._accept("-", "in", "-", "holding", "pattern")
+            or self._accept("in", "holding", "pattern")
         ):
-            return self._preceding_fix()
+            return None
         self._expect("in")
+        self._accept("the")
         fix = self._target()
         self._expect("holding", "pattern")
         return fix
 
-    def _preceding_fix(self) -> NavaidRef | FixRef:
+    def _one_hold_fix(self, *named: NavaidRef | FixRef | None) -> NavaidRef | FixRef:
+        fixes = [fix for fix in named if fix is not None]
+        if any(not _same_facility(fix, fixes[0]) for fix in fixes):
+            raise self._error("hold crossing names a different fix")
+        if fixes:
+            return fixes[0]
         if self._last_fix is None:
             raise self._error("climb in hold without a preceding fix")
         return self._last_fix
 
-    def _hold_until(self, fix: NavaidRef | FixRef) -> Altitude | EnrouteAltitude | None:
+    def _hold_until(
+        self,
+    ) -> tuple[Altitude | EnrouteAltitude | None, NavaidRef | FixRef | None]:
         """hold-until := "to" (nnnn | enroute) | "until" altitude-constraint
-        | "to" ("cross" | "depart") <fix> altitude-constraint"""
+        | "to" ("cross" | "depart") <fix> altitude-constraint
+
+        Returns the altitude and the fix crossed, if one is named.
+        """
         if self._peek("to") and self._peek_integer(1):
-            return self._to_altitude()
+            return self._to_altitude(), None
         if self._peek("to") and self._peek_enroute(1):
             start = self._position()
             self._expect("to")
-            return self._enroute(AltitudeKind.TO, start)
+            return self._enroute(AltitudeKind.TO, start), None
         if self._peek("until", "at"):
             self._expect("until")
-            return self._altitude_constraint()
+            return self._altitude_constraint(), None
         if not (self._peek("to", "cross") or self._peek("to", "depart")):
-            return None
+            return None, None
         self._expect("to")
         self._expect_any("cross", "depart")
         crossed = self._target()
-        if not _same_facility(crossed, fix):
-            raise self._error("hold crossing names a different fix")
-        return self._altitude_constraint()
+        return self._altitude_constraint(), crossed
 
     def _altitude_constraint(self) -> Altitude | EnrouteAltitude:
         """altitude-constraint := "at" ["or" ("above" | "below")] (nnnn ["MSL"] | enroute)"""
@@ -733,9 +766,16 @@ class LegParser(TokenStream):
             self._expect("of", "intended", "route")
         return EnrouteAltitude(tuple(names), kind, self._slice_from(start))
 
-    def _hold_spec(self) -> HoldSpec:
-        """hold-spec := "(" ["hold"] compass "," hold-turns "," nnn ["°"] "inbound" ")" """
+    def _hold_spec(self) -> tuple[NavaidRef | FixRef | None, HoldSpec]:
+        """hold-spec := "(" [target] ["hold"] compass "," hold-turns "," nnn ["°"]
+        "inbound" ")"
+
+        Returns the fix named inside the parentheses, if any, and the hold.
+        """
         self._expect("(")
+        fix = None
+        if self._peek_navaid() and not self._peek_any_of(frozenset(COMPASS_WORDS)):
+            fix = self._target()
         self._accept("hold")
         direction = self._compass()
         self._expect(",")
@@ -744,7 +784,7 @@ class LegParser(TokenStream):
         inbound = self._integer()
         self._accept("°")
         self._expect("inbound", ")")
-        return HoldSpec(direction, turns, inbound)
+        return fix, HoldSpec(direction, turns, inbound)
 
     def _compass(self) -> Compass8:
         token = self._token()
@@ -864,10 +904,10 @@ def _same_facility(target: NavaidRef | FixRef, navaid: NavaidRef | FixRef) -> bo
     return target.ident == navaid.ident
 
 
-def _end_fix(leg: Leg) -> NavaidRef | FixRef | None:
+def end_fix(leg: Leg) -> NavaidRef | FixRef | None:
     """The fix a leg ends at, or ``None`` when it ends anywhere else."""
     if isinstance(leg, ClimbingTurn):
-        return _end_fix(leg.then) if leg.then is not None else None
+        return end_fix(leg.then) if leg.then is not None else None
     if isinstance(leg, Direct):
         return leg.target
     if isinstance(leg, ClimbInHold):

@@ -21,6 +21,7 @@ from .legs import (
     RANGE_ALTERNATIVES,
     VISUAL_CLIMB,
     LegParser,
+    end_fix,
 )
 from .normalize import normalize
 from .procedure import (
@@ -414,7 +415,12 @@ class _Parser(LegParser):
             self._accept_any(",", ":")
         elif not dotted:
             raise self._unmatched()
-        self._last_fix = None
+        entering = [
+            group
+            for group in (map(_continued_to_tail, groups) if for_all else groups)
+            if _ends_with_thence(group.legs)
+        ]
+        self._last_fix = _common_end_fix(entering)
         return self._legs([self._leg()]), for_all
 
     def _require_tail_for_thence(
@@ -572,6 +578,14 @@ def _continued_to_tail(group: RunwayGroup) -> RunwayGroup:
     ):
         return group
     return dataclasses.replace(group, legs=(*group.legs, Thence()))
+
+
+def _common_end_fix(groups: list[RunwayGroup]) -> NavaidRef | FixRef | None:
+    """The fix every group reaches before "thence", if they all reach one."""
+    ends = {
+        end_fix(group.legs[-2]) if len(group.legs) > 1 else None for group in groups
+    }
+    return ends.pop() if len(ends) == 1 else None
 
 
 def _require_routes_for_turns(
