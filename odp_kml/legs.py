@@ -67,6 +67,9 @@ _NAVAID_TYPES = (
 )
 NAVAID_TYPE_WORDS = frozenset(words[0] for words, _ in _NAVAID_TYPES)
 VISUAL_CLIMB = ("for", "climb", "in", "visual", "conditions")
+BOUND_WORDS = {
+    f"{word}bound": point for word, point in COMPASS_WORDS.items() if len(word) > 2
+}
 
 
 class LegParser(TokenStream):
@@ -92,7 +95,7 @@ class LegParser(TokenStream):
         """
         self._last_fix = _end_fix(legs[-1]) if legs else None
         while True:
-            if self._peek("before") or self._peek(",", "before"):
+            if self._peek_before() or (self._peek(",") and self._peek_before_at(1)):
                 self._accept(",")
                 self._append(legs, self._before())
             elif (
@@ -173,11 +176,81 @@ class LegParser(TokenStream):
             return self._direct()
         raise self._unmatched()
 
-    def _before(self) -> ProceedOnCourse:
-        """before := "before" ("proceeding on course" | "turning" [turn | compass])"""
-        self._expect("before")
-        if self._accept("proceeding", "on", "course"):
+    def _peek_before(self) -> bool:
+        return self._peek_before_at(0)
+
+    def _peek_before_at(self, offset: int) -> bool:
+        return self._peek("before", offset=offset) or self._peek(
+            "prior", "to", offset=offset
+        )
+
+    def _before(self) -> ProceedOnCourse | Direct:
+        """before := ("before" | "prior to") (
+              "proceeding" ("on course" | "enroute" | direction | direct)
+            | "climbing on course"
+            | "turning" [turn-word] [direction] ["on course"]
+            | "turn")
+
+        A compass direction ("before turning southbound") is read but not
+        drawn; a turn direction bends the on-course stub.
+        """
+        if not self._accept("before"):
+            self._expect("prior", "to")
+        if self._accept("proceeding"):
+            if self._peek("direct"):
+                return self._direct()
+            if not (self._accept("on", "course") or self._accept("enroute")):
+                self._direction()
             return ProceedOnCourse()
+        if self._accept("climbing", "on", "course") or self._accept("turn"):
+            return ProceedOnCourse()
+        self._expect("turning")
+        token = self._token()
+        turn = None
+        if token is not None and token.lower in _TURN_WORDS:
+            self._index += 1
+            turn = _TURN_WORDS[token.lower]
+        if self._peek_direction():
+            self._direction()
+        self._accept("on", "course")
+        return ProceedOnCourse(turn)
+
+    # --- Compass directions ------------------------------------------------
+
+    def _peek_direction(self, offset: int = 0) -> bool:
+        token = self._token(offset)
+        return token is not None and (
+            token.lower in COMPASS_WORDS or token.lower in BOUND_WORDS
+        )
+
+    def _direction(self) -> Compass8:
+        """direction := compass ["bound"] | "northbound" | "southeastbound" | …"""
+        if not self._peek_direction():
+            raise self._unmatched()
+        return self._bound() or COMPASS_WORDS[self._next().lower]
+
+    def _peek_bound(self, offset: int = 0) -> bool:
+        """``southeast bound`` or ``westbound``, a direction of flight."""
+        token = self._token(offset)
+        if token is None:
+            return False
+        if token.lower in BOUND_WORDS:
+            return True
+        return (
+            token.lower in COMPASS_WORDS
+            and len(token.text) > 2
+            and self._peek("bound", offset=offset + 1)
+        )
+
+    def _bound(self) -> Compass8 | None:
+        """bound := compass "bound" | "northbound" | "southeastbound" | …"""
+        if not self._peek_bound():
+            return None
+        token = self._next()
+        if token.lower in BOUND_WORDS:
+            return BOUND_WORDS[token.lower]
+        self._expect("bound")
+        return COMPASS_WORDS[token.lower]
         self._expect("turning")
         token = self._token()
         if token is not None and token.lower in _TURN_WORDS:

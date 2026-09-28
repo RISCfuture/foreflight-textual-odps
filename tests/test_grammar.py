@@ -427,6 +427,36 @@ def test_parses_heading_ranges(text, groups):
     assert procedure.runway_groups == tuple(groups)
 
 
+@pytest.mark.parametrize(
+    ("ending", "legs"),
+    [
+        ("before turning on course.", (ProceedOnCourse(),)),
+        ("before turning southbound.", (ProceedOnCourse(),)),
+        ("before turning northeast bound.", (ProceedOnCourse(),)),
+        ("before turning right on course.", (ProceedOnCourse(Turn.RIGHT),)),
+        ("before turning west on course.", (ProceedOnCourse(),)),
+        ("before climbing on course.", (ProceedOnCourse(),)),
+        ("before proceeding enroute.", (ProceedOnCourse(),)),
+        ("before proceeding east.", (ProceedOnCourse(),)),
+        ("before proceeding southeast bound.", (ProceedOnCourse(),)),
+        ("prior to turning northbound.", (ProceedOnCourse(),)),
+        ("prior to turn.", (ProceedOnCourse(),)),
+        (
+            "before proceeding direct OED VORTAC.",
+            (Direct(NavaidRef("OED", NavaidType.VORTAC)),),
+        ),
+    ],
+)
+def test_parses_what_follows_the_climb(ending, legs):
+    text = f"Rwy 30, climb heading 300° to 1400 {ending}"
+
+    (group,) = parse_departure_procedure(
+        text, airport="X", amendment=None
+    ).runway_groups
+
+    assert group.legs == (ClimbHeading(300, to(1400)), *legs)
+
+
 def test_all_other_courses_needs_a_heading_range_before_it():
     text = (
         "Rwy 8, climb heading 080° to 5000. All other courses: climbing left turn "

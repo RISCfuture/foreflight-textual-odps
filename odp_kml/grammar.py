@@ -16,7 +16,6 @@ import re
 from collections.abc import Iterator, Mapping
 
 from .legs import (
-    COMPASS_WORDS,
     FIX_LENGTH,
     NAVAID_TYPE_WORDS,
     RANGE_ALTERNATIVES,
@@ -26,7 +25,6 @@ from .legs import (
 from .normalize import normalize
 from .procedure import (
     ClimbingTurn,
-    Compass8,
     FixRef,
     GraphicDeparture,
     HeadingRange,
@@ -131,9 +129,6 @@ _DP_NAME_MAX_TOKENS = 8
 # Lowercase words inside an airport name: "Augusta Rgnl at Bush Fld",
 # "Prairie du Chien Muni".
 _AIRPORT_NAME_CONNECTORS = frozenset({"at", "du"})
-_BOUND = {
-    f"{word}bound": point for word, point in COMPASS_WORDS.items() if len(word) > 2
-}
 
 
 class _Parser(LegParser):
@@ -420,28 +415,6 @@ class _Parser(LegParser):
         if legs and isinstance(legs[-1], Thence):
             raise ParseError("visual climb into the shared tail", "", self._position())
         return VcoaGroup(runways, cross, feet, legs, bound)
-
-    def _peek_bound(self, offset: int = 0) -> bool:
-        token = self._token(offset)
-        if token is None:
-            return False
-        if token.lower in _BOUND:
-            return True
-        return (
-            token.lower in COMPASS_WORDS
-            and len(token.text) > 2
-            and self._peek("bound", offset=offset + 1)
-        )
-
-    def _bound(self) -> Compass8 | None:
-        """bound := compass "bound" | "northbound" | "southeastbound" | …"""
-        if not self._peek_bound():
-            return None
-        token = self._next()
-        if token.lower in _BOUND:
-            return _BOUND[token.lower]
-        self._expect("bound")
-        return COMPASS_WORDS[token.lower]
 
     def _vcoa_crossing(self) -> FixRef | None:
         """crossing := FIX | airport-name — ``None`` means the departure airport."""
