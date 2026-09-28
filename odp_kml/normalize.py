@@ -29,7 +29,28 @@ def _straighten_quotes(text: str) -> str:
 
 
 def _expand_ellipsis(text: str) -> str:
-    return text.replace("…", "...")
+    """``…``, spaced ``. . .`` and a run of four or more dots all read ``...``.
+
+    Only spaces and tabs may separate the dots, so an ellipsis ending one line
+    and another opening the next stay two.
+    """
+    text = text.replace("…", "...")
+    return re.sub(r"\.(?:[ \t]?\.){2,}", "...", text)
+
+
+def _spell_radials(text: str) -> str:
+    """``r-221``, ``R- 083`` and ``R·210`` all read ``R-nnn``."""
+    return re.sub(r"\b[Rr][-·]\s*(?=\d{3}\b)", "R-", text)
+
+
+def _join_navaid_slash(text: str) -> str:
+    """``VOR/ DME``, a line break inside the type joined back, reads ``VOR/DME``."""
+    return re.sub(r"\b(VOR|NDB)/\s+DME\b", r"\1/DME", text)
+
+
+def _drop_thousands_separators(text: str) -> str:
+    """``10,000`` becomes ``10000``; a list such as ``1,200,300`` is left alone."""
+    return re.sub(r"(?<![\d,])(\d{1,2}),(\d{3})(?![\d,])", r"\1\2", text)
 
 
 def _spell_out_min_climb(text: str) -> str:
@@ -72,6 +93,9 @@ def _drop_doubled_of(text: str) -> str:
 _SUBSTITUTIONS: tuple[Callable[[str], str], ...] = (
     _straighten_quotes,
     _expand_ellipsis,
+    _spell_radials,
+    _join_navaid_slash,
+    _drop_thousands_separators,
     _spell_out_min_climb,
     _expand_fractions,
     _drop_foot_marks,
