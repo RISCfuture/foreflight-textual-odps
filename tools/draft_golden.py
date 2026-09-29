@@ -774,6 +774,10 @@ Output: one Procedure object matching the response schema. Every object carries
   states it next to that mention. Fixes are five-letter identifiers. A navaid
   named without an ident takes the ident given for that name elsewhere in the
   same procedure.
+- "Rwys 35 L/R," is 35L, 35R. A direction of flight after a radial settles
+  outbound: "R-340 northwest bound" flies away from the navaid, "R-350
+  southbound" toward it. "Then on assigned route" is ProceedOnCourse, and
+  "Thence..." opening a sentence of its own is still Thence.
 - Headings, radials, and inbound courses are integers (R-009 is 9, 070° is 70).
 - vcoa: one group per VCOA runway list; cross is the fix crossed, or null when
   climbing over the airport; at_or_above is the crossing altitude; bound is the

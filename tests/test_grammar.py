@@ -93,6 +93,26 @@ def test_parses_fixture_procedures(name):
     ("text", "groups", "shared_tail"),
     [
         pytest.param(
+            "Rwy 12, climb heading 128° to 1400 before proceeding on course\n"
+            "Rwy 26, climb heading 262° to 1500 before proceeding on course.",
+            [
+                RunwayGroup(("12",), (ClimbHeading(128, to(1400)), ProceedOnCourse())),
+                RunwayGroup(("26",), (ClimbHeading(262, to(1500)), ProceedOnCourse())),
+            ],
+            None,
+            id="period missing before the next runway's line",
+        ),
+        pytest.param(
+            "Rwys 35 L/R, climb heading 350° to 2000 before proceeding on course.",
+            [
+                RunwayGroup(
+                    ("35L", "35R"), (ClimbHeading(350, to(2000)), ProceedOnCourse())
+                )
+            ],
+            None,
+            id="runway sides printed apart from the number",
+        ),
+        pytest.param(
             "Rwy 22, NA - Obstacles. Rwys 2L/R, NA-ATC.\n"
             "Rwy 4: Climb heading 154° to 2500 before turning left.",
             [
@@ -319,6 +339,13 @@ def test_parses_leg_shapes(text, groups, shared_tail):
         ("Rwy 15, climb direct TPH", 'unexpected end after "<id>"'),
         (
             (
+                "Rwy 5, climb heading 046° to intercept OTH VOR/DME R-340 eastbound "
+                "to 1800."
+            ),
+            "direction of flight across the radial",
+        ),
+        (
+            (
                 "Rwy 16, climb heading 154° to 2500, do not exceed 200 KIAS until "
                 "turning left direct ABC VOR."
             ),
@@ -535,6 +562,11 @@ def test_parses_heading_ranges(text, groups):
         ("before proceeding enroute.", (ProceedOnCourse(),)),
         ("before proceeding east.", (ProceedOnCourse(),)),
         ("before proceeding southeast bound.", (ProceedOnCourse(),)),
+        ("before proceeding east or southeast bound.", (ProceedOnCourse(),)),
+        ("before turning west or northwest.", (ProceedOnCourse(),)),
+        ("before turning left", (ProceedOnCourse(Turn.LEFT),)),
+        (", then proceed on course.", (ProceedOnCourse(),)),
+        ("; then on assigned route.", (ProceedOnCourse(),)),
         ("prior to turning northbound.", (ProceedOnCourse(),)),
         ("prior to turn.", (ProceedOnCourse(),)),
         (
@@ -642,6 +674,23 @@ def test_radial_without_a_sense_is_left_for_the_drawing():
     assert group.legs[0].outbound is None
 
 
+@pytest.mark.parametrize(
+    ("course", "outbound"),
+    [
+        ("R-340 northwest bound to 1800", True),
+        ("R-350 southbound to OTH VOR/DME", False),
+    ],
+)
+def test_direction_of_flight_gives_a_radial_its_sense(course, outbound):
+    text = f"Rwy 5, climb on heading 046° to intercept OTH VOR/DME {course}."
+
+    (group,) = parse_departure_procedure(
+        text, airport="X", amendment=None
+    ).runway_groups
+
+    assert group.legs[0].outbound is outbound
+
+
 def test_radial_takes_the_sense_of_the_same_radial_flown_next():
     text = (
         "Rwy 11, climbing left turn heading 022° to intercept GLL VOR/DME R-221 to "
@@ -695,6 +744,23 @@ def test_ellipsis_alone_leads_into_an_all_aircraft_tail():
     assert [group.legs[-1] for group in procedure.runway_groups] == [Thence(), Thence()]
     assert procedure.runway_groups[1].legs[0] == ClimbingTurn(Turn.RIGHT, None)
     assert procedure.shared_tail == (Direct(NavaidRef("GLL", NavaidType.VOR_DME)),)
+
+
+def test_thence_may_open_a_sentence_of_its_own():
+    text = (
+        "Rwy 16, climb heading 156° to 5000, then climbing right turn direct RLY "
+        "VOR/DME. Thence ...\nRwy 34, climbing left turn direct RLY VOR/DME; thence "
+        "...\n... Continue climb in RLY VOR/DME holding pattern (hold N, right "
+        "turns, 159° inbound) to 9000."
+    )
+
+    procedure = parse_departure_procedure(text, airport="WRL", amendment=None)
+
+    rly = NavaidRef("RLY", NavaidType.VOR_DME)
+    assert [group.legs[-1] for group in procedure.runway_groups] == [Thence(), Thence()]
+    assert procedure.shared_tail == (
+        ClimbInHold(rly, HoldSpec(Compass8.N, Turn.RIGHT, 159), to(9000)),
+    )
 
 
 def test_turn_with_no_route_needs_a_shared_tail():
@@ -1229,6 +1295,23 @@ def test_sentence_repeated_for_each_runway_joins_the_last_one_too():
     ).runway_groups
 
     assert [type(group.legs[-2]) for group in groups] == [ClimbInHold, ClimbInHold]
+
+
+def test_visual_climb_continuing_with_its_route_into_the_tail_is_left_out():
+    text = (
+        "Rwy 14, climbing right turn direct OED VORTAC, or for climb in visual "
+        "conditions, cross Test airport at or above 4100 before proceeding direct "
+        "OED VORTAC. When executing VCOA, notify ATC prior to departure. Thence...\n"
+        "...all aircraft climb in OED VORTAC holding pattern (hold NW, right turns, "
+        "153° inbound) to 9000."
+    )
+
+    procedure, unparsed = read_in_part(text)
+
+    assert (procedure.runway_groups[0].legs[-1], procedure.vcoa) == (Thence(), ())
+    assert unparsed == [(("14",), "visual climb into the shared tail", True)]
+    with pytest.raises(ParseError):
+        parse_procedure(sections_of(text), airport="XXX")
 
 
 def test_notify_atc_sentence_reads_without_its_comma():

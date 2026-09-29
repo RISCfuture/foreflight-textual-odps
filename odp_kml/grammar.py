@@ -231,6 +231,7 @@ def _navaid_refs(node) -> Iterator[NavaidRef]:
 
 
 _RUNWAY = re.compile(r"\d{1,2}[LRC]?")
+_RUNWAY_SIDES = ("L", "R", "C")
 _DP_NAME_WORD = re.compile(r"[A-Z][A-Z0-9]*")
 _DP_NAME_PUNCTUATION = frozenset("()'")
 _DP_NAME_MAX_TOKENS = 8
@@ -297,6 +298,8 @@ class _Parser(LegParser):
                     else:
                         legs = last.legs + self._continuation()
                     groups[-1] = dataclasses.replace(last, legs=legs)
+                if self._peek_thence_sentence():
+                    groups[-1] = self._thence_sentence(groups[kept:], inline)
             except ParseError as error:
                 if not self._in_part:
                     raise
@@ -546,6 +549,44 @@ class _Parser(LegParser):
             for index, token in enumerate(self._tokens[self._index :], self._index)
         )
 
+    def _peek_thence_sentence(self) -> bool:
+        """``... direct RLY VOR/DME. Thence ...``: "thence" opening a sentence."""
+        return (
+            self._index > 0
+            and self._tokens[self._index - 1].text == "."
+            and self._peek("thence", "...")
+        )
+
+    def _thence_sentence(self, read: list[RunwayGroup], inline: int) -> RunwayGroup:
+        """thence-sentence := "Thence" "...", after the sentences of the runway
+        groups just `read`; returns the last of them, which it continues into
+        the shared tail.
+
+        A visual climb read beside that route ("..., or for climb in visual
+        conditions, cross ... direct OED VORTAC. When executing VCOA, notify
+        ATC prior to departure. Thence...") would continue into the tail too,
+        so it is refused: the tail is drawn from the runways.
+        """
+        last = read[-1] if read else None
+        if last is None or not _flies_route(last) or _ends_with_thence(last.legs):
+            raise self._error('"thence" without a route')
+        self._refuse_visual_climbs_into_tail(inline)
+        self._expect("thence", "...")
+        return _continued_to_tail(last)
+
+    def _refuse_visual_climbs_into_tail(self, inline: int) -> None:
+        """Leave out every visual climb read since the `inline`-th, as unread."""
+        refused = self._inline_vcoa[inline:]
+        if not refused:
+            return
+        error = self._error("visual climb into the shared tail")
+        if not self._in_part:
+            raise error
+        del self._inline_vcoa[inline:]
+        self.unparsed.extend(
+            Unparsed(vcoa.runways, error, vcoa=True) for vcoa in refused
+        )
+
     def _flown_legs(self) -> tuple[Leg, ...]:
         self._last_fix = None
         return self._legs([self._leg()])
@@ -627,19 +668,37 @@ class _Parser(LegParser):
         return token is not None and bool(_RUNWAY.fullmatch(token.text))
 
     def _runway(self) -> list[str]:
-        """runway := nn[LRC] ("/" [LRC])*  e.g. ``2L/R`` → ``2L``, ``2R``"""
+        """runway := nn[LRC] ("/" [LRC])*  e.g. ``2L/R`` → ``2L``, ``2R``
+
+        The sides of a pair may be printed apart from the number: ``2 L/R``.
+        """
         if not self._peek_runway():
             raise self._unmatched()
         number = self._next().text
+        if number.isdigit() and self._peek_spaced_side():
+            number += self._next().text
         runways = [number]
         while self._peek_sibling_runway():
             self._index += 1
             runways.append(number.rstrip("LRC") + self._next().text)
         return runways
 
-    def _peek_sibling_runway(self) -> bool:
-        side = self._token(1)
-        return self._peek("/") and side is not None and side.text in ("L", "R", "C")
+    def _peek_sibling_runway(self, offset: int = 0) -> bool:
+        side = self._token(offset + 1)
+        return (
+            self._peek("/", offset=offset)
+            and side is not None
+            and side.text in _RUNWAY_SIDES
+        )
+
+    def _peek_spaced_side(self) -> bool:
+        """``L/R`` printed apart from its runway number, as in ``35 L/R``."""
+        side = self._token()
+        return (
+            side is not None
+            and side.text in _RUNWAY_SIDES
+            and self._peek_sibling_runway(1)
+        )
 
     def _not_available(self) -> bool:
         """not-available := "NA" "-" ("Obstacles" | "ATC") "." """

@@ -88,6 +88,7 @@ ENROUTE_LEADS = frozenset({"the", "airway", "appropriate"})
 BOUND_WORDS = {
     f"{word}bound": point for word, point in COMPASS_WORDS.items() if len(word) > 2
 }
+_BOUND_TOLERANCE_DEG = 67.5
 
 
 class LegParser(TokenStream):
@@ -120,6 +121,7 @@ class LegParser(TokenStream):
                 (legs and self._peek_vcoa_alternative())
                 or self._peek_range_alternative(legs)
                 or self._accept(".")
+                or self._ends_on_course_unpunctuated(legs)
             ):
                 return tuple(legs)
             elif self._thence():
@@ -131,23 +133,48 @@ class LegParser(TokenStream):
                 self._leg_separator(required=bool(legs))
                 self._append(legs, self._leg())
 
+    def _accept_on_course(self) -> bool:
+        """on-course := "proceed on course" | "on assigned route", a leg that
+        leaves the procedure as "before proceeding on course" does: "..., then
+        proceed on course.", "...; then on assigned route."."""
+        return self._accept("proceed", "on", "course") or self._accept(
+            "on", "assigned", "route"
+        )
+
+    def _ends_on_course_unpunctuated(self, legs: list[Leg]) -> bool:
+        """A route that goes on course may omit its period where the text ends
+        ("... before turning left") or a runway header opens the next line
+        ("... on course⏎Rwy 26, climb ..."); a route ending anywhere else is
+        not taken as whole without one."""
+        return (
+            bool(legs)
+            and isinstance(legs[-1], ProceedOnCourse)
+            and (self._at_end() or self._peek_runway_header_line())
+        )
+
+    def _peek_runway_header_line(self) -> bool:
+        token, runway = self._token(), self._token(1)
+        return (
+            token is not None
+            and runway is not None
+            and token.lower in ("rwy", "rwys")
+            and runway.text[0].isdigit()
+            and "\n" in self._text[self._tokens[self._index - 1].end : token.start]
+        )
+
     def _append(self, legs: list[Leg], leg: Leg) -> None:
         legs.append(leg)
         self._last_fix = end_fix(leg)
 
     def _thence(self) -> bool:
-        """thence := [","] "thence" "..." | [","] "..."
+        """thence := ["," | ";"] "thence" "..." | ["," | ";"] "..."
 
         An ellipsis alone ("to 7000...") also leads into the shared tail.
         """
-        if not (
-            self._peek("thence")
-            or self._peek(",", "thence")
-            or self._peek("...")
-            or self._peek(",", "...")
-        ):
+        lead = 1 if self._peek(",") or self._peek(";") else 0
+        if not (self._peek("thence", offset=lead) or self._peek("...", offset=lead)):
             return False
-        self._accept(",")
+        self._index += lead
         self._accept("thence")
         self._expect("...")
         return True
@@ -198,6 +225,8 @@ class LegParser(TokenStream):
             return self._climb()
         if self._peek("continue"):
             return self._continue_climb()
+        if self._accept_on_course():
+            return ProceedOnCourse()
         if self._peek("proceed"):
             return self._proceed()
         if self._peek("direct"):
@@ -277,7 +306,18 @@ class LegParser(TokenStream):
         )
 
     def _direction(self) -> Compass8:
-        """direction := compass ["bound"] | "northbound" | "southeastbound" | …"""
+        """direction := point ("or" point)*, e.g. "east or southeast bound";
+        returns the first point.
+
+        point := compass ["bound"] | "northbound" | "southeastbound" | …
+        """
+        first = self._direction_point()
+        while self._peek("or") and self._peek_direction(1):
+            self._expect("or")
+            self._direction_point()
+        return first
+
+    def _direction_point(self) -> Compass8:
         if not self._peek_direction():
             raise self._unmatched()
         return self._bound() or COMPASS_WORDS[self._next().lower]
@@ -673,7 +713,24 @@ class LegParser(TokenStream):
             return navaid, radial, True
         if self._accept("inbound"):
             return navaid, radial, False
+        if self._peek_bound():
+            return navaid, radial, self._bound_outbound(radial)
         return navaid, radial, None
+
+    def _bound_outbound(self, radial: int) -> bool:
+        """A direction of flight printed after the radial in place of "inbound"
+        or "outbound" ("R-350 southbound"): whether it is outbound. It must lie
+        within 67.5° of one way along the radial, so that neither the compass
+        point's coarseness nor magnetic variation can flip it."""
+        start = self._index
+        bound = _compass_bearing(self._bound())
+        off_outbound = abs((bound - radial + 180) % 360 - 180)
+        if off_outbound <= _BOUND_TOLERANCE_DEG:
+            return True
+        if off_outbound >= 180 - _BOUND_TOLERANCE_DEG:
+            return False
+        self._index = start
+        raise self._error("direction of flight across the radial")
 
     def _radial(self) -> int:
         token = self._token()
@@ -687,11 +744,12 @@ class LegParser(TokenStream):
     ) -> bool | None:
         """As printed; a radial flown to its own navaid is inbound; otherwise
         ``None``, for the grammar or the drawing to settle."""
+        to_navaid = isinstance(until, AtFix) and _same_facility(until.target, navaid)
+        if direction and to_navaid:
+            raise self._error("radial flown outbound to its own navaid")
         if direction is not None:
             return direction
-        if isinstance(until, AtFix) and _same_facility(until.target, navaid):
-            return False
-        return None
+        return False if to_navaid else None
 
     # --- Leg terminators ---------------------------------------------------
 
@@ -1019,6 +1077,11 @@ RANGE_ALTERNATIVES = (
     ("or", "climb"),
     ("or", "climbing"),
 )
+
+
+def _compass_bearing(point: Compass8) -> int:
+    """``N`` → 0, ``NE`` → 45, … ``NW`` → 315."""
+    return list(Compass8).index(point) * 45
 
 
 def _speed_restriction_of(leg: Leg) -> SpeedRestriction | None:

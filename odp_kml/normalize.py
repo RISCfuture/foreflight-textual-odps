@@ -109,6 +109,21 @@ def _strip_lines(text: str) -> str:
     return "\n".join(line.strip() for line in text.split("\n"))
 
 
+def _spell_proceeding(text: str) -> str:
+    """``before preceding on course`` reads ``before proceeding on course``."""
+    return re.sub(r"\bpreceding on course\b", "proceeding on course", text)
+
+
+def _climb_on_course(text: str) -> str:
+    """``continue climb on course`` and ``continue climbing on course`` read
+    ``climb on course``."""
+    return re.sub(
+        r"\b([Cc])ontinue climb(?:ing)? on course\b",
+        lambda match: f"{'C' if match[1] == 'C' else 'c'}limb on course",
+        text,
+    )
+
+
 def _collapse_blank_lines(text: str) -> str:
     """A run of blank lines becomes one blank line."""
     return re.sub(r"\n{3,}", "\n\n", text)
@@ -133,6 +148,8 @@ _SUBSTITUTIONS: tuple[Callable[[str], str], ...] = (
     _drop_foot_marks,
     _collapse_horizontal_whitespace,
     _strip_lines,
+    _spell_proceeding,
+    _climb_on_course,
     _collapse_blank_lines,
     _drop_doubled_of,
     str.strip,

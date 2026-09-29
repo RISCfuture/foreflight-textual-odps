@@ -29,6 +29,7 @@ from .procedure import (
 from .resolved import ResolvedPoint, ResolvedProcedure, RunwayStart
 
 _MAX_RANGE_NM = 150.0
+_TEST_FACILITY_TYPE = "VOT"
 _FEET_PER_NM = 6076.11549
 
 
@@ -238,11 +239,16 @@ def _resolve_ref(
 def _resolve_navaid(
     ref: NavaidRef, airport: nasr.Airport, data: nasr.NasrData
 ) -> ResolvedPoint:
-    """The single navaid within range named `ref`, with its own declination."""
+    """The single navaid within range named `ref`, with its own declination.
+
+    A VOR test facility (VOT) sharing the ident is never it: it has no
+    radials and is no fix to fly to.
+    """
     matches = [
         navaid
         for navaid in data.navaids.get(ref.ident, ())
-        if (ref.type is None or navaid.type == ref.type.value)
+        if navaid.type != _TEST_FACILITY_TYPE
+        and (ref.type is None or navaid.type == ref.type.value)
         and distance_nm(airport.position, navaid.position) <= _MAX_RANGE_NM
     ]
     navaid = _pick_one(matches, ref.ident, "navaid not found", "navaid ambiguous")

@@ -33,6 +33,12 @@ class TestNormalize:
             ("Do not exceed 250 KTS until", "Do not exceed 250 KIAS until"),
             ("do not exceed 200 KIAS until", "do not exceed 200 KIAS until"),
             ("before turning left..", "before turning left."),
+            ("before preceding on course.", "before proceeding on course."),
+            (
+                "LIN VOR/DME, continue climbing on course.",
+                "LIN VOR/DME, climb on course.",
+            ),
+            ("CVV VOR/DME. Continue climb on course.", "CVV VOR/DME. Climb on course."),
             ("to 7000...", "to 7000..."),
             ("std. w/min. climb", "std. with a min. climb"),
             ("std. w/ min. climb", "std. with a min. climb"),

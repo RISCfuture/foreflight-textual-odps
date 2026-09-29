@@ -192,6 +192,19 @@ class TestNavaids:
         assert excinfo.value.kind == Kind.AMBIGUOUS_REF
         assert excinfo.value.signature == "navaid ambiguous"
 
+    def test_vor_test_facility_sharing_the_ident_is_not_the_navaid(self, nasr_data):
+        airport = nasr_data.airports["TPH"]
+        original = nasr_data.navaids["TPH"][0]
+        vot = dataclasses.replace(original, type="VOT", position=LatLon(38.06, -117.05))
+        data = dataclasses.replace(
+            nasr_data, navaids={**nasr_data.navaids, "TPH": (original, vot)}
+        )
+        procedure = _procedure_with_leg(Direct(NavaidRef("TPH")))
+
+        point = resolve(procedure, airport, data).points["TPH"]
+
+        assert point.position == original.position
+
     def test_one_ident_resolving_to_two_facilities_is_ambiguous(self):
         airport = _airport("TST", LatLon(40.0, -100.0), 1000.0, 10.0)
         vor = nasr.Navaid("ABC", "VOR", "ABLE", LatLon(40.1, -100.0), None, 10.0)
