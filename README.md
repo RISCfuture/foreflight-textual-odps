@@ -126,12 +126,15 @@ visual climb.
 ## How it decides what to draw
 
 A route is drawn only when the pipeline is certain of it: its text,
-and every sentence that may apply to it, parses completely (a sentence
-naming its runway applies to its VCOA too), every navaid and fix
-reference resolves to exactly one match in NASR, and the geometry hits
-no degenerate case (a radial parallel to a course, a turn with no
-defined radius, and so on). Anything less
-certain is never drawn; it becomes a `Finding` instead, listed in
+and every sentence that may apply to it, parses completely, every navaid
+and fix reference resolves to exactly one match in NASR, and the geometry
+hits no degenerate case (a radial parallel to a course, a turn with no
+defined radius, and so on). An unread sentence under a runway's header
+applies to that runway's routes and VCOAs, including a VCOA for all
+runways. One before the first runway header, after the last, or ending
+in a colon ("When tethered balloon ... is flying:") may apply to every
+departure, so nothing at that airport is drawn. Anything less certain is
+never drawn; it becomes a `Finding` instead, listed in
 `report.md` on the release for that cycle and filed as a GitHub issue,
 grouped by failure signature so one recurring problem across airports and
 cycles produces one issue. Coverage improves cycle by cycle as those

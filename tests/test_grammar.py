@@ -2022,9 +2022,15 @@ ROUTE_19 = "Rwy 19, climb heading 190° to 5000 before proceeding on course."
         ),
         pytest.param(
             f"Banana.\n{ROUTE_1}",
-            (HEADING_010,),
-            [()],
-            id="before any runway, none",
+            (),
+            [(), ("1",)],
+            id="before any runway, every route",
+        ),
+        pytest.param(
+            f"{ROUTE_1}\nWhen tethered balloon is flying:\n{ROUTE_19}",
+            (),
+            [("1",), ("19",)],
+            id="a condition ending in a colon, every route",
         ),
         pytest.param(
             "Rwy 19, climbing right turn direct ABC VOR, thence...continue climb in "
@@ -2100,6 +2106,35 @@ def test_unreadable_sentence_naming_no_runway_withholds_routes_it_may_modify(
 
     assert procedure.runway_groups == kept
     assert [runways for runways, _, _ in unparsed] == withheld
+
+
+ALL_RUNWAYS_VCOA = (
+    "All runways, obtain ATC approval for VCOA when requesting IFR clearance. "
+    "Climb in visual conditions to cross Test airport at or above 1800 before "
+    "proceeding on course."
+)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param(f"{ROUTE_1}\nVCOA NA at night.", id="after the last runway"),
+        pytest.param(
+            f"{ROUTE_1} NOTE: VCOA NA when tower closed.\n{ROUTE_19}",
+            id="after a runway's route",
+        ),
+        pytest.param(
+            f"When tower closed:\n{ROUTE_1}\n{ROUTE_19}", id="a condition first"
+        ),
+    ],
+)
+def test_unread_text_that_may_restrict_a_visual_climb_withholds_the_vcoa_section(
+    text,
+):
+    procedure, unparsed = read_in_part(text, ALL_RUNWAYS_VCOA)
+
+    assert procedure.vcoa == ()
+    assert ((), True) in [(runways, vcoa) for runways, _, vcoa in unparsed]
 
 
 def test_unread_text_naming_a_runway_withholds_its_routes_and_vcoa():

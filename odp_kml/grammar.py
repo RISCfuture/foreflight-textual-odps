@@ -54,12 +54,16 @@ class Unparsed:
     """Text for some runways that the grammar could not read.
 
     `runways` are those its runway header named, as far as the grammar
-    could read it; `vcoa` marks the VCOA section.
+    could read it; `vcoa` marks the VCOA section. `everywhere` marks text
+    that may restrict every departure: text before the first runway header,
+    after the last, or a condition ending in a colon ("When tethered balloon
+    ... is flying:").
     """
 
     runways: tuple[str, ...]
     error: ParseError
     vcoa: bool = False
+    everywhere: bool = False
 
 
 def parse_departure_procedure(
@@ -180,13 +184,19 @@ def _without_unread_runways(
     """`procedure` less every route and VCOA flown from a runway that
     unread text names, each joining `unparsed` with the first such text's
     error: that text may restrict every departure from the runway ("Rwy 31,
-    departure NA when R-3602B active"). A VCOA for all runways names none.
+    departure NA when R-3602B active"). A VCOA for all runways is flown from
+    each of them. Text that may restrict every departure withholds them all.
     """
+    everywhere = next((part.error for part in unparsed if part.everywhere), None)
     errors = {
         runway: part.error for part in reversed(unparsed) for runway in part.runways
     }
 
     def unread(group: RunwayGroup | VcoaGroup) -> ParseError | None:
+        if everywhere is not None:
+            return everywhere
+        if isinstance(group, VcoaGroup) and not group.runways:
+            return next(iter(errors.values()), None)
         return next((errors[r] for r in group.runways if r in errors), None)
 
     unread_routes = [
@@ -329,6 +339,7 @@ class _Parser(LegParser):
         self.unparsed: list[Unparsed] = []
         self._continuations: set[str] = set()
         self._unrouted: set[str] = set()
+        self._header_runways: tuple[str, ...] | None = None
 
     @property
     def inline_vcoa(self) -> tuple[VcoaGroup, ...]:
@@ -391,17 +402,18 @@ class _Parser(LegParser):
                     if self._names_all_aircraft_at(start):
                         groups = [_continued_to_tail(group) for group in groups]
                     break
-                runways = self._runways_at(start)
+                resume = self._next_group_at(start)
                 named = self._runways_named_at(start)
-                if runways or not any(map(_withholdable, groups)):
+                if self._runways_at(start):
                     self.unparsed.append(Unparsed(named, error))
                 else:
-                    self._withhold(
-                        groups, error, trailing=not self._header_after(start)
-                    )
+                    if self._restricts_every_departure(start, resume):
+                        self._withhold_everything(groups, error)
+                    else:
+                        self._withhold_runways_before(groups, error)
                     if named:
                         self.unparsed.append(Unparsed(named, error))
-                self._skip_to_next_group(groups, start, stopped)
+                self._skip_to_next_group(groups, stopped, resume)
         if self._in_part:
             if tail_error is None and not self._at_end():
                 tail_error, shared_tail = self._unmatched(), None
@@ -434,7 +446,7 @@ class _Parser(LegParser):
         if tail_error is not None and not any(
             _ends_with_thence(group.legs) for group in groups
         ):
-            self.unparsed.append(Unparsed((), tail_error))
+            self.unparsed.append(Unparsed((), tail_error, everywhere=True))
         readable = []
         for group in groups:
             error = None
@@ -518,23 +530,80 @@ class _Parser(LegParser):
         finally:
             self._index = resume
 
-    def _withhold(
-        self, groups: list[RunwayGroup], error: ParseError, *, trailing: bool
+    def _restricts_every_departure(self, start: int, resume: int) -> bool:
+        """Whether unread text from token `start` to `resume` that names no
+        runway may restrict every departure: it comes before the first runway
+        header or after the last, follows a header for all runways, or states
+        a condition ending in a colon for the text after it."""
+        return (
+            not self._header_runways
+            or not self._header_after(start)
+            or self._introduces_condition(start, resume)
+        )
+
+    def _introduces_condition(self, start: int, end: int) -> bool:
+        """Whether a colon between tokens `start` and `end` ends its line or
+        leads into a runway header: "When tower closed:⏎Rwy 1, ...". A colon
+        closing a runway header ("Rwy 4: Climb ...") leads into its route."""
+        return any(
+            self._tokens[index].text == ":"
+            and (self._starts_line(index + 1) or self._opens_header(index + 1))
+            for index in range(start, min(end, len(self._tokens) - 1))
+        )
+
+    def _opens_header(self, index: int) -> bool:
+        return index < len(self._tokens) and self._tokens[index].lower in (
+            "rwy",
+            "rwys",
+        )
+
+    def _withhold_everything(
+        self, groups: list[RunwayGroup], error: ParseError
     ) -> None:
-        """Leave out the routes an unreadable sentence naming no runway may
-        modify: after the last runway header, every route and the visual
-        climbs written into the section; between headers, the runways just
-        before it. A route is never drawn without a sentence it may have."""
-        flown = [group for group in groups if _withholdable(group)]
-        runways = None if trailing else flown[-1].runways
-        for group in flown:
-            if trailing or group.runways == runways:
+        """Leave out every route and visual climb read so far, and mark the
+        text as restricting every departure, so that those read after it and
+        the VCOA section's are left out too (`_without_unread_runways`). A
+        route is never drawn without a sentence it may have."""
+        if not self._withhold(groups, error, lambda _: True, everywhere=True):
+            self.unparsed.append(Unparsed((), error, everywhere=True))
+
+    def _withhold_runways_before(
+        self, groups: list[RunwayGroup], error: ParseError
+    ) -> None:
+        """Leave out the routes and visual climbs of the runway header just
+        before an unreadable sentence naming no runway, which it may modify,
+        and name those runways so the VCOA section's groups for them are left
+        out too."""
+        before = self._header_runways
+        if not self._withhold(groups, error, lambda runways: runways == before):
+            self.unparsed.append(Unparsed(before, error))
+
+    def _withhold(
+        self,
+        groups: list[RunwayGroup],
+        error: ParseError,
+        restricts,
+        *,
+        everywhere: bool = False,
+    ) -> bool:
+        """Leave out the routes and visual climbs written into the section
+        whose runways `restricts`; whether there were any."""
+        withheld = False
+        for group in [group for group in groups if _withholdable(group)]:
+            if restricts(group.runways):
                 groups.remove(group)
-                self.unparsed.append(Unparsed(group.runways, error))
+                self.unparsed.append(
+                    Unparsed(group.runways, error, everywhere=everywhere)
+                )
+                withheld = True
         for vcoa in list(self._inline_vcoa):
-            if trailing or vcoa.runways == runways:
+            if restricts(vcoa.runways):
                 self._inline_vcoa.remove(vcoa)
-                self.unparsed.append(Unparsed(vcoa.runways, error, vcoa=True))
+                self.unparsed.append(
+                    Unparsed(vcoa.runways, error, vcoa=True, everywhere=everywhere)
+                )
+                withheld = True
+        return withheld
 
     def _withhold_tail_vcoa(self, error: ParseError) -> None:
         if self._tail_vcoa is not None:
@@ -564,19 +633,10 @@ class _Parser(LegParser):
         finally:
             self._index = resume
 
-    def _skip_to_next_group(
-        self, groups: list[RunwayGroup], start: int, stopped: int
-    ) -> None:
-        """Resume at the next runway header or shared tail that opens a line
-        or sentence after `start`, or at the end.
-
-        Only the text up to the end of the sentence parsing `stopped` in is
-        surely the failed group's own. A sentence skipped after it is unread
-        like any other that names no runway: between headers it belongs to
-        the failed runways, and after the last header it withholds every
-        route (`_withhold`).
-        """
-        resume = next(
+    def _next_group_at(self, start: int) -> int:
+        """The next runway header or shared tail that opens a line or sentence
+        after token `start`, or the end."""
+        return next(
             (
                 index
                 for index in range(start + 1, len(self._tokens))
@@ -584,10 +644,22 @@ class _Parser(LegParser):
             ),
             len(self._tokens),
         )
+
+    def _skip_to_next_group(
+        self, groups: list[RunwayGroup], stopped: int, resume: int
+    ) -> None:
+        """Resume at token `resume`.
+
+        Only the text up to the end of the sentence parsing `stopped` in is
+        surely the failed group's own. A sentence skipped after it is unread
+        like any other that names no runway: between headers it belongs to
+        the failed runways, and after the last header it withholds every
+        departure (`_withhold_everything`).
+        """
         unowned = self._sentence_end(stopped)
         if unowned < resume and not self._header_after(unowned):
             self._index = unowned
-            self._withhold(groups, self._unmatched(), trailing=True)
+            self._withhold_everything(groups, self._unmatched())
         self._index = resume
 
     def _opens_group(self, index: int) -> bool:
@@ -664,9 +736,11 @@ class _Parser(LegParser):
         turn alternative is another group for the same runways.
         """
         if self._accept("all", "rwys") or self._accept("all", "runways"):
+            self._header_runways = ()
             self._expect(",")
             return self._all_runways_group()
         runways = self._runway_header()
+        self._header_runways = runways
         self._equipment_note()
         if self._not_available():
             return [RunwayGroup(runways, ())]
@@ -709,9 +783,11 @@ class _Parser(LegParser):
         self._index, self._last_fix = start, last_fix
         return None
 
-    def _starts_line(self) -> bool:
-        """Whether the next token begins a new line of the text."""
-        previous, token = self._tokens[self._index - 1], self._tokens[self._index]
+    def _starts_line(self, index: int | None = None) -> bool:
+        """Whether token `index` (the next token by default) begins a new line
+        of the text."""
+        index = self._index if index is None else index
+        previous, token = self._tokens[index - 1], self._tokens[index]
         return "\n" in self._text[previous.end : token.start]
 
     def _may_continue(self, groups: list[RunwayGroup]) -> bool:
