@@ -83,6 +83,16 @@ def to(feet: int) -> Altitude:
     return Altitude(feet, AltitudeKind.TO, f"to {feet}")
 
 
+TURN_ALTERNATIVES = (
+    "Rwy 16, climb heading 167° to 2700 before turning right. Climb heading 167° "
+    "to 3400 before turning left."
+)
+TURN_ALTERNATIVE_GROUPS = [
+    RunwayGroup(("16",), (ClimbHeading(167, to(2700)), ProceedOnCourse(Turn.RIGHT))),
+    RunwayGroup(("16",), (ClimbHeading(167, to(3400)), ProceedOnCourse(Turn.LEFT))),
+]
+
+
 @pytest.mark.parametrize("name", ["tph", "alb", "bam"])
 def test_parses_fixture_procedures(name):
     expected = expected_procedure(name)
@@ -537,6 +547,16 @@ def test_parses_fixture_procedures(name):
             None,
             id="lowercase climbing turn without a separator",
         ),
+        pytest.param(
+            f"{TURN_ALTERNATIVES}\nRwy 34, climb heading 347° to 2700 before "
+            "proceeding on course.",
+            [
+                *TURN_ALTERNATIVE_GROUPS,
+                RunwayGroup(("34",), (ClimbHeading(347, to(2700)), ProceedOnCourse())),
+            ],
+            None,
+            id="turn alternatives",
+        ),
     ],
 )
 def test_parses_leg_shapes(text, groups, shared_tail):
@@ -722,6 +742,27 @@ def test_parses_leg_shapes(text, groups, shared_tail):
                 "proceeding on course."
             ),
             'unmatched phrase "or for climb in"',
+        ),
+        (
+            (
+                "Rwy 3, climb heading 033° to 1720 before turning left. Climb "
+                "heading 300° to 3000 before turning right."
+            ),
+            "leg after proceeding on course",
+        ),
+        (
+            (
+                "Rwy 16, climb heading 167° to 2700 before turning right. Climb "
+                "heading 167° to 3400 before turning right."
+            ),
+            "leg after proceeding on course",
+        ),
+        (
+            (
+                "Rwy 16, climb heading 167° to 2700 before turning right; climb "
+                "heading 167° to 3400 before turning left."
+            ),
+            "leg after proceeding on course",
         ),
     ],
 )
@@ -1954,10 +1995,30 @@ ROUTE_19 = "Rwy 19, climb heading 190° to 5000 before proceeding on course."
             id="after the last runway, every route",
         ),
         pytest.param(
+            f"{ROUTE_1}\n{ROUTE_19} Proceed direct ABC VORTAC.",
+            (),
+            [("1",), ("19",)],
+            id="continuing after the last runway, every route",
+        ),
+        pytest.param(
+            f"{ROUTE_1}\nRwy 19, climb heading 190° to 5000 before turning left.\n"
+            "Climb heading 190° to 7000 before turning right.",
+            (),
+            [("1",), ("19",)],
+            id="turn alternative on its own line, every route",
+        ),
+        pytest.param(
             f"{ROUTE_1} Maintain 5000 or as assigned.\n{ROUTE_19}",
             (RunwayGroup(("19",), (ClimbHeading(190, to(5000)), ProceedOnCourse())),),
             [("1",)],
             id="between runways, the one before",
+        ),
+        pytest.param(
+            f"{TURN_ALTERNATIVES} Do not exceed 200 KIAS until reaching 2000.\n"
+            f"{ROUTE_1}",
+            (HEADING_010,),
+            [("16",), ("16",)],
+            id="after turn alternatives, both",
         ),
         pytest.param(
             f"Banana.\n{ROUTE_1}",

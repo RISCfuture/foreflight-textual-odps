@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TypeGuard
 
 from .procedure import (
@@ -149,7 +149,7 @@ class LegParser(TokenStream):
             else:
                 self._reject_airway_routing()
                 self._leg_separator(required=bool(legs))
-                self._append(legs, self._leg())
+                self._append(legs, self._next_leg(legs))
 
     def _accept_on_course(self) -> bool:
         """on-course := "proceed on course" | "on assigned route", a leg that
@@ -164,10 +164,8 @@ class LegParser(TokenStream):
         ("... before turning left") or a runway header opens the next line
         ("... on course⏎Rwy 26, climb ..."); a route ending anywhere else is
         not taken as whole without one."""
-        return (
-            bool(legs)
-            and isinstance(legs[-1], ProceedOnCourse)
-            and (self._at_end() or self._peek_runway_header_line())
+        return ends_on_course(legs) and (
+            self._at_end() or self._peek_runway_header_line()
         )
 
     def _peek_runway_header_line(self) -> bool:
@@ -305,8 +303,20 @@ class LegParser(TokenStream):
     def _follows_period(self) -> bool:
         return self._index > 0 and self._tokens[self._index - 1].text == "."
 
-    def _continuation(self) -> tuple[Leg, ...]:
-        return self._legs([self._leg()])
+    def _continuation(self, legs: tuple[Leg, ...]) -> tuple[Leg, ...]:
+        """`legs` and the legs of a continuation sentence that goes on flying them."""
+        return legs + self._legs([self._next_leg(legs)])
+
+    def _next_leg(self, legs: Sequence[Leg]) -> Leg:
+        """The leg flown after `legs`. A route that ends on course ("... before
+        turning right") has none: where the turn leaves the aircraft is not
+        known, so a leg read after it is refused."""
+        start = self._index
+        leg = self._leg()
+        if ends_on_course(legs):
+            self._index = start
+            raise self._error("leg after proceeding on course")
+        return leg
 
     def _peek_if_required(self) -> bool:
         return self._peek("if", "required", "continue", "climb") or self._peek(
@@ -1454,3 +1464,8 @@ def end_fix(leg: Leg) -> NavaidRef | FixRef | None:
         case Dme(fix=fix):
             return fix
     return None
+
+
+def ends_on_course(legs: Sequence[Leg]) -> bool:
+    """Whether the route ends by proceeding on course."""
+    return bool(legs) and isinstance(legs[-1], ProceedOnCourse)

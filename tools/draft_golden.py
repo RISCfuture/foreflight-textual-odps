@@ -774,13 +774,17 @@ Output: one Procedure object matching the response schema. Every object carries
   5000" after reaching LIN), ProceedOnCourse
   (turn_restriction L/R only for "before turning left/right" or "before
   left/right turn"; null otherwise; toward the compass directions printed
-  for the course, "before proceeding north or northeast" is [N, NE], else []),
-  and Thence (the "thence..." marker leading into a shared tail).
+  for the course, "before proceeding north or northeast" is [N, NE], else [];
+  no leg follows it), and Thence (the "thence..." marker leading into a shared
+  tail).
 - "All other courses: ..." (or "or climb on a heading between ...") after a
   HeadingRange is a further runway group for the same runways. So is "or min.
   climb of 415 ft per NM to 1600 for all other courses" (or for the headings the
   ranges leave out, "for headings 101° through 314°"), whose only leg is
-  MinimumClimb: ft_per_nm and until the altitude.
+  MinimumClimb: ft_per_nm and until the altitude. So is a sentence on the
+  runway's own line that climbs the same heading as a route "... to 2700 before
+  turning right" to another altitude before turning the other way ("Climb
+  heading 167° to 3400 before turning left.").
 - Sentences that change nothing drawn have no node: "DME required." and
   "Diverse departures NA." "If required, continue climb in ... holding
   pattern" is the ClimbInHold.

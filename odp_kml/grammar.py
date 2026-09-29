@@ -24,9 +24,12 @@ from .legs import (
     VISUAL_CLIMB,
     LegParser,
     end_fix,
+    ends_on_course,
 )
 from .normalize import normalize
 from .procedure import (
+    Altitude,
+    ClimbHeading,
     ClimbingTurn,
     FixRef,
     GraphicDeparture,
@@ -36,9 +39,9 @@ from .procedure import (
     Leg,
     NavaidRef,
     Procedure,
-    ProceedOnCourse,
     Radial,
     RunwayGroup,
+    RunwayHeading,
     Thence,
     VcoaGroup,
 )
@@ -328,7 +331,7 @@ class _Parser(LegParser):
                     if self._peek_speed_sentence():
                         legs = self._with_speed_sentence(last.legs)
                     else:
-                        legs = last.legs + self._continuation()
+                        legs = self._continuation(last.legs)
                     groups[-1] = dataclasses.replace(last, legs=legs)
                 if self._peek_thence_sentence():
                     groups[-1] = self._thence_sentence(groups[kept:], inline)
@@ -569,13 +572,14 @@ class _Parser(LegParser):
         """runway-group := runway-header [equipment] (not-available
                            | unrouted | diverse-range
                            | graphic-dp | vcoa-only | [diverse-lead-in] legs
-                             range-alternative* [vcoa-alternative])
+                             range-alternative* turn-alternative*
+                             [vcoa-alternative])
                          | all-runways (graphic-dp | vcoa-only)
 
         A runway whose only procedure is a visual climb yields no runway group;
         its VCOA group joins `inline_vcoa`. Each alternative to a heading range
-        ("All other courses: …", "or climb on a heading between …") is another
-        group for the same runways.
+        ("All other courses: …", "or climb on a heading between …") and each
+        turn alternative is another group for the same runways.
         """
         if self._accept("all", "rwys") or self._accept("all", "runways"):
             self._expect(",")
@@ -596,8 +600,37 @@ class _Parser(LegParser):
         groups = [RunwayGroup(runways, self._first_legs(runways))]
         while _has_heading_range(groups[-1]) and self._range_alternative():
             groups.append(RunwayGroup(runways, self._alternative_legs(groups)))
+        while ends_on_course(groups[-1].legs) and (
+            alternative := self._turn_alternative(groups)
+        ):
+            groups.append(RunwayGroup(runways, alternative))
         self._vcoa_alternative(runways)
         return groups
+
+    def _turn_alternative(self, groups: list[RunwayGroup]) -> tuple[Leg, ...] | None:
+        """turn-alternative := "." legs, on the runway header's line
+
+        A sentence after routes that end on course, climbing as they do to
+        another altitude before turning another way: "Rwy 16, climb heading
+        167° to 2700 before turning right. Climb heading 167° to 3400 before
+        turning left." ``None``, having read nothing, for any other sentence.
+        """
+        if not self._peek_continuation() or self._starts_line():
+            return None
+        start, last_fix = self._index, self._last_fix
+        try:
+            legs = self._flown_legs()
+        except ParseError:
+            legs = None
+        if legs and _turn_alternatives([*(group.legs for group in groups), legs]):
+            return legs
+        self._index, self._last_fix = start, last_fix
+        return None
+
+    def _starts_line(self) -> bool:
+        """Whether the next token begins a new line of the text."""
+        previous, token = self._tokens[self._index - 1], self._tokens[self._index]
+        return "\n" in self._text[previous.end : token.start]
 
     def _may_continue(self, groups: list[RunwayGroup]) -> bool:
         """Whether a new sentence continues the last runway group's route.
@@ -607,15 +640,21 @@ class _Parser(LegParser):
         it repeats word for word a sentence read for an earlier runway; after
         the last of several routes that end apart it could otherwise mean all
         of them, so it is left unread. So is one straight after a visual
-        climb written into the section, which it may continue instead. A
-        speed limit sentence may also limit a heading range, so for one a
-        heading range counts as a route; one that could limit more than the
-        last group is left unread too.
+        climb written into the section, which it may continue instead, and
+        one after turn alternatives, which it could mean either of. A speed
+        limit sentence may also limit a heading range, so for one a heading
+        range counts as a route; one that could limit more than the last
+        group is left unread too.
         """
         speed = self._peek_speed_sentence()
         takes = _takes_speed_limit if speed else _flies_route
         last = groups[-1] if groups else None
-        if last is None or not takes(last) or _ends_with_thence(last.legs):
+        if (
+            last is None
+            or not takes(last)
+            or _ends_with_thence(last.legs)
+            or _ends_in_turn_alternatives(groups)
+        ):
             return False
         if self._follows_visual_climb():
             return False
@@ -1058,7 +1097,7 @@ class _Parser(LegParser):
             if ends_on_speed := self._peek_speed_sentence():
                 legs = self._with_speed_sentence(legs)
             else:
-                legs += self._continuation()
+                legs = self._continuation(legs)
         if not ends_on_speed and self._peek_tail_vcoa(legs, continuing):
             self._expect("or")
             self._tail_vcoa = self._inline_visual_climb(_runways_of(entering))
@@ -1069,7 +1108,7 @@ class _Parser(LegParser):
     ) -> bool:
         return (
             self._follows_period()
-            and isinstance(tail[-1], ProceedOnCourse)
+            and ends_on_course(tail)
             and self._peek("or", *VISUAL_CLIMB)
             and _every_route_enters_tail(continuing)
         )
@@ -1106,7 +1145,7 @@ class _Parser(LegParser):
         return tuple(groups)
 
     def _continued_vcoa(self, group: VcoaGroup) -> VcoaGroup:
-        legs = group.then + self._continuation()
+        legs = self._continuation(group.then)
         if isinstance(legs[-1], Thence):
             raise self._error("visual climb into the shared tail")
         return dataclasses.replace(group, then=legs)
@@ -1371,3 +1410,37 @@ def _range_sectors(groups: list[RunwayGroup]) -> tuple[HeadingSector, ...]:
 
 def _ends_with_thence(legs: tuple[Leg, ...]) -> bool:
     return bool(legs) and isinstance(legs[-1], Thence)
+
+
+def _ends_in_turn_alternatives(groups: list[RunwayGroup]) -> bool:
+    """Whether the last two groups are turn alternatives for the same runways."""
+    return (
+        len(groups) > 1
+        and groups[-2].runways == groups[-1].runways
+        and _turn_alternatives([groups[-2].legs, groups[-1].legs])
+    )
+
+
+def _turn_alternatives(routes: list[tuple[Leg, ...]]) -> bool:
+    """Whether every route is one straight climb, the same but for its
+    altitude, before turning a way that no other route turns."""
+    if not all(len(route) == 2 and ends_on_course(route) for route in routes):
+        return False
+    courses = {_climb_course(climb) for climb, _ in routes}
+    turns = {on_course.turn_restriction for _, on_course in routes}
+    return (
+        len(courses) == 1
+        and None not in courses
+        and len(turns) == len(routes)
+        and None not in turns
+    )
+
+
+def _climb_course(leg: Leg) -> ClimbHeading | RunwayHeading | None:
+    """A heading or runway-heading climb to an altitude, without the
+    altitude; ``None`` for any other leg."""
+    if isinstance(leg, ClimbHeading | RunwayHeading) and isinstance(
+        leg.until, Altitude
+    ):
+        return dataclasses.replace(leg, until=None)
+    return None

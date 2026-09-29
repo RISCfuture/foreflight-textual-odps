@@ -60,6 +60,9 @@ with certainty:
   the route ends without a stub. A VCOA that only proceeds on course
   draws just its circle, and the stub leaving it when the text names one
   direction.
+- Alternative climbs for one runway that differ only in altitude and turn
+  direction ("climb heading 167° to 2700 before turning right. Climb
+  heading 167° to 3400 before turning left."), each drawn to its own stub.
 - Climb-in-hold racetracks.
 - Heading ranges ("climb on a heading between 350° CW to 162° from DER")
   as a thin wedge from the turn-start point, labelled as printed
