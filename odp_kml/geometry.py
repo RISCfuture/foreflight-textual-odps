@@ -82,6 +82,7 @@ INTERCEPT_ANGLE_DEG = 45.0
 MAX_INTERCEPT_TURN_DEG = 270.0
 CONVERGE_ANGLE_DEG = 20.0
 ON_RADIAL_TOLERANCE_NM = 0.5
+JOINED_RADIAL_MAX_DEG = 3.0
 ON_TRACK_DEG = 1.0
 ARRIVAL_TOLERANCE_NM = 0.01
 HOLD_HIGH_ALTITUDE_FT = 14000
@@ -98,6 +99,10 @@ ARROW_SETBACK_NM = 0.5
 ARROW_SPLAY_DEG = 30.0
 RUNWAY_HEADING_LABEL = "rwy hdg"
 UNSTATED_SENSE = 'radial without "inbound" or "outbound"'
+UNSTATED_SENSE_TURN_DEG = 60.0
+RADIAL_COLINEAR = "radial colinear"
+INTERCEPT_BEHIND = "radial intercept behind"
+NO_INTERCEPT_AHEAD = (RADIAL_COLINEAR, INTERCEPT_BEHIND)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -311,6 +316,7 @@ def _draw_shared_tail(ctx: _Context, pens: list[_Pen], legs: tuple[Leg, ...]) ->
         if not legs:
             return
     first = _shared_radial_start(ctx, pens, legs[0]) or _converged(pens)
+    _require_one_sense(ctx, pens, legs[0])
     first.straight_out = False
     runways = (
         runway
@@ -336,6 +342,22 @@ def _converged(pens: list[_Pen]) -> _Pen:
                 "shared tail start mismatch", f"{pen.name} {gap:.2f} NM away"
             )
     return first
+
+
+def _require_one_sense(ctx: _Context, pens: list[_Pen], leg: Leg) -> None:
+    """Refuse a tail that sets out along a radial every route would fly a
+    different way, each settling its unprinted sense from where and on what
+    course it arrives."""
+    direction = None
+    if isinstance(leg, ClimbingTurn):
+        leg, direction = leg.then, leg.direction
+    if not isinstance(leg, Radial):
+        return
+    senses = {
+        _with_sense(ctx, leg, pen.at, pen.course, direction).outbound for pen in pens
+    }
+    if len(senses) > 1:
+        raise Degenerate(UNSTATED_SENSE, f"routes disagree: {leg!r}")
 
 
 def _shared_radial_start(ctx: _Context, pens: list[_Pen], leg: Leg) -> _Pen | None:
@@ -704,9 +726,14 @@ def _tangent_point(centre: Vec, radius: float, target: Vec, side: int, leg) -> V
 
 
 def _radial(pen: _Pen, leg: Radial, direction: Turn | None) -> None:
-    """Turn onto the radial's course from a position already on it, then track it."""
+    """Turn onto the radial's course from a position already on it, then track it.
+
+    A route that starts over the airport (a VCOA's) sets out on a schematic
+    course, so only a runway's route may take the radial's sense from its own.
+    """
     ctx = pen.ctx
-    leg = _with_sense(ctx, leg, pen.at)
+    course = pen.course if pen.runway_course is not None else None
+    leg = _with_sense(ctx, leg, pen.at, course, direction)
     radial_course = _radial_true(ctx, leg)
     name = _leg_name(pen, direction, radial_phrase(leg))
     points, side = pen.turn_onto(_tracking_course(leg, radial_course), direction)
@@ -746,7 +773,7 @@ def _intercept_radial(pen: _Pen, leg: Radial, direction: Turn | None) -> None:
     if direction is None:
         raise Degenerate("intercept without a turn", repr(leg))
     ctx = pen.ctx
-    leg = _with_sense(ctx, leg, pen.at)
+    leg = _with_sense(ctx, leg, pen.at, None)
     track = _tracking_course(leg, _radial_true(ctx, leg))
     side = _side(direction)
     beside = _abeam_after_turn(pen, leg, track, side, 0.0)
@@ -823,53 +850,137 @@ def _intercept_on[L: (Radial, HeadingAndRadial)](
     heading_text: str | None,
 ) -> None:
     """Turn onto the true `heading`, fly it to the radial, round the corner,
-    then track the radial; `heading_text` labels the heading, if printed."""
+    then track the radial; `heading_text` labels the heading, if printed.
+
+    Where a printed heading cannot intercept the radial ahead with room to
+    round the corner (it runs within `MIN_INTERCEPT_DEG` of the radial, meets
+    it behind, or too close), a runway's route that rolls out on the heading
+    already on the radial has joined it there, and turns straight onto it.
+    """
     ctx = pen.ctx
     radial_course = _radial_true(ctx, leg)
-    _require_intercept_angle(heading, radial_course, leg)
+    navaid = ctx.xy(leg.navaid.ident)
     points, heading_side = pen.turn_onto(heading, direction)
-    corner = _intercept(pen.at, heading, ctx.xy(leg.navaid.ident), radial_course, leg)
-    leg = _with_sense(ctx, leg, corner)
+    heading_start = pen.at
+    try:
+        leg, rounding_start = _rounding_start(pen, leg, heading, radial_course)
+    except Degenerate as refusal:
+        if not (
+            isinstance(leg, HeadingAndRadial)
+            and _rolled_out_on_radial(pen, refusal, navaid, radial_course)
+        ):
+            raise
+        leg = _with_sense(ctx, leg, heading_start, heading)
+        rounding_start = heading_start
     name = _leg_name(pen, direction, phrase) + radial_phrase(leg)
     track = _tracking_course(leg, radial_course)
-    turn = _signed_turn(heading, track, None)
-    lead = ctx.radius * math.tan(math.radians(abs(turn)) / 2)
-    if distance(pen.at, corner) < lead:
-        raise Degenerate(
-            "radial intercept behind", f"turn needs {lead:.2f} NM: {leg!r}"
-        )
-    heading_start = pen.at
-    pen.straight_to(offset(corner, heading + 180, lead))
+    pen.straight_to(rounding_start)
     if heading_text is not None:
         heading_middle = midpoint(heading_start, pen.at)
         _offset_label(pen, heading_text, heading_middle, heading_side)
-    rounding, side = pen.turn_onto(track, _turn(sign(turn)))
+    rounding, side = pen.turn_onto(
+        track, _turn(sign(_signed_turn(heading, track, None)))
+    )
+    _require_on_radial(pen.at, navaid, radial_course, leg)
     _track_radial(pen, leg, name, [*points, *rounding], side)
 
 
-def _with_sense[L: (Radial, HeadingAndRadial)](ctx: _Context, leg: L, joined: Vec) -> L:
-    """`leg` with its sense settled: as printed, else toward where it ends.
+def _rolled_out_on_radial(
+    pen: _Pen, refusal: Degenerate, navaid: Vec, radial_course: float
+) -> bool:
+    """Whether a heading refused for meeting its radial nowhere ahead rolled
+    out already on it. A VCOA's route sets out from a schematic point, so
+    where it rolls out never shows that."""
+    return (
+        refusal.signature in NO_INTERCEPT_AHEAD
+        and pen.runway_course is not None
+        and _on_radial(pen.at, navaid, radial_course)
+        and _bearing_off_radial(pen.at, navaid, radial_course) <= JOINED_RADIAL_MAX_DEG
+    )
+
+
+def _bearing_off_radial(at: Vec, navaid: Vec, radial_course: float) -> float:
+    """Degrees between the radial and the navaid's bearing to `at`, as a
+    course deviation indicator tuned to that radial would show it."""
+    along, across = along_across(sub(at, navaid), radial_course)
+    return math.degrees(math.atan2(abs(across), along))
+
+
+def _rounding_start[L: (Radial, HeadingAndRadial)](
+    pen: _Pen, leg: L, heading: float, radial_course: float
+) -> tuple[L, Vec]:
+    """`leg` with its sense settled, and where the turn from the heading onto
+    the radial begins so that it rolls out on the radial ahead."""
+    ctx = pen.ctx
+    _require_intercept_angle(heading, radial_course, leg)
+    corner = _intercept(pen.at, heading, ctx.xy(leg.navaid.ident), radial_course, leg)
+    leg = _with_sense(ctx, leg, corner, heading)
+    turn = _signed_turn(heading, _tracking_course(leg, radial_course), None)
+    lead = ctx.radius * math.tan(math.radians(abs(turn)) / 2)
+    if distance(pen.at, corner) < lead:
+        raise Degenerate(INTERCEPT_BEHIND, f"turn needs {lead:.2f} NM: {leg!r}")
+    return leg, offset(corner, heading + 180, lead)
+
+
+def _with_sense[L: (Radial, HeadingAndRadial)](
+    ctx: _Context,
+    leg: L,
+    joined: Vec,
+    course: float | None,
+    direction: Turn | None = None,
+) -> L:
+    """`leg` with its sense settled: as printed, else toward where it ends,
+    else the way the aircraft turns onto it.
 
     A radial printed without "inbound" or "outbound" that ends at a fix or a
     DME distance on that radial is flown whichever way along it reaches that
-    point from `joined`, where the aircraft joins the radial. Any other, or
-    one whose end is within `MIN_LEG_NM` of the join, is refused.
+    point from `joined`, where the aircraft joins the radial; one whose end
+    is within `MIN_LEG_NM` of the join is refused. One flown to an altitude
+    is flown the way an aircraft on `course` turns onto it (see
+    `_turned_sense`), and refused when no `course` is given. Any other is
+    refused.
     """
     if leg.outbound is not None:
         return leg
     navaid = ctx.xy(leg.navaid.ident)
-    course = _radial_true(ctx, leg)
+    radial_course = _radial_true(ctx, leg)
     match leg.until:
         case AtFix(target=target):
-            end = along_across(sub(ctx.xy(target.ident), navaid), course)[0]
+            end = along_across(sub(ctx.xy(target.ident), navaid), radial_course)[0]
         case Dme(navaid=dme, nm=nm) if dme.ident == leg.navaid.ident:
             end = nm
+        case Altitude() if course is not None:
+            outbound = _turned_sense(course, radial_course, direction, leg)
+            return dataclasses.replace(leg, outbound=outbound)
         case _:
             raise Degenerate(UNSTATED_SENSE, repr(leg))
-    start = along_across(sub(joined, navaid), course)[0]
+    start = along_across(sub(joined, navaid), radial_course)[0]
     if abs(end - start) < MIN_LEG_NM:
         raise Degenerate(UNSTATED_SENSE, repr(leg))
     return dataclasses.replace(leg, outbound=end > start)
+
+
+def _turned_sense(
+    course: float, radial_course: float, direction: Turn | None, leg
+) -> bool:
+    """Whether an aircraft on `course` turns onto the radial outbound rather
+    than inbound.
+
+    With no turn stated, it turns onto whichever of the radial's two courses
+    lies within `UNSTATED_SENSE_TURN_DEG` of its own. With a turn stated,
+    onto whichever that turn reaches after between `UNSTATED_SENSE_TURN_DEG`
+    and its supplement. A shorter stated turn is refused, since procedures
+    state turns of over 180° onto a radial and it may mean the other course;
+    so is a radial crossing the course more squarely than either allows.
+    """
+    low, high = 0.0, UNSTATED_SENSE_TURN_DEG
+    if direction is not None:
+        low, high = UNSTATED_SENSE_TURN_DEG, 180 - UNSTATED_SENSE_TURN_DEG
+    tracks = {True: radial_course, False: radial_course + 180}
+    for outbound, track in tracks.items():
+        if low <= abs(_signed_turn(course, track, direction)) <= high:
+            return outbound
+    raise Degenerate(UNSTATED_SENSE, repr(leg))
 
 
 def _require_intercept_angle(heading: float, radial_course: float, leg) -> None:
@@ -878,7 +989,7 @@ def _require_intercept_angle(heading: float, radial_course: float, leg) -> None:
         abs(wrap180(heading - radial_course - 180)),
     )
     if angle < MIN_INTERCEPT_DEG:
-        raise Degenerate("radial colinear", f"{angle:.1f} deg: {leg!r}")
+        raise Degenerate(RADIAL_COLINEAR, f"{angle:.1f} deg: {leg!r}")
 
 
 def _intercept(
@@ -895,15 +1006,22 @@ def _intercept(
     ahead = cross(to_navaid, u_r) / denominator
     along_radial = cross(to_navaid, u_h) / denominator
     if ahead <= 0 or along_radial <= 0:
-        raise Degenerate("radial intercept behind", repr(leg))
+        raise Degenerate(INTERCEPT_BEHIND, repr(leg))
     return offset(start, heading, ahead)
 
 
 def _require_on_radial(at: Vec, navaid: Vec, radial_course: float, leg) -> None:
     """Refuse to track a radial the route is not already established on."""
-    along, across = along_across(sub(at, navaid), radial_course)
-    if along < 0 or abs(across) > ON_RADIAL_TOLERANCE_NM:
+    if not _on_radial(at, navaid, radial_course):
+        across = along_across(sub(at, navaid), radial_course)[1]
         raise Degenerate("off radial", f"{across:.2f} NM abeam: {leg!r}")
+
+
+def _on_radial(at: Vec, navaid: Vec, radial_course: float) -> bool:
+    """Whether `at` lies on the radial itself, not its extension behind the
+    navaid, within `ON_RADIAL_TOLERANCE_NM` of it."""
+    along, across = along_across(sub(at, navaid), radial_course)
+    return along >= 0 and abs(across) <= ON_RADIAL_TOLERANCE_NM
 
 
 def _track_radial(
@@ -912,16 +1030,18 @@ def _track_radial(
     """Track the radial from the current position to the leg's end, drawing
     the route and the radial itself.
 
-    An altitude the climb already reached before joining the radial ends the
-    leg where it joins, as a heading leg's does where its turn ends. One
-    climbed to on the way to a fix or DME distance is labelled beside where
-    the leg ends, and the climb goes no higher until a later leg climbs on.
+    The climb gradient alone places an altitude's end, so the tracked part
+    may be any length: an altitude the climb already reached before joining
+    the radial ends the leg where it joins, as a heading leg's does where
+    its turn ends. One climbed to on the way to a fix or DME distance is
+    labelled beside where the leg ends, and the climb goes no higher until a
+    later leg climbs on.
     """
     ctx = pen.ctx
     navaid = ctx.xy(leg.navaid.ident)
     joined = pen.at
     end = _tracking_end(pen, leg, navaid)
-    if end != joined or not isinstance(leg.until, Altitude):
+    if not isinstance(leg.until, Altitude):
         _require_length(along_across(sub(end, joined), pen.course)[0], leg)
     pen.straight_to(end)
     ctx.polyline(name, Style.ROUTE, [*points, end])
@@ -1022,10 +1142,13 @@ def _proceed_on_course(pen: _Pen, leg: ProceedOnCourse) -> None:
 
 
 def _cross_at(pen: _Pen, leg: CrossAt) -> None:
-    """Label the altitude to cross the fix the route has just reached."""
+    """Label the altitude to cross the fix the route has just reached: at
+    it, or abeam it within `ON_RADIAL_TOLERANCE_NM`, where a radial flown to
+    the fix ends."""
     ctx = pen.ctx
     fix = ctx.xy(leg.fix.ident)
-    if distance(pen.at, fix) > ARRIVAL_TOLERANCE_NM:
+    along, across = along_across(sub(fix, pen.at), pen.course)
+    if abs(along) > ARRIVAL_TOLERANCE_NM or abs(across) > ON_RADIAL_TOLERANCE_NM:
         raise Degenerate("crossing off the route", repr(leg))
     _offset_label(pen, format_altitude(leg.altitude, ctx.params.label_style), fix, 0)
 

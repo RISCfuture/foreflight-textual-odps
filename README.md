@@ -139,6 +139,8 @@ used whenever the text does not otherwise constrain the geometry:
 | Intercept heading not printed | 45° to the radial on the side the turn ends; 20° after rolling out within 0.5 NM of it. Not drawn if the turn onto it is over 270° or over 45° off the turn onto the radial's course |
 | Magnetic headings | Airport's variation of record (WMM if unpublished) |
 | Magnetic radials | Referenced navaid's own station declination |
+| Intercept heading rolled out on its radial | Radial joined there, if a runway's route is within 0.5 NM and 3° of it |
+| Unprinted radial sense, flown to an altitude | Within 60° of the printed heading, else of a runway route's course or 60°–120° into its stated turn (all routes into a shared tail agreeing) |
 
 ## Data sources
 

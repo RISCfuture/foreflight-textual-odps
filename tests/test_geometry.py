@@ -222,13 +222,35 @@ def test_heading_intercepts_radial_inbound_and_tracks_to_the_vor():
     assert texts == {f"hdg {magnetic(90):03d}°", "VOR R-180"}
 
 
-def test_heading_colinear_with_radial_is_degenerate():
-    leg = HeadingAndRadial(magnetic(180), NavaidRef("VOR"), 180, outbound=True)
+@pytest.mark.parametrize(
+    ("heading", "radial", "vor_x", "refusal"),
+    [
+        (0, 0, 0.0, None),
+        (30, 0, 0.0, None),
+        (0, 0, 2.0, "radial colinear"),
+        (30, 0, -2.0, "radial intercept behind"),
+        (0, 350, 0.0, "radial colinear"),
+    ],
+)
+def test_heading_that_cannot_intercept_ahead_joins_the_radial_it_is_on(
+    heading, radial, vor_x, refusal
+):
+    """RWY 36 climbs to its turn start on R-360 (true) of a VOR at the field,
+    or 2 NM beside it, then flies a heading along or away from the radial; a
+    heading within 0.5 NM of R-350 but 10° off it has not joined it."""
+    leg = HeadingAndRadial(
+        magnetic(heading), NavaidRef("VOR"), magnetic(radial), True, feet(7000)
+    )
+    procedure = resolved(group(leg), points=(point("VOR", vor_x, 0.0, VARIATION),))
 
-    with pytest.raises(Degenerate) as raised:
-        draw(resolved(group(leg), points=(point("VOR", 0.0, 0.0),)))
-
-    assert raised.value.signature == "radial colinear"
+    if refusal:
+        with pytest.raises(Degenerate) as raised:
+            draw(procedure)
+        assert raised.value.signature == refusal
+    else:
+        end = route_vertices(draw(procedure))[-1]
+        assert abs(end[0]) < 0.5
+        assert end[1] > 9.0
 
 
 def straight_courses(drawing) -> set[int]:
@@ -744,11 +766,85 @@ def test_unstated_radial_sense_is_toward_where_the_leg_ends(until, outbound):
     assert any(line.name.endswith(sense) for line in polylines(drawing))
 
 
-def test_unstated_radial_sense_with_an_altitude_terminator_is_degenerate():
-    leg = Radial(NavaidRef("VOR"), 360 - int(VARIATION), None, feet(7000))
+@pytest.mark.parametrize(
+    ("leg", "sense"),
+    [
+        (Radial(NavaidRef("VOR"), magnetic(0), None, feet(7000)), "outbound"),
+        (
+            ClimbingTurn(
+                Turn.RIGHT, Radial(NavaidRef("WEST"), magnetic(270), None, feet(7000))
+            ),
+            "inbound",
+        ),
+        (
+            ClimbingTurn(
+                Turn.LEFT, Radial(NavaidRef("VOR"), magnetic(345), None, feet(7000))
+            ),
+            None,
+        ),
+        (
+            HeadingAndRadial(
+                magnetic(45), NavaidRef("SOUTH"), magnetic(0), None, feet(7000)
+            ),
+            "outbound",
+        ),
+        (
+            HeadingAndRadial(
+                magnetic(90), NavaidRef("SOUTH"), magnetic(0), None, feet(7000)
+            ),
+            None,
+        ),
+        (HeadingAndRadial(magnetic(45), NavaidRef("SOUTH"), magnetic(0), None), None),
+    ],
+)
+def test_unstated_radial_sense_to_an_altitude_is_the_way_it_is_turned_onto(leg, sense):
+    """RWY 36 reaches its turn start on R-360 (true) of VOR, 10 NM out on
+    R-270 of WEST after turning, and 8 NM up R-360 of SOUTH."""
+    points = (
+        point("VOR", 0.0, 0.0, VARIATION),
+        point("WEST", 10.0, 2.0 + R, VARIATION),
+        point("SOUTH", 3.0, -6.0, VARIATION),
+    )
 
+    if sense:
+        drawing = draw(resolved(group(leg), points=points))
+        assert any(line.name.endswith(sense) for line in polylines(drawing))
+    else:
+        with pytest.raises(Degenerate) as raised:
+            draw(resolved(group(leg), points=points))
+        assert raised.value.signature == 'radial without "inbound" or "outbound"'
+
+
+NORTH = point("NORTH", 0.0, 15.0, VARIATION)
+UP_NORTH_R180 = Radial(NavaidRef("NORTH"), magnetic(180), None, feet(9000))
+
+
+def reaching_fix_opposite_ways(order):
+    """RWY 36 and RWY 18, grouped in `order`, fly direct to FIX northbound
+    and southbound, then share a tail along R-180 (true) of NORTH."""
+    return resolved(
+        *(group(Direct(FixRef("FIX")), Thence(), runways=(rwy,)) for rwy in order),
+        runways=(runway(), runway("18", course=180.0, der=(0.0, 20.0))),
+        points=(NORTH, point("FIX", 0.0, 10.0)),
+        shared_tail=(UP_NORTH_R180,),
+    )
+
+
+@pytest.mark.parametrize(
+    "procedure",
+    [
+        resolved(vcoa=(VcoaGroup((), None, 7000, (UP_NORTH_R180,)),), points=(NORTH,)),
+        reaching_fix_opposite_ways(("36", "18")),
+        reaching_fix_opposite_ways(("18", "36")),
+    ],
+)
+def test_unstated_radial_sense_is_not_taken_from_a_course_no_one_route_flies(
+    procedure,
+):
+    """A VCOA's route sets out toward NORTH on a schematic course; routes
+    converging on a tail arrive on courses that turn onto it opposite ways."""
     with pytest.raises(Degenerate) as raised:
-        draw(resolved(group(leg), points=(point("VOR", 0.0, 0.0, VARIATION),)))
+        draw(procedure)
 
     assert raised.value.signature == 'radial without "inbound" or "outbound"'
 
@@ -786,12 +882,19 @@ def test_turns_into_the_tail_must_be_every_group_or_none():
     assert raised.value.signature == "shared tail start mismatch"
 
 
-def test_crossing_is_labelled_at_the_fix_the_route_reached():
-    vor = NavaidRef("VOR")
-    crossing = CrossAt(vor, feet(9000, AltitudeKind.AT_OR_ABOVE))
-    points = (point("VOR", 0.0, 12.0),)
+@pytest.mark.parametrize(
+    "route",
+    [
+        Direct(FixRef("FIX")),
+        Radial(NavaidRef("VOR"), magnetic(0), True, AtFix(FixRef("FIX"))),
+    ],
+)
+def test_crossing_is_labelled_at_the_fix_the_route_reached(route):
+    """FIX lies 0.3 NM east of R-360 (true), where a radial flown to it ends."""
+    crossing = CrossAt(FixRef("FIX"), feet(9000, AltitudeKind.AT_OR_ABOVE))
+    points = (point("VOR", 0.0, 0.0, VARIATION), point("FIX", 0.3, 12.0))
 
-    drawing = draw(resolved(group(Direct(vor), crossing), points=points))
+    drawing = draw(resolved(group(route, crossing), points=points))
 
     texts = [lbl.text for lbl in labels(drawing)]
     assert format_altitude(feet(9000, AltitudeKind.AT_OR_ABOVE), "plain") in texts
@@ -800,17 +903,22 @@ def test_crossing_is_labelled_at_the_fix_the_route_reached():
     assert raised.value.signature == "crossing off the route"
 
 
-def test_altitude_reached_before_joining_a_radial_ends_the_leg_at_the_join():
-    """At 200 ft/NM, 5500 ft comes about 2.3 NM out, before R-180 is joined."""
+@pytest.mark.parametrize("altitude", [5500, 6300])
+def test_radial_leg_to_an_altitude_ends_where_the_climb_reaches_it_or_the_join(
+    altitude,
+):
+    """At 200 ft/NM, R-180 is joined about 5.9 NM out: 5500 ft comes before
+    it, about 2.3 NM out, so the leg ends at the join; 6300 ft comes 0.4 NM
+    after it, where the leg ends however short its tracked part."""
     leg = HeadingAndRadial(
-        magnetic(90), NavaidRef("VOR"), magnetic(180), False, feet(5500)
+        magnetic(90), NavaidRef("VOR"), magnetic(180), False, feet(altitude)
     )
 
     drawing = draw(resolved(group(leg), points=(point("VOR", 3.0, 20.0, VARIATION),)))
 
     end = route_vertices(drawing)[-1]
     assert end[0] == pytest.approx(3.0, abs=1e-6)
-    assert "5500'" in [lbl.text for lbl in labels(drawing)]
+    assert f"{altitude}'" in [lbl.text for lbl in labels(drawing)]
 
 
 def test_altitude_climbed_on_the_way_to_a_fix_is_labelled_and_held_there():

@@ -208,11 +208,12 @@ class Radial:
     """Fly a navaid's radial, inbound or outbound.
 
     `outbound` is ``None`` when the text prints neither; the drawing then
-    takes it from where the leg ends, or refuses the leg. `altitude` is the
-    altitude climbed to on the way to a fix or DME distance that ends the
-    leg: "to 3000 via FSM R-064 to FSM VORTAC". `intercept` marks a radial
-    joined on no printed heading ("climbing left turn to intercept PUB
-    R-274"), rather than one the aircraft is already on.
+    takes it from where the leg ends or the way the aircraft turns onto the
+    radial, or refuses the leg. `altitude` is the altitude climbed to on the
+    way to a fix or DME distance that ends the leg: "to 3000 via FSM R-064 to
+    FSM VORTAC". `intercept` marks a radial joined on no printed heading
+    ("climbing left turn to intercept PUB R-274"), rather than one the
+    aircraft is already on.
     """
 
     navaid: NavaidRef
