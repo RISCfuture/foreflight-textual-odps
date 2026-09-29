@@ -8,6 +8,7 @@ from odp_kml.labels import (
     heading_range_lines,
     heading_range_phrases,
     hold_label,
+    not_shown_lines,
     speed_label,
     vcoa_label,
 )
@@ -137,3 +138,23 @@ def test_heading_range_lines_fill_as_few_whole_foreflight_labels_as_they_can(
     drops its "hdg" only to make room for them or save a line, else stand
     apart, and are left out when too many to name."""
     assert heading_range_lines(runways, phrases) == expected
+
+
+@pytest.mark.parametrize(
+    ("parts", "expected"),
+    [
+        (["RWY 17L/17R", "VCOA"], ["ODP NOT SHOWN", "RWY 17L/17R, VCOA"]),
+        (
+            ["RWY 17L/17R", "RWY 35L/35R"],
+            ["ODP NOT SHOWN", "RWY 17L/17R,", "RWY 35L/35R"],
+        ),
+        (
+            ["RWY 1L/1R/14L/14R/19L/19R", "RWY 32L/32R", "VCOA"],
+            ["ODP NOT SHOWN", "RWY 1L/1R/14L/14R/19L/", "19R, RWY 32L/32R, VCOA"],
+        ),
+    ],
+)
+def test_not_shown_lines_keep_every_part_whole_in_foreflight(parts, expected):
+    """No line is elided: parts pack into lines of at most 22 characters,
+    and only a part too long for a line breaks, after a "/"."""
+    assert not_shown_lines(parts) == expected

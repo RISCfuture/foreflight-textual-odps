@@ -166,7 +166,8 @@ class TestDrawings:
         (finding,) = outcome.findings
         assert finding.kind == Kind.PARSE_FAILED
         assert finding.detail.startswith("RWY 6: banana.")
-        assert "ODP NOT SHOWN: RWY 6" in label_texts(outcome.drawing)
+        texts = label_texts(outcome.drawing)
+        assert texts[texts.index("ODP NOT SHOWN") + 1] == "RWY 6"
         full = process_block(tph_block(), fixture_nasr(), options).drawing
         assert set(full.shapes) < set(outcome.drawing.shapes)
 

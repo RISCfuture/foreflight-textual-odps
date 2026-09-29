@@ -77,6 +77,7 @@ __all__ = [
     "DisplayParams",
     "draw",
     "format_altitude",
+    "lay_out_note",
     "lay_out_wedges",
     "trace",
     "turn_radius_nm",
@@ -136,6 +137,10 @@ LINE_CROSSING_COST = 4.0
 RADIAL_CROSSING_COST = 1.0
 OTHER_WEDGE_COST = 3.0
 OFF_MIDDLE_COST = 0.005
+# ForeFlight's airport symbol and name, which a note keeps clear of.
+AIRPORT_MARK_HALF_NM = (0.6, 0.3)
+NOTE_MAX_REACH_NM = 2.0
+NOTE_BEARING_STEP_DEG = 15
 UNSTATED_SENSE = 'radial without "inbound" or "outbound"'
 UNSTATED_SENSE_TURN_DEG = 60.0
 RADIAL_COLINEAR = "radial colinear"
@@ -249,6 +254,39 @@ def lay_out_wedges(
         others = [other for other in fans if other is not fan]
         shapes += fan.labels(plane, _Clutter.of(plane, shapes, others), step)
     return dataclasses.replace(drawing, shapes=tuple(shapes), wedges=())
+
+
+def lay_out_note(drawing: AirportDrawing, texts: list[str]) -> AirportDrawing:
+    """`drawing` with `texts` stacked as labels near the airport, within
+    `NOTE_MAX_REACH_NM` of it, where they are least cluttered by the
+    airport's own lines and labels (wedge labels among them, so this runs
+    after `lay_out_wedges`) and by ForeFlight's airport symbol and name,
+    and otherwise as near the airport as they can stand, south first."""
+    plane = LocalPlane(drawing.position)
+    airport = (0.0, 0.0)
+    clutter = _Clutter.of(
+        plane, list(drawing.shapes), [], [_box(airport, AIRPORT_MARK_HALF_NM)]
+    )
+    half = _block_half_size(texts)
+    spots = [
+        offset(airport, bearing_deg, reach)
+        for reach in _note_reaches()
+        for bearing_deg in range(180, 540, NOTE_BEARING_STEP_DEG)
+    ]
+    centre = min(
+        spots, key=lambda spot: clutter.cost(_box(spot, half)) + distance(airport, spot)
+    )
+    labels = (
+        Label(text, plane.to_latlon(*at))
+        for text, at in zip(texts, _block_lines(centre, len(texts)), strict=True)
+    )
+    return dataclasses.replace(drawing, shapes=(*drawing.shapes, *labels))
+
+
+def _note_reaches() -> list[float]:
+    """Distances out from the airport at which to try centring a note."""
+    steps = math.floor(NOTE_MAX_REACH_NM / LABEL_STEP_NM)
+    return [i * LABEL_STEP_NM for i in range(2, steps + 1)]
 
 
 class _Context:
@@ -1072,8 +1110,14 @@ class _Clutter:
 
     @classmethod
     def of(
-        cls, plane: LocalPlane, shapes: list[Polyline | Label], fans: list[_Fan]
+        cls,
+        plane: LocalPlane,
+        shapes: list[Polyline | Label],
+        fans: list[_Fan],
+        marks: Sequence[_Box] = (),
     ) -> _Clutter:
+        """The clutter of `shapes` and `fans`, and any other `marks` on the
+        map as boxes."""
         labels = [
             _box(plane.to_xy(shape.at), _block_half_size([shape.text]))
             for shape in shapes
@@ -1084,7 +1128,7 @@ class _Clutter:
         radials = [line for line in lines if line.style is Style.RADIAL]
         others = [line for line in lines if line.style is not Style.RADIAL]
         return cls(
-            [*labels, *apexes],
+            [*labels, *apexes, *marks],
             _plane_segments(plane, others),
             _plane_segments(plane, radials),
             fans,

@@ -18,9 +18,16 @@ from . import dtpp, nasr
 from .cycle import Cycle
 from .extract import AirportBlock, check_against_metafile, extract_blocks
 from .findings import Finding, Kind, Report
-from .geo import destination
-from .geometry import DEFAULT_PARAMS, Degenerate, DisplayParams, lay_out_wedges, trace
+from .geometry import (
+    DEFAULT_PARAMS,
+    Degenerate,
+    DisplayParams,
+    lay_out_note,
+    lay_out_wedges,
+    trace,
+)
 from .grammar import ParseError, Unparsed, parse_procedure_in_part
+from .labels import NOT_SHOWN, not_shown_lines
 from .minimums import parse_takeoff_minimums, speed_limit_for
 from .normalize import normalize
 from .palette import assign_palettes
@@ -45,8 +52,6 @@ _NO_METAFILE_AIRPORT = re.compile(
 _ICAO_LENGTH = 4
 VCOA_PART = "VCOA"
 UNNAMED_PART = "other runways"
-NOT_DRAWN_LABEL_OFFSET_NM = 1.0
-NOT_SHOWN_LABEL = "ODP NOT SHOWN"
 
 type SectionsEntry = dict[str, str | None]
 
@@ -187,13 +192,8 @@ def _not_drawn(
         airport = find_airport(nasr_data, finding.airport)
     except ResolveError:
         return BlockOutcome(entry, findings=(finding,))
-    at = destination(airport.position, 180.0, NOT_DRAWN_LABEL_OFFSET_NM)
-    marker = AirportDrawing(
-        airport.lid,
-        airport.name,
-        (Label(NOT_SHOWN_LABEL, at),),
-        position=airport.position,
-    )
+    empty = AirportDrawing(airport.lid, airport.name, (), position=airport.position)
+    marker = lay_out_note(empty, [NOT_SHOWN])
     return BlockOutcome(entry, findings=(finding,), marker=marker)
 
 
@@ -417,11 +417,9 @@ def _merged(drawings: list[AirportDrawing]) -> AirportDrawing:
 
 
 def _with_not_shown_label(drawing: AirportDrawing, parts: list[str]) -> AirportDrawing:
-    """Name the parts left undrawn just south of the airport, so a missing
-    line is not read as a runway without an ODP."""
-    text = f"{NOT_SHOWN_LABEL}: {', '.join(dict.fromkeys(parts))}"
-    at = destination(drawing.position, 180.0, NOT_DRAWN_LABEL_OFFSET_NM)
-    return dataclasses.replace(drawing, shapes=(*drawing.shapes, Label(text, at)))
+    """Name the parts left undrawn near the airport, clear of its drawing, so
+    a missing line is not read as a runway without an ODP."""
+    return lay_out_note(drawing, not_shown_lines(list(dict.fromkeys(parts))))
 
 
 def _runways_part(runways: tuple[str, ...]) -> str:

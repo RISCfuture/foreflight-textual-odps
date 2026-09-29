@@ -11,6 +11,7 @@ from odp_kml.geometry import (
     Degenerate,
     draw,
     format_altitude,
+    lay_out_note,
     lay_out_wedges,
     turn_radius_nm,
 )
@@ -719,6 +720,26 @@ def test_wedge_labels_sit_by_a_wide_wedge_clear_of_other_labels():
     assert distance(apex, tag) < 3.0
     assert distance(apex, moved) < 3.0
     assert distance(tag, moved) > 0.6
+
+
+def test_note_stands_by_the_airport_clear_of_its_labels():
+    """South of the airport's own mark when nothing else is there, else
+    moved over for a label already there, always within 2 NM."""
+
+    def spots(drawing):
+        return [xy(lbl.at) for lbl in labels(drawing) if lbl.text == "ODP NOT SHOWN"]
+
+    [alone] = spots(
+        lay_out_note(AirportDrawing("TST", "TEST", (), AIRPORT), ["ODP NOT SHOWN"])
+    )
+    other = Label("hdg 999° CW 999°", at(*alone))
+    crowded = AirportDrawing("TST", "TEST", (other,), AIRPORT)
+
+    [moved] = spots(lay_out_note(crowded, ["ODP NOT SHOWN"]))
+
+    assert alone[1] < -0.3 and abs(alone[0]) < 1e-6
+    assert distance((0.0, 0.0), moved) <= 2.0
+    assert distance(alone, moved) > 0.6
 
 
 def test_counterclockwise_sector_sweeps_the_other_way():

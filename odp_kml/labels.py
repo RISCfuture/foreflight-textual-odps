@@ -134,6 +134,40 @@ def heading_range_lines(
     return min([*leading, [_standing(tag), *_wrapped(phrases)]], key=len)
 
 
+NOT_SHOWN = "ODP NOT SHOWN"
+
+
+def not_shown_lines(parts: list[str]) -> list[str]:
+    """The labels naming the `parts` of an airport's procedure left undrawn,
+    top to bottom, each whole within `LABEL_LIMIT`: ``ODP NOT SHOWN``, then
+    the parts packed into as few lines as fit, e.g. ``["ODP NOT SHOWN",
+    "RWY 17L/17R, VCOA"]``. Only a part too long for a line of its own
+    breaks, after a ``/`` in its runway list."""
+    last = len(parts) - 1
+    pieces = [
+        piece
+        for index, part in enumerate(parts)
+        for piece in _unbroken(part + ("," if index < last else ""))
+    ]
+    lines: list[str] = []
+    for piece in pieces:
+        if lines and fits(joined := _joined(lines[-1], piece)):
+            lines[-1] = joined
+        else:
+            lines.append(piece)
+    return [NOT_SHOWN, *lines]
+
+
+def _unbroken(part: str) -> list[str]:
+    """`part` whole if it fits a line, else broken after each ``/``."""
+    return [part] if fits(part) else re.findall(r"[^/]+/?", part)
+
+
+def _joined(line: str, piece: str) -> str:
+    """`piece` after `line`: straight on after a ``/``, else after a space."""
+    return f"{line}{piece}" if line.endswith("/") else f"{line} {piece}"
+
+
 def _bare(phrase: str) -> str:
     """A range's first phrase without its ``hdg``, e.g. ``LT 256° CW 054°``."""
     return phrase.replace("hdg ", "", 1)
