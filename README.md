@@ -68,7 +68,8 @@ with certainty:
   as a fan from the turn-start point, beside the route flown on "all
   other courses": the route splits there into a line along each limiting
   heading, each turning off the arriving course as any other turn does
-  (the published way, else the shorter) and ending in an arrowhead, with a
+  (the published way; else the way that stays within the range, where only
+  one does; else the shorter) and ending in an arrowhead, with a
   light dashed arc between them. Each fan is labelled with its runways
   and the range as printed, keeping every heading, CW/CCW, printed turn
   and altitude, on as few lines as ForeFlight shows whole (it elides the
@@ -176,7 +177,7 @@ used whenever the text does not otherwise constrain the geometry:
 | Hold leg length | 1 minute (1.5 minutes above 14,000 ft; 1 minute to an unstated MEA, MCA or MOCA) |
 | VCOA circle | 2 NM schematic radius |
 | Heading-range wedge | 1 NM schematic radius from the turn start, or 0.3 NM beyond where the widest turn onto a limiting heading ends |
-| Wedge edges | Turn off the arriving course at the standard turn radius, like every other turn |
+| Wedge edges | Turn off the arriving course at the standard turn radius, like every other turn: the published way, else the way that passes only through headings inside the range where just one does, else the shorter |
 | Shared heading-range wedge | Turn starts within 1.5 NM of each other |
 | Wedge label clearance | Labels sized for about 20 NM across an iPad screen |
 | Runway-group shades | Same perceived lightness as the airport's color; hue within 15° of it and at most a third of the way to a comparably vivid palette color; chroma down to 60% from four groups on |

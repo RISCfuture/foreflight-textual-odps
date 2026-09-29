@@ -672,6 +672,27 @@ def test_heading_range_is_a_wedge_from_the_turn_start():
     assert all(x > 0 and y > apex[1] and distance(apex, (x, y)) < 3 for x, y in spots)
 
 
+def test_wedge_edge_with_no_printed_turn_stays_inside_the_sectors():
+    """FNL's shape: RWY 18 flies 180° true into a range from 186° CCW to
+    338°, the east. The shorter turn onto 338° (right, 158°) would pass
+    through the excluded west, so the edge turns left the long way."""
+    sector = HeadingSector(186, 338, clockwise=False)
+    south = runway("18", course=180.0)
+
+    drawing = draw(
+        resolved(group(HeadingRange((sector,)), runways=("18",)), runways=(south,))
+    )
+
+    [to_186, to_338] = [
+        [xy(p) for p in line.points]
+        for line in polylines(drawing, Style.ROUTE)
+        if " CCW " in line.name and not line.name.endswith("arrow")
+    ]
+    assert to_186[-1][1] < to_186[0][1]
+    assert all(x >= -1e-6 for x, _ in to_338)
+    assert max(x for x, _ in to_338) == pytest.approx(2 * R, abs=0.01)
+
+
 @pytest.mark.parametrize(
     ("spacing", "tags"),
     [(0.4, ["36L/R hdg"]), (4.0, ["36L hdg", "36R hdg"])],

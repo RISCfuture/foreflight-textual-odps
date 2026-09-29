@@ -992,10 +992,40 @@ class _Fan:
         return [*limits, *dashes]
 
     def turn_onto(self, heading: float, step: float) -> list[Vec]:
-        """The aircraft's turn from the apex onto `heading` (the published
-        way, else the shorter), flown like every other turn in the drawing."""
-        delta = _signed_turn(self.course, heading, self.turn)
+        """The aircraft's turn from the apex onto `heading`, flown like every
+        other turn in the drawing: the published way; else the one way that
+        keeps every heading passed through inside the sectors, as when the
+        course flown in already lies inside them; else the shorter."""
+        direction = self.turn or self._turn_within(heading)
+        delta = _signed_turn(self.course, heading, direction)
         return _turn_arc(self.apex, self.course, delta, self.turn_radius, step)
+
+    def _turn_within(self, heading: float) -> Turn | None:
+        """The way onto `heading` that stays inside the sectors, when only
+        one does."""
+        inside = [
+            turn
+            for turn in Turn
+            if self._sweeps_inside(_signed_turn(self.course, heading, turn))
+        ]
+        return inside[0] if len(inside) == 1 else None
+
+    def _sweeps_inside(self, delta: float) -> bool:
+        """Whether turning `delta` degrees from the course flown in passes
+        only through headings inside the sectors, checked a degree apart."""
+        steps = max(1, math.ceil(abs(delta)))
+        return all(
+            self._permits(self.course + delta * i / steps) for i in range(steps + 1)
+        )
+
+    def _permits(self, heading: float) -> bool:
+        """Whether `heading` lies inside a sector, its limits included."""
+        return any(
+            _within_sweep(heading, start, sweep)
+            or abs(wrap180(heading - start)) < ANGLE_EPSILON_DEG
+            or abs(wrap180(heading - start - sweep)) < ANGLE_EPSILON_DEG
+            for start, sweep in self.sectors
+        )
 
     def edge(self, heading: float, step: float) -> list[Vec]:
         """The turn onto `heading`, then straight on until `radius` out."""
