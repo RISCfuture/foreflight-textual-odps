@@ -158,13 +158,15 @@ def draw(
     """
     ctx = _Context(resolved, params)
     procedure = resolved.procedure
-    pens = [
-        pen
-        for runway_group in procedure.runway_groups
-        if runway_group.legs and not runway_group.graphic
-        for pen in _draw_runway_group(ctx, runway_group)
-        if _continues_to_tail(runway_group)
-    ]
+    pens = []
+    for runway_group in procedure.runway_groups:
+        if not runway_group.legs or runway_group.graphic:
+            continue
+        group_pens = _draw_runway_group(ctx, runway_group)
+        if _continues_to_tail(runway_group):
+            pens += group_pens
+        else:
+            _end_routes(group_pens)
     if procedure.shared_tail:
         _draw_shared_tail(ctx, pens, procedure.shared_tail)
     for vcoa in procedure.vcoa:
@@ -196,9 +198,15 @@ class _Context:
     def heading_true(self, magnetic: int) -> float:
         return magnetic_to_true(magnetic, self.resolved.airport_variation_east)
 
-    def polyline(self, name: str, style: Style, points: list[Vec]) -> None:
+    def polyline(self, name: str, style: Style, points: list[Vec]) -> Polyline:
         latlons = tuple(self.plane.to_latlon(*p) for p in points)
-        self._emit(Polyline(name, style, latlons))
+        line = Polyline(name, style, latlons)
+        self._emit(line)
+        return line
+
+    def discard(self, shape: Polyline | Label) -> None:
+        if shape in self.shapes:
+            self.shapes.remove(shape)
 
     def arc(self, centre: Vec, radius: float, start: float, sweep: float) -> list[Vec]:
         return arc(centre, radius, start, sweep, self.params.arc_step_deg)
@@ -248,6 +256,17 @@ def _runway_climb(start: RunwayStart, default_gradient: float) -> _Climb:
     return _Climb(published.ft_per_nm, published.to_ft, default_gradient)
 
 
+@dataclasses.dataclass(frozen=True)
+class _Arrowhead:
+    """An arrowhead drawn short of `end`, kept so it can be redrawn at `end`."""
+
+    shape: Polyline
+    name: str
+    style: Style
+    end: Vec
+    course: float
+
+
 @dataclasses.dataclass
 class _Pen:
     """Where the aircraft is: position, true course, and climb bookkeeping.
@@ -272,6 +291,7 @@ class _Pen:
     turn_pending: bool = False
     pending_direction: Turn | None = None
     open_heading: bool = False
+    last_arrow: _Arrowhead | None = None
 
     def altitude_leg_nm(self, feet: int) -> float:
         """Along-track distance at which the climb reaches `feet`."""
@@ -355,6 +375,7 @@ def _draw_shared_tail(ctx: _Context, pens: list[_Pen], legs: tuple[Leg, ...]) ->
             _draw_legs(pen, legs[:1], pen.pending_direction)
         legs = legs[1:]
         if not legs:
+            _end_routes(pens)
             return
     first = _shared_radial_start(ctx, pens, legs[0]) or _converged(pens)
     _require_one_sense(ctx, pens, legs[0])
@@ -367,6 +388,7 @@ def _draw_shared_tail(ctx: _Context, pens: list[_Pen], legs: tuple[Leg, ...]) ->
     )
     first.name = f"RWY {'/'.join(runways)}"
     _draw_legs(first, legs)
+    _end_routes([first])
 
 
 def _flies_first_tail_leg(pen: _Pen, first: Leg) -> bool:
@@ -455,6 +477,7 @@ def _draw_vcoa(ctx: _Context, vcoa: VcoaGroup) -> None:
             _Climb(ctx.params.default_gradient_ft_nm),
         )
         _draw_legs(pen, vcoa.then)
+        _end_routes([pen])
 
 
 def _vcoa_runways_name(runways: tuple[str, ...]) -> str:
@@ -663,7 +686,7 @@ def _climb_course(
         case None:
             if len(points) > 1:
                 ctx.polyline(name, Style.ROUTE, points)
-                _arrowhead(ctx, name, Style.ROUTE, pen.at, pen.course)
+                _arrowhead(pen, name, Style.ROUTE, pen.at, pen.course)
             _offset_label(pen, heading_text, pen.at, side)
             return
         case Altitude():
@@ -676,7 +699,7 @@ def _climb_course(
     route = [*points, pen.at] if straight else points
     if len(route) > 1:
         ctx.polyline(name, Style.ROUTE, route)
-    _arrowhead(ctx, name, Style.ROUTE, pen.at, pen.course)
+    _arrowhead(pen, name, Style.ROUTE, pen.at, pen.course)
     if heading_text is not None:
         _offset_label(pen, heading_text, midpoint(turn_end, pen.at), side)
     ctx.label(format_altitude(leg.until, ctx.params.label_style), pen.at)
@@ -753,7 +776,7 @@ def _direct(pen: _Pen, leg: Direct, direction: Turn | None) -> None:
     _require_length(distance(tangent, target), leg)
     pen.straight_to(target)
     ctx.polyline(name, Style.ROUTE, [*points, target])
-    _arrowhead(ctx, name, Style.ROUTE, target, pen.course)
+    _arrowhead(pen, name, Style.ROUTE, target, pen.course)
 
 
 def _turn_side(pen: _Pen, target: Vec, direction: Turn | None) -> int:
@@ -1096,7 +1119,7 @@ def _track_radial(
         _require_length(along_across(sub(end, joined), pen.course)[0], leg)
     pen.straight_to(end)
     ctx.polyline(name, Style.ROUTE, [*points, end])
-    _arrowhead(ctx, name, Style.ROUTE, end, pen.course)
+    _arrowhead(pen, name, Style.ROUTE, end, pen.course)
     if terminator := _terminator_label(ctx, leg.until):
         ctx.label(terminator, end)
     if leg.altitude is not None:
@@ -1199,7 +1222,7 @@ def _proceed_on_course(pen: _Pen, leg: ProceedOnCourse) -> None:
             name, Style.ROUTE, [start, offset(start, course, ON_COURSE_DASH_NM)]
         )
     pen.straight_to(offset(pen.at, course, ON_COURSE_STUB_NM))
-    _arrowhead(ctx, name, Style.ROUTE, pen.at, pen.course)
+    _arrowhead(pen, name, Style.ROUTE, pen.at, pen.course)
 
 
 def _bent(course: float, turn: Turn | None) -> float:
@@ -1259,7 +1282,7 @@ def _climb_in_hold(pen: _Pen, leg: ClimbInHold) -> None:
     racetrack = _racetrack(ctx, fix, inbound, side, length)
     name = f"HOLD {ident}"
     ctx.polyline(name, Style.HOLD, racetrack)
-    _arrowhead(ctx, name, Style.HOLD, fix, inbound)
+    _arrowhead(pen, name, Style.HOLD, fix, inbound)
     inbound_middle = offset(fix, inbound + 180, length / 2)
     label_at = offset(inbound_middle, inbound - 90 * side, ctx.params.label_offset_nm)
     ctx.label(hold_label(spec, leg.until, ctx.params.label_style), label_at)
@@ -1339,17 +1362,36 @@ def _offset_label(pen: _Pen, text: str, anchor: Vec, turn_side: int) -> None:
     )
 
 
-def _arrowhead(ctx: _Context, name: str, style: Style, end: Vec, course: float) -> None:
+def _arrowhead(pen: _Pen, name: str, style: Style, end: Vec, course: float) -> None:
     """A two-armed "V" pointing along `course`, its tip `ARROW_SETBACK_NM`
-    short of `end` so arrows converging on one fix stay distinguishable."""
+    short of `end` so arrows converging on one fix stay distinguishable.
+
+    The pen keeps it as its latest arrowhead until the route ends."""
+    tip = offset(end, course + 180, ARROW_SETBACK_NM)
+    shape = _draw_arrow(pen.ctx, name, style, tip, course)
+    pen.last_arrow = _Arrowhead(shape, name, style, end, course)
+
+
+def _end_routes(pens: list[_Pen]) -> None:
+    """Where a route ends, its last arrowhead points right at the end of
+    its final segment rather than short of it."""
+    for pen in pens:
+        if arrow := pen.last_arrow:
+            pen.ctx.discard(arrow.shape)
+            _draw_arrow(pen.ctx, arrow.name, arrow.style, arrow.end, arrow.course)
+            pen.last_arrow = None
+
+
+def _draw_arrow(
+    ctx: _Context, name: str, style: Style, tip: Vec, course: float
+) -> Polyline:
     back = course + 180
-    tip = offset(end, back, ARROW_SETBACK_NM)
     arms = [
         offset(tip, back - ARROW_SPLAY_DEG, ARROW_ARM_NM),
         tip,
         offset(tip, back + ARROW_SPLAY_DEG, ARROW_ARM_NM),
     ]
-    ctx.polyline(f"{name} arrow", style, arms)
+    return ctx.polyline(f"{name} arrow", style, arms)
 
 
 def _signed_turn(course: float, target: float, direction: Turn | None) -> float:

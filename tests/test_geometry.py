@@ -597,16 +597,18 @@ def test_climb_heading_to_an_altitude_not_above_the_climb_start_is_degenerate(
     assert raised.value.signature == "altitude not above current"
 
 
-def test_arrowhead_stands_back_from_the_leg_end():
-    leg = ClimbHeading(magnetic(0), feet(7000))
+def test_only_a_routes_last_arrowhead_reaches_the_end_of_its_segment():
+    climb = ClimbHeading(magnetic(0), feet(7000))
 
-    drawing = draw(resolved(group(leg)))
+    drawing = draw(resolved(group(climb, ProceedOnCourse())))
 
-    end = route_vertices(drawing)[-1]
-    arrow = next(line for line in polylines(drawing) if line.name.endswith("arrow"))
-    tip = xy(arrow.points[1])
-    assert distance(tip, end) == pytest.approx(ARROW_SETBACK_NM, abs=1e-6)
-    assert tip[1] < end[1]
+    arrows = [line for line in polylines(drawing) if line.name.endswith("arrow")]
+    climb_tip, stub_tip = (xy(arrow.points[1]) for arrow in arrows)
+    stub = [line for line in polylines(drawing) if line.name.endswith("on course")]
+    climb_end = xy(stub[0].points[0])
+    assert distance(climb_tip, climb_end) == pytest.approx(ARROW_SETBACK_NM, abs=1e-6)
+    assert climb_tip[1] < climb_end[1]
+    assert stub_tip == pytest.approx(route_vertices(drawing)[-1], abs=1e-6)
 
 
 def test_identical_shapes_are_drawn_once_and_labels_never_overprint():
