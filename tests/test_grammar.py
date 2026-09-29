@@ -1971,6 +1971,15 @@ ROUTE_19 = "Rwy 19, climb heading 190° to 5000 before proceeding on course."
             id="a speed limit after a visual climb, that runway's",
         ),
         pytest.param(
+            "Rwy 4, climb direct ABC VOR or for climb in visual conditions cross Test "
+            "airport at or above 2300, then climb direct ABC VOR. Continue climb in "
+            "ABC VOR holding pattern (hold south, left turns, 004° inbound) to 9000."
+            f"\n{ROUTE_1}",
+            (HEADING_010,),
+            [("4",), ("4",)],
+            id="a continuation after a visual climb, that runway's",
+        ),
+        pytest.param(
             f"{ROUTE_1}\nRwy 19, for climb in visual conditions: cross Test airport "
             "at or above 1700 before proceeding on course. Do not exceed 180 KIAS "
             "until reaching 1700 MSL.",

@@ -606,14 +606,18 @@ class _Parser(LegParser):
         route, when every route ends at the same fix it starts from, or when
         it repeats word for word a sentence read for an earlier runway; after
         the last of several routes that end apart it could otherwise mean all
-        of them, so it is left unread. A speed limit sentence may also limit
-        a heading range, so for one a heading range counts as a route; one
-        that could limit more than the last group is left unread too.
+        of them, so it is left unread. So is one straight after a visual
+        climb written into the section, which it may continue instead. A
+        speed limit sentence may also limit a heading range, so for one a
+        heading range counts as a route; one that could limit more than the
+        last group is left unread too.
         """
         speed = self._peek_speed_sentence()
         takes = _takes_speed_limit if speed else _flies_route
         last = groups[-1] if groups else None
         if last is None or not takes(last) or _ends_with_thence(last.legs):
+            return False
+        if self._follows_visual_climb():
             return False
         if speed and self._speed_limit_may_mean_others(groups):
             return False
@@ -627,17 +631,19 @@ class _Parser(LegParser):
             or self._sentence() in self._continuations
         )
 
+    def _follows_visual_climb(self) -> bool:
+        return self._index == self._visual_climb_end
+
     def _speed_limit_may_mean_others(self, groups: list[RunwayGroup]) -> bool:
         """Whether a speed limit sentence here could limit more than the last
-        group: it follows a visual climb written into the section, or the
-        last group is one of several alternatives for the same runways."""
+        group, one of several alternatives for the same runways."""
         last = groups[-1]
         alternatives = [
             group
             for group in groups
             if group.runways == last.runways and _takes_speed_limit(group)
         ]
-        return self._index == self._visual_climb_end or len(alternatives) > 1
+        return len(alternatives) > 1
 
     def _sentence(self) -> str:
         """The words from here to the end of the sentence, spaced as one line."""
