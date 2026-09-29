@@ -100,6 +100,23 @@ def with_rwy_15_speed_limit(block):
     )
 
 
+def vcoas_beside_an_undrawable_route(block):
+    """`block` with a Rwy 29 climb too long to draw and VCOAs crossing at 7800
+    for Rwy 15 and 7900 for Rwy 33, so each VCOA is drawn as a part alone."""
+    head = block.text[: block.text.index("DEPARTURE PROCEDURE:")]
+    visual = (
+        "Rwy {}, obtain ATC approval for VCOA when requesting IFR clearance. Climb "
+        "in visual conditions to cross Tonopah airport at or above {} before "
+        "proceeding on course.\n"
+    )
+    return dataclasses.replace(
+        block,
+        text=f"{head}DEPARTURE PROCEDURE:\n"
+        "Rwy 29, climb heading 290° to 30000 before proceeding on course.\n"
+        f"VCOA:\n{visual.format(15, 7800)}{visual.format(33, 7900)}",
+    )
+
+
 def tph_block():
     blocks, _ = extract_blocks(FIXTURES / "pdf" / "SW4TO-excerpt.pdf", "SW4")
     return next(block for block in blocks if block.lid == "TPH")
@@ -172,6 +189,16 @@ class TestDrawings:
 
     def test_airport_missing_from_nasr_has_no_marker(self, result):
         assert "JTC" not in [marker.lid for marker in result.markers]
+
+    def test_vcoa_altitudes_drawn_as_separate_parts_label_apart(self):
+        options = BuildOptions(cycle=CYCLE, cache_dir=Path("unused"))
+
+        outcome = process_block(
+            vcoas_beside_an_undrawable_route(tph_block()), fixture_nasr(), options
+        )
+
+        at = {s.text: s.at for s in outcome.drawing.shapes if isinstance(s, Label)}
+        assert at["VCOA (≥7800')"].lat > at["VCOA (≥7900')"].lat
 
 
 class TestFindings:

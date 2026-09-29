@@ -98,6 +98,7 @@ ON_COURSE_DASH_SPACING_NM = (ON_COURSE_STUB_NM - ON_COURSE_DASH_NM) / (
 )
 ON_COURSE_BEND_DEG = 45.0
 VCOA_DASHES = 36
+VCOA_LABEL_BEARINGS = (0.0, 180.0, 90.0, 270.0)
 ARROW_ARM_NM = 0.25
 ARROW_SETBACK_NM = 0.5
 ARROW_SPLAY_DEG = 30.0
@@ -202,15 +203,19 @@ class _Context:
     def arc(self, centre: Vec, radius: float, start: float, sweep: float) -> list[Vec]:
         return arc(centre, radius, start, sweep, self.params.arc_step_deg)
 
-    def label(self, text: str, p: Vec) -> None:
-        self._emit(Label(text, self.plane.to_latlon(*p)))
+    def label(self, text: str, p: Vec, *fallbacks: Vec) -> None:
+        latlons = tuple(self.plane.to_latlon(*q) for q in fallbacks)
+        self._emit(Label(text, self.plane.to_latlon(*p), latlons))
 
     def _emit(self, shape: Polyline | Label) -> None:
         """Keep one of identical shapes: routes that reach the same hold draw
         it identically, VCOA groups for several runways label the same circle
         at the same point, and groups that are alternatives for one runway
-        ("All other courses: …") share its initial climb."""
-        if shape not in self.shapes:
+        ("All other courses: …") share its initial climb. A label moves to
+        a fallback point rather than print over different text."""
+        if isinstance(shape, Label):
+            shape = shape.placed(self.shapes)
+        if shape and shape not in self.shapes:
             self.shapes.append(shape)
 
 
@@ -422,17 +427,20 @@ def _shared_radial_start(ctx: _Context, pens: list[_Pen], leg: Leg) -> _Pen | No
 
 
 def _draw_vcoa(ctx: _Context, vcoa: VcoaGroup) -> None:
-    """A dashed circle to climb in over the airport (or a fix), then its legs."""
+    """A dashed circle to climb in over the airport (or a fix), then its legs.
+
+    The label stands at the circle's north point or, where a different
+    label (another altitude's) already stands, at its south, east or west
+    point.
+    """
     centre = ctx.xy(vcoa.cross.ident) if vcoa.cross else (0.0, 0.0)
     radius = ctx.params.vcoa_radius_nm
     name = f"{_vcoa_runways_name(vcoa.runways)}: VCOA"
     for start in _dash_starts(VCOA_DASHES):
         dash = ctx.arc(centre, radius, start, 180 / VCOA_DASHES)
         ctx.polyline(name, Style.VCOA, dash)
-    ctx.label(
-        vcoa_label(vcoa.at_or_above, ctx.params.label_style, vcoa.bound),
-        offset(centre, 0.0, radius),
-    )
+    points = (offset(centre, angle, radius) for angle in VCOA_LABEL_BEARINGS)
+    ctx.label(vcoa_label(vcoa.at_or_above, ctx.params.label_style, vcoa.bound), *points)
     if vcoa.speed is not None:
         ctx.label(speed_label(vcoa.speed), offset(centre, 180.0, radius))
     if _departs_toward_something(vcoa.then):

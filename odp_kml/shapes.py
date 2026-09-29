@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Iterable
 from enum import StrEnum
 
 from .geo import LatLon
@@ -24,8 +25,31 @@ class Polyline:
 
 @dataclasses.dataclass(frozen=True)
 class Label:
+    """Text at a point. `fallbacks` are where it may stand instead, in order,
+    when different text already stands at `at` (see `placed`)."""
+
     text: str
     at: LatLon
+    fallbacks: tuple[LatLon, ...] = ()
+
+    def placed(self, shapes: Iterable[Polyline | Label]) -> Label | None:
+        """This label at the first of its points where no label stands, with
+        the points after it kept as fallbacks; ``None`` when a label with
+        the same text is met first, since that one already says it.
+
+        A point where different text stands is passed over so two labels
+        never print on top of each other; when every point is taken, the
+        label stays at `at`.
+        """
+        standing = [(s.at, s.text) for s in shapes if isinstance(s, Label)]
+        points = (self.at, *self.fallbacks)
+        for index, point in enumerate(points):
+            texts = {text for at, text in standing if at == point}
+            if self.text in texts:
+                return None
+            if not texts:
+                return Label(self.text, point, points[index + 1 :])
+        return self
 
 
 @dataclasses.dataclass(frozen=True)

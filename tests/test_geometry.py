@@ -609,15 +609,20 @@ def test_arrowhead_stands_back_from_the_leg_end():
     assert tip[1] < end[1]
 
 
-def test_identical_shapes_are_drawn_once():
-    """Two runways' VCOA groups circle the same airport: one label, not two."""
+def test_identical_shapes_are_drawn_once_and_labels_never_overprint():
+    """Two runways' VCOA groups circle the same airport at one altitude: one
+    label, not two. A third runway's other altitude labels the south point."""
     groups = tuple(
-        VcoaGroup((rwy,), None, 7000, (ProceedOnCourse(),)) for rwy in ("36", "18")
+        VcoaGroup((rwy,), None, altitude, (ProceedOnCourse(),))
+        for rwy, altitude in (("36", 7000), ("18", 7000), ("9", 7100))
     )
 
     drawing = draw(resolved(vcoa=groups))
 
-    assert len(labels(drawing)) == 1
+    north, south = labels(drawing)
+    assert xy(north.at) == pytest.approx((0.0, 2.0), abs=1e-6)
+    assert south.text == "VCOA (≥7100')"
+    assert xy(south.at) == pytest.approx((0.0, -2.0), abs=1e-6)
     assert len(drawing.shapes) == len(set(drawing.shapes))
 
 

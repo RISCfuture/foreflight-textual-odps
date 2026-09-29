@@ -76,8 +76,11 @@ with certainty:
 - VCOA (visual climb over airport) circles, including airports whose only
   procedure is a VCOA and visual climbs written into the departure
   procedure itself ("..., or for climb in visual conditions: cross ...").
-  A published crossing direction joins the label: `VCOA (≥8200' SE bound)`,
-  and a speed limit on the visual climb is labelled below the circle.
+  A published crossing direction joins the label where it still fits in
+  ForeFlight's 22 characters (`VCOA (≥8200' SE bound)`), and a speed limit
+  on the visual climb is labelled below the circle. The label stands at
+  the circle's north point; a second altitude around the same circle
+  stands at its south point (then east, then west), never on top of it.
 - Altitude labels in plain text (ForeFlight renders neither rich text nor
   combining marks): `7000'` for "climb to," `≥7000'` for "at or above,"
   `≤7000'` for "at or below," and `at 7000'` for a mandatory altitude;

@@ -396,13 +396,16 @@ def _parts(procedure: Procedure) -> list[tuple[str, Procedure]]:
 
 def _merged(drawings: list[AirportDrawing]) -> AirportDrawing:
     """One drawing of every part's shapes, keeping one of any that coincide:
-    parts sharing a tail each draw it."""
+    parts sharing a tail each draw it. A label moves to a fallback point
+    rather than print over another part's different text."""
     seen: set = set()
     shapes: list[Polyline | Label] = []
     for drawing in drawings:
         for shape in drawing.shapes:
-            key = (shape.style, shape.points) if isinstance(shape, Polyline) else shape
-            if key not in seen:
+            if isinstance(shape, Label):
+                if label := shape.placed(shapes):
+                    shapes.append(label)
+            elif (key := (shape.style, shape.points)) not in seen:
                 seen.add(key)
                 shapes.append(shape)
     return dataclasses.replace(drawings[0], shapes=tuple(shapes))

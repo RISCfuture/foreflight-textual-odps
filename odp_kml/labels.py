@@ -148,9 +148,12 @@ def speed_label(speed: SpeedRestriction) -> str:
 
 def vcoa_label(at_or_above: int, style: str, bound: Compass8 | None = None) -> str:
     """``VCOA`` plus, in parentheses, the altitude to cross the airport at and
-    any direction to cross it in, e.g. ``VCOA (≥8200' SE bound)``."""
+    any direction to cross it in, e.g. ``VCOA (≥8200' SE bound)``. The
+    direction is left to the FAA text where the label would not fit
+    `LABEL_LIMIT` with it: ``VCOA (≥12500')``."""
     altitude = format_feet(at_or_above, AltitudeKind.AT_OR_ABOVE, style)
-    return f"VCOA ({altitude} {bound} bound)" if bound else f"VCOA ({altitude})"
+    bound_label = f"VCOA ({altitude} {bound} bound)"
+    return bound_label if bound and fits(bound_label) else f"VCOA ({altitude})"
 
 
 def turn_phrase(direction: Turn | None) -> str:

@@ -68,6 +68,7 @@ def test_hold_label_gives_inbound_course_turns_and_altitude():
 def test_vcoa_label_wraps_the_altitude_in_parentheses():
     assert vcoa_label(7800, "plain") == "VCOA (≥7800')"
     assert vcoa_label(8200, "plain", Compass8.SE) == "VCOA (≥8200' SE bound)"
+    assert vcoa_label(12500, "plain", Compass8.SE) == "VCOA (≥12500')"
 
 
 @pytest.mark.parametrize(
