@@ -2073,6 +2073,24 @@ ROUTE_19 = "Rwy 19, climb heading 190° to 5000 before proceeding on course."
             [("1",), ("19",)],
             id="a speed limit after the last runway's visual climb, every route",
         ),
+        pytest.param(
+            f"{ROUTE_1}\nRwy 19, climb banana. Both departures climb to 3000.",
+            (),
+            [("19",), ("1",)],
+            id="after a runway that failed, every route",
+        ),
+        pytest.param(
+            f"{ROUTE_1}\nRwy 19, climb banana or min. climb of 250 ft per NM.",
+            (HEADING_010,),
+            [("19",)],
+            id="none within the failed runway's sentence",
+        ),
+        pytest.param(
+            f"{ROUTE_1}\nRwys 20C, 20R banana heading 200° to 5000.",
+            (),
+            [("1",), ("20C", "20R")],
+            id="an unreadable runway header, every route and its runways",
+        ),
     ],
 )
 def test_unreadable_sentence_naming_no_runway_withholds_routes_it_may_modify(
@@ -2082,6 +2100,24 @@ def test_unreadable_sentence_naming_no_runway_withholds_routes_it_may_modify(
 
     assert procedure.runway_groups == kept
     assert [runways for runways, _, _ in unparsed] == withheld
+
+
+def test_unread_text_naming_a_runway_withholds_its_routes_and_vcoa():
+    procedure, unparsed = read_in_part(
+        "Rwy 31, climb heading 310° to 5000 before proceeding on course.\n"
+        "Rwy 31, departure NA when R-3602B active.\n"
+        "Rwy 15, climb heading 150° to 5000 before proceeding on course.",
+        "Rwy 31, obtain ATC approval for VCOA when requesting IFR clearance. Climb "
+        "in visual conditions to cross Test airport at or above 1800 before "
+        "proceeding on course.",
+    )
+
+    assert (procedure.runway_groups, procedure.vcoa) == ((HEADING_150,), ())
+    assert [(runways, vcoa) for runways, _, vcoa in unparsed] == [
+        (("31",), False),
+        (("31",), False),
+        (("31",), True),
+    ]
 
 
 def test_sentence_repeated_for_each_runway_joins_the_last_one_too():
@@ -2098,7 +2134,8 @@ def test_sentence_repeated_for_each_runway_joins_the_last_one_too():
     assert [type(group.legs[-2]) for group in groups] == [ClimbInHold, ClimbInHold]
 
 
-def test_visual_climb_continuing_with_its_route_into_the_tail_is_left_out():
+def test_visual_climb_continuing_with_its_route_into_the_tail_withholds_the_runway():
+    """The refused visual climb names runway 14, so its route is withheld too."""
     text = (
         "Rwy 14, climbing right turn direct OED VORTAC, or for climb in visual "
         "conditions, cross Test airport at or above 4100 before proceeding direct "
@@ -2109,8 +2146,13 @@ def test_visual_climb_continuing_with_its_route_into_the_tail_is_left_out():
 
     procedure, unparsed = read_in_part(text)
 
-    assert (procedure.runway_groups[0].legs[-1], procedure.vcoa) == (Thence(), ())
-    assert unparsed == [(("14",), "visual climb into the shared tail", True)]
+    refusal = "visual climb into the shared tail"
+    assert (procedure.runway_groups, procedure.shared_tail, procedure.vcoa) == (
+        (),
+        None,
+        (),
+    )
+    assert unparsed == [(("14",), refusal, True), (("14",), refusal, False)]
     with pytest.raises(ParseError):
         parse_procedure(sections_of(text), airport="XXX")
 

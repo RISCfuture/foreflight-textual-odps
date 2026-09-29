@@ -53,8 +53,8 @@ from .tokens import ParseError, Token, is_ident_word
 class Unparsed:
     """Text for some runways that the grammar could not read.
 
-    `runways` are those its runway header named, empty when it named none
-    the grammar could read; `vcoa` marks the VCOA section.
+    `runways` are those its runway header named, as far as the grammar
+    could read it; `vcoa` marks the VCOA section.
     """
 
     runways: tuple[str, ...]
@@ -123,13 +123,20 @@ def parse_procedure_in_part(
 
     A runway group, the shared tail or the VCOA section that fails to parse
     is left out and reported as `Unparsed` rather than failing the whole
-    procedure; so are the groups that continue into a tail that failed.
+    procedure; so are the groups that continue into a tail that failed, and
+    every route and VCOA flown from a runway that unread text names.
     Raises `ParseError` only when neither section is present.
     """
     return _parse_procedure(sections, airport, in_part=True)
 
 
 def _parse_procedure(
+    sections: Sections, airport: str, *, in_part: bool
+) -> tuple[Procedure, list[Unparsed]]:
+    return _without_unread_runways(*_both_sections(sections, airport, in_part=in_part))
+
+
+def _both_sections(
     sections: Sections, airport: str, *, in_part: bool
 ) -> tuple[Procedure, list[Unparsed]]:
     procedure, unparsed = _departure_procedure(sections, airport, in_part=in_part)
@@ -165,6 +172,44 @@ def _open_runway_vcoa(
         except ParseError as error:
             refused.append(Unparsed(group.runways, error, vcoa=True))
     return tuple(kept), refused
+
+
+def _without_unread_runways(
+    procedure: Procedure, unparsed: list[Unparsed]
+) -> tuple[Procedure, list[Unparsed]]:
+    """`procedure` less every route and VCOA flown from a runway that
+    unread text names, each joining `unparsed` with the first such text's
+    error: that text may restrict every departure from the runway ("Rwy 31,
+    departure NA when R-3602B active"). A VCOA for all runways names none.
+    """
+    errors = {
+        runway: part.error for part in reversed(unparsed) for runway in part.runways
+    }
+
+    def unread(group: RunwayGroup | VcoaGroup) -> ParseError | None:
+        return next((errors[r] for r in group.runways if r in errors), None)
+
+    unread_routes = [
+        group
+        for group in procedure.runway_groups
+        if _withholdable(group) and unread(group)
+    ]
+    unread_vcoa = [group for group in procedure.vcoa if unread(group)]
+    if not unread_routes and not unread_vcoa:
+        return procedure, unparsed
+    groups = tuple(g for g in procedure.runway_groups if g not in unread_routes)
+    entered = any(_ends_with_thence(group.legs) for group in groups)
+    procedure = dataclasses.replace(
+        procedure,
+        runway_groups=groups,
+        shared_tail=procedure.shared_tail if entered else None,
+        vcoa=tuple(group for group in procedure.vcoa if group not in unread_vcoa),
+    )
+    return procedure, [
+        *unparsed,
+        *(Unparsed(group.runways, unread(group)) for group in unread_routes),
+        *(Unparsed(group.runways, unread(group), vcoa=True) for group in unread_vcoa),
+    ]
 
 
 def _departure_procedure(
@@ -338,6 +383,7 @@ class _Parser(LegParser):
             except ParseError as error:
                 if not self._in_part:
                     raise
+                stopped = self._index
                 del groups[kept:]
                 del self._inline_vcoa[inline:]
                 if self._starts_shared_tail_at(start):
@@ -346,13 +392,16 @@ class _Parser(LegParser):
                         groups = [_continued_to_tail(group) for group in groups]
                     break
                 runways = self._runways_at(start)
+                named = self._runways_named_at(start)
                 if runways or not any(map(_withholdable, groups)):
-                    self.unparsed.append(Unparsed(runways, error))
+                    self.unparsed.append(Unparsed(named, error))
                 else:
                     self._withhold(
                         groups, error, trailing=not self._header_after(start)
                     )
-                self._skip_to_next_group(start)
+                    if named:
+                        self.unparsed.append(Unparsed(named, error))
+                self._skip_to_next_group(groups, start, stopped)
         if self._in_part:
             if tail_error is None and not self._at_end():
                 tail_error, shared_tail = self._unmatched(), None
@@ -453,6 +502,22 @@ class _Parser(LegParser):
         finally:
             self._index = resume
 
+    def _runways_named_at(self, index: int) -> tuple[str, ...]:
+        """The runways a header at token `index` names up to the first word
+        the grammar cannot read: ``Rwys 20C, 20R climb`` names 20C and 20R,
+        although the header needs a comma after them."""
+        resume = self._index
+        self._index = index
+        runways: list[str] = []
+        try:
+            if self._accept_any("rwy", "rwys"):
+                while self._peek_runway():
+                    runways += self._runway()
+                    self._accept(",")
+            return tuple(runways)
+        finally:
+            self._index = resume
+
     def _withhold(
         self, groups: list[RunwayGroup], error: ParseError, *, trailing: bool
     ) -> None:
@@ -499,14 +564,31 @@ class _Parser(LegParser):
         finally:
             self._index = resume
 
-    def _skip_to_next_group(self, start: int) -> None:
+    def _skip_to_next_group(
+        self, groups: list[RunwayGroup], start: int, stopped: int
+    ) -> None:
         """Resume at the next runway header or shared tail that opens a line
-        or sentence after `start`, or at the end."""
-        for index in range(start + 1, len(self._tokens)):
-            if self._opens_group(index):
-                self._index = index
-                return
-        self._index = len(self._tokens)
+        or sentence after `start`, or at the end.
+
+        Only the text up to the end of the sentence parsing `stopped` in is
+        surely the failed group's own. A sentence skipped after it is unread
+        like any other that names no runway: between headers it belongs to
+        the failed runways, and after the last header it withholds every
+        route (`_withhold`).
+        """
+        resume = next(
+            (
+                index
+                for index in range(start + 1, len(self._tokens))
+                if self._opens_group(index)
+            ),
+            len(self._tokens),
+        )
+        unowned = self._sentence_end(stopped)
+        if unowned < resume and not self._header_after(unowned):
+            self._index = unowned
+            self._withhold(groups, self._unmatched(), trailing=True)
+        self._index = resume
 
     def _opens_group(self, index: int) -> bool:
         token = self._tokens[index]
@@ -686,15 +768,24 @@ class _Parser(LegParser):
 
     def _sentence(self) -> str:
         """The words from here to the end of the sentence, spaced as one line."""
-        end = next(
+        end = self._sentence_end(self._index)
+        return " ".join(token.text for token in self._tokens[self._index : end])
+
+    def _sentence_end(self, index: int) -> int:
+        """The token just past the "." ending the sentence that holds token
+        `index`, or the end. A "." before a lowercase word ends an
+        abbreviation ("min. climb"), not the sentence."""
+        return next(
             (
-                index
-                for index in range(self._index, len(self._tokens))
-                if self._tokens[index].text == "."
+                later + 1
+                for later in range(index, len(self._tokens))
+                if self._tokens[later].text == "." and not self._lowercase_at(later + 1)
             ),
-            len(self._tokens) - 1,
+            len(self._tokens),
         )
-        return " ".join(token.text for token in self._tokens[self._index : end + 1])
+
+    def _lowercase_at(self, index: int) -> bool:
+        return index < len(self._tokens) and self._tokens[index].text[0].islower()
 
     def _later_runway_header(self) -> bool:
         return any(
