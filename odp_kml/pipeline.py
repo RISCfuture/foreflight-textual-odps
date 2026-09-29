@@ -19,7 +19,7 @@ from .cycle import Cycle
 from .extract import AirportBlock, check_against_metafile, extract_blocks
 from .findings import Finding, Kind, Report
 from .geo import destination
-from .geometry import DEFAULT_PARAMS, Degenerate, DisplayParams, draw
+from .geometry import DEFAULT_PARAMS, Degenerate, DisplayParams, lay_out_wedges, trace
 from .grammar import ParseError, Unparsed, parse_procedure_in_part
 from .minimums import parse_takeoff_minimums, speed_limit_for
 from .normalize import normalize
@@ -343,7 +343,8 @@ def _draw_in_part(
     params: DisplayParams,
 ) -> tuple[AirportDrawing | None, list[Failure]]:
     """The whole procedure drawn; failing that, each part drawn on its own
-    and the drawable ones merged, with the parts that failed.
+    and the drawable ones merged, with the parts that failed. Heading-range
+    wedges are laid out once the parts are merged, so parts can share one.
 
     Raises the whole procedure's error when it has at most one part or no
     part draws. ``None`` when there is no part to draw.
@@ -351,14 +352,14 @@ def _draw_in_part(
     airport = find_airport(nasr_data, lid)
     min_climb = parse_takeoff_minimums(sections.takeoff_minimums or "")
 
-    def drawn(part: Procedure) -> AirportDrawing:
-        return draw(resolve(part, airport, nasr_data, min_climb=min_climb), params)
+    def traced(part: Procedure) -> AirportDrawing:
+        return trace(resolve(part, airport, nasr_data, min_climb=min_climb), params)
 
     parts = _parts(procedure)
     if not parts:
         return None, []
     try:
-        return drawn(procedure), []
+        return lay_out_wedges(traced(procedure), params), []
     except (ResolveError, Degenerate) as error:
         if len(parts) == 1:
             raise
@@ -366,12 +367,12 @@ def _draw_in_part(
     drawings, failed = [], []
     for name, part in parts:
         try:
-            drawings.append(drawn(part))
+            drawings.append(traced(part))
         except (ResolveError, Degenerate) as error:
             failed.append((name, error))
     if not drawings:
         raise whole_error
-    return _merged(drawings), failed
+    return lay_out_wedges(_merged(drawings), params), failed
 
 
 def _parts(procedure: Procedure) -> list[tuple[str, Procedure]]:
@@ -395,9 +396,9 @@ def _parts(procedure: Procedure) -> list[tuple[str, Procedure]]:
 
 
 def _merged(drawings: list[AirportDrawing]) -> AirportDrawing:
-    """One drawing of every part's shapes, keeping one of any that coincide:
-    parts sharing a tail each draw it. A label moves to a fallback point
-    rather than print over another part's different text."""
+    """One drawing of every part's shapes and wedges, keeping one of any
+    shapes that coincide: parts sharing a tail each draw it. A label moves to
+    a fallback point rather than print over another part's different text."""
     seen: set = set()
     shapes: list[Polyline | Label] = []
     for drawing in drawings:
@@ -408,7 +409,8 @@ def _merged(drawings: list[AirportDrawing]) -> AirportDrawing:
             elif (key := (shape.style, shape.points)) not in seen:
                 seen.add(key)
                 shapes.append(shape)
-    return dataclasses.replace(drawings[0], shapes=tuple(shapes))
+    wedges = tuple(wedge for drawing in drawings for wedge in drawing.wedges)
+    return dataclasses.replace(drawings[0], shapes=tuple(shapes), wedges=wedges)
 
 
 def _with_not_shown_label(drawing: AirportDrawing, parts: list[str]) -> AirportDrawing:

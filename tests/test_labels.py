@@ -1,10 +1,12 @@
-"""Tests for odp_kml.labels: altitude, hold and VCOA label wording."""
+"""Tests for odp_kml.labels: altitude, hold, VCOA and heading-range label
+wording."""
 
 import pytest
 
 from odp_kml.labels import (
     format_altitude,
-    heading_range_label,
+    heading_range_lines,
+    heading_range_phrases,
     hold_label,
     speed_label,
     vcoa_label,
@@ -82,16 +84,56 @@ def test_speed_label_gives_only_a_reaching_altitude_in_feet(until_phrase, expect
     assert speed_label(SpeedRestriction(200, until_phrase)) == expected
 
 
-@pytest.mark.parametrize(
-    ("clockwise", "expected"),
-    [(True, "hdg 177° CW 336° 8800'"), (False, "336° CCW 177° 8800'")],
-)
-def test_heading_range_label_drops_hdg_where_it_would_overflow(clockwise, expected):
-    sector = (
-        HeadingSector(177, 336, True) if clockwise else HeadingSector(336, 177, False)
+def test_heading_range_phrases_break_between_sectors_and_before_the_altitude():
+    leg = HeadingRange(
+        (
+            HeadingSector(256, 54, clockwise=True),
+            HeadingSector(213, 353, clockwise=False),
+        ),
+        Altitude(7700, AltitudeKind.TO, "to 7700"),
     )
-    until = Altitude(8800, AltitudeKind.TO, "to 8800")
 
-    assert (
-        heading_range_label(HeadingRange((sector,), until), None, "plain") == expected
+    assert heading_range_phrases(leg, Turn.LEFT, "plain") == (
+        "LT hdg 256° CW 054°",
+        "or 213° CCW 353°",
+        "7700'",
     )
+
+
+@pytest.mark.parametrize(
+    ("runways", "phrases", "expected"),
+    [
+        (("7",), ("hdg 315° CW 218°",), ["7 hdg 315° CW 218°"]),
+        (("11",), ("hdg 320° CW 220°", "3000'"), ["11 320° CW 220° 3000'"]),
+        (
+            ("30",),
+            ("LT hdg 267° CW 300°", "10000'"),
+            ["30 LT hdg 267° CW 300°", "10000'"],
+        ),
+        (("35R", "35L"), ("hdg 313° CW 172°",), ["35L/R hdg 313° CW 172°"]),
+        (("16L", "16R"), ("hdg 213° CCW 353°",), ["16L/R 213° CCW 353°"]),
+        (
+            ("16L", "16R", "17L"),
+            ("LT hdg 213° CCW 353°",),
+            ["RWY 16L/R,17L", "LT hdg 213° CCW 353°"],
+        ),
+        (
+            ("25",),
+            ("hdg 317° CW 083°", "or 206° CCW 083°"),
+            ["25 hdg 317° CW 083°", "or 206° CCW 083°"],
+        ),
+        (
+            ("16L", "16R", "17L", "17R", "34L", "34R", "35L", "35R"),
+            ("hdg 313° CW 172°",),
+            ["hdg 313° CW 172°"],
+        ),
+        ((), ("hdg 107° CW 250°",), ["ALL RWYS 107° CW 250°"]),
+    ],
+)
+def test_heading_range_lines_fill_as_few_whole_foreflight_labels_as_they_can(
+    runways, phrases, expected
+):
+    """Parallels share their number; the runways lead the first line, which
+    drops its "hdg" only to make room for them or save a line, else stand
+    apart, and are left out when too many to name."""
+    assert heading_range_lines(runways, phrases) == expected

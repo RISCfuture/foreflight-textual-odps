@@ -3,7 +3,8 @@ and the human phrases that name polylines.
 
 Labels are plain text: ForeFlight renders neither combining characters nor
 rich text, so a constraint takes a precomposed sign ("≥9300'") rather than
-the chart's underline/overline marks."""
+the chart's underline/overline marks. It elides the middle of a label
+longer than `LABEL_LIMIT` characters."""
 
 from __future__ import annotations
 
@@ -18,6 +19,7 @@ from .procedure import (
     EnrouteAltitude,
     HeadingAndRadial,
     HeadingRange,
+    HeadingSector,
     HoldSpec,
     NavaidRef,
     Radial,
@@ -30,6 +32,7 @@ LABEL_LIMIT = 22
 """The most characters of a label ForeFlight shows; it elides a longer one
 from the middle."""
 
+ALL_RUNWAYS = "ALL RWYS"
 PLAIN_PREFIXES = {
     AltitudeKind.AT_OR_ABOVE: "≥",
     AltitudeKind.AT_OR_BELOW: "≤",
@@ -84,24 +87,102 @@ def heading_label(magnetic: int) -> str:
 
 def heading_range_label(leg: HeadingRange, direction: Turn | None, style: str) -> str:
     """The sectors as printed, e.g. ``hdg 350° CW 162°`` or, with a published
-    turn and altitude, ``LT hdg 256° CW 054° or 179° CW 254° 7700'``.
+    turn and altitude, ``LT hdg 256° CW 054° or 179° CW 254° 7700'``."""
+    return " ".join(heading_range_phrases(leg, direction, style))
 
-    The word ``hdg`` is left out where only that makes the label fit
-    `LABEL_LIMIT`: ``336° CCW 177° 8800'``.
-    """
-    sectors = " or ".join(
-        f"{s.start:03d}° {'CW' if s.clockwise else 'CCW'} {s.end:03d}°"
-        for s in leg.sectors
-    )
-    turn = f"{direction}T " if direction is not None else ""
+
+def heading_range_phrases(
+    leg: HeadingRange, direction: Turn | None, style: str
+) -> tuple[str, ...]:
+    """`heading_range_label` in the pieces a label may break between: the
+    first sector with any turn onto it, each further sector and any altitude,
+    e.g. ``("LT hdg 256° CW 054°", "or 179° CW 254°", "7700'")``."""
+    turn = f"{direction}T " if direction else ""
+    first, *others = map(_sector_phrase, leg.sectors)
     altitude = (
-        f" {format_altitude(leg.until, style)}"
-        if isinstance(leg.until, Altitude)
-        else ""
+        (format_altitude(leg.until, style),) if isinstance(leg.until, Altitude) else ()
     )
-    label = f"{turn}hdg {sectors}{altitude}"
-    shorter = f"{turn}{sectors}{altitude}"
-    return shorter if fits(shorter) and not fits(label) else label
+    return (f"{turn}hdg {first}", *(f"or {other}" for other in others), *altitude)
+
+
+def _sector_phrase(sector: HeadingSector) -> str:
+    """e.g. ``350° CW 162°``."""
+    return (
+        f"{sector.start:03d}° {'CW' if sector.clockwise else 'CCW'} {sector.end:03d}°"
+    )
+
+
+def heading_range_lines(
+    runways: tuple[str, ...], phrases: tuple[str, ...]
+) -> list[str]:
+    """The labels for a heading range flown from `runways`, top to bottom:
+    its `phrases` after the runways, filling as few lines as show whole in
+    ForeFlight. The runways lead the first line, e.g.
+    ``["35L/R hdg 333° CW 162°"]``, dropping its ``hdg`` if that is what
+    lets them, e.g. ``["16L/R 213° CCW 353°"]``, or saves a line, e.g.
+    ``["11 320° CW 220° 3000'"]``; otherwise they stand on a line of their
+    own. They are left out when they do not fit a label."""
+    tag = runway_tag(runways)
+    if tag is None:
+        return _wrapped(phrases)
+    first, *rest = phrases
+    leading = [
+        _wrapped((line, *rest))
+        for line in (f"{tag} {first}", f"{tag} {_bare(first)}")
+        if fits(line)
+    ]
+    return min([*leading, [_standing(tag), *_wrapped(phrases)]], key=len)
+
+
+def _bare(phrase: str) -> str:
+    """A range's first phrase without its ``hdg``, e.g. ``LT 256° CW 054°``."""
+    return phrase.replace("hdg ", "", 1)
+
+
+def runway_tag(runways: tuple[str, ...]) -> str | None:
+    """`runways` as tightly as a label can name them, e.g. ``35L/R``, or
+    ``ALL RWYS`` when the text names none; ``None`` when they do not fit."""
+    tag = _designators(runways) if runways else ALL_RUNWAYS
+    return tag if fits(tag) else None
+
+
+def _standing(tag: str) -> str:
+    """A runway tag as a line of its own, e.g. ``RWY 35L/R``."""
+    standing = f"RWY {tag}"
+    return standing if tag != ALL_RUNWAYS and fits(standing) else tag
+
+
+def _wrapped(phrases: tuple[str, ...]) -> list[str]:
+    """`phrases` in order, as many to a line as fit a label."""
+    lines: list[str] = []
+    for phrase in phrases:
+        if lines and fits(joined := f"{lines[-1]} {phrase}"):
+            lines[-1] = joined
+        else:
+            lines.append(phrase)
+    return lines
+
+
+RUNWAY_DESIGNATOR = re.compile(r"(\d*)(.*)")
+PARALLEL_ORDER = {"L": 0, "C": 1, "R": 2}
+
+
+def _designators(runways: tuple[str, ...]) -> str:
+    """Runway designators as tightly as a chart gives them, parallels
+    sharing their number, e.g. ``35L/R`` or ``16L/R,17L``."""
+    parallels: dict[str, list[str]] = {}
+    for runway in runways:
+        number, side = RUNWAY_DESIGNATOR.fullmatch(runway).groups()
+        parallels.setdefault(number, []).append(side)
+    return ",".join(
+        number + "/".join(sorted(sides, key=_parallel_rank))
+        for number, sides in parallels.items()
+    )
+
+
+def _parallel_rank(side: str) -> int:
+    """L, C, R in that order; any other suffix after them."""
+    return PARALLEL_ORDER.get(side, len(PARALLEL_ORDER))
 
 
 def radial_label(radial: int) -> str:

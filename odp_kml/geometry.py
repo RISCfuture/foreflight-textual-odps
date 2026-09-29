@@ -9,18 +9,23 @@ shape. Anything the constructions cannot draw with certainty raises
 from __future__ import annotations
 
 import dataclasses
+import itertools
 import math
+from collections.abc import Sequence
 
-from .geo import LocalPlane, heading_to_unit, magnetic_to_true
+from .geo import LocalPlane, distance_nm, heading_to_unit, magnetic_to_true
 from .labels import (
     dme_label,
     format_altitude,
     heading_label,
     heading_phrase,
     heading_range_label,
+    heading_range_lines,
+    heading_range_phrases,
     hold_label,
     navaid_radial_label,
     radial_phrase,
+    runway_tag,
     speed_label,
     turn_phrase,
     vcoa_label,
@@ -65,9 +70,17 @@ from .procedure import (
     VcoaGroup,
 )
 from .resolved import ResolvedProcedure, RunwayStart
-from .shapes import AirportDrawing, Label, Polyline, Style
+from .shapes import AirportDrawing, Label, Polyline, Style, Wedge
 
-__all__ = ["Degenerate", "DisplayParams", "draw", "format_altitude", "turn_radius_nm"]
+__all__ = [
+    "Degenerate",
+    "DisplayParams",
+    "draw",
+    "format_altitude",
+    "lay_out_wedges",
+    "trace",
+    "turn_radius_nm",
+]
 
 KT_PER_BANK_FACTOR = 68626.0
 STANDARD_RATE_DIVISOR = 188.5
@@ -104,6 +117,22 @@ ARROW_SETBACK_NM = 0.5
 ARROW_SPLAY_DEG = 30.0
 COMPASS_BEARINGS = {point: 45.0 * index for index, point in enumerate(Compass8)}
 RUNWAY_HEADING_LABEL = "rwy hdg"
+SHARED_WEDGE_NM = 1.5
+LABEL_CHAR_NM = 0.16
+LABEL_LINE_NM = 0.32
+LABEL_GAP_NM = 0.1
+LABEL_STEP_NM = 0.25
+ZOOMED_OUT = 1.6
+# What a wedge's labels pay, in NM of distance from its apex, for: each
+# square NM of other labels they overlap (and would overlap zoomed out),
+# each NM of route or radial line under them, centring inside another
+# wedge, and each degree off the middle of a sector.
+LABEL_OVERLAP_COST = 100.0
+LABEL_MARGIN_COST = 20.0
+LINE_CROSSING_COST = 4.0
+RADIAL_CROSSING_COST = 1.0
+OTHER_WEDGE_COST = 3.0
+OFF_MIDDLE_COST = 0.005
 UNSTATED_SENSE = 'radial without "inbound" or "outbound"'
 UNSTATED_SENSE_TURN_DEG = 60.0
 RADIAL_COLINEAR = "radial colinear"
@@ -119,7 +148,7 @@ class DisplayParams:
     bank_deg: float = 25.0
     default_gradient_ft_nm: float = 200.0
     vcoa_radius_nm: float = 2.0
-    heading_range_radius_nm: float = 3.0
+    heading_range_radius_nm: float = 1.0
     arc_step_deg: float = 5.0
     label_offset_nm: float = 0.35
     label_style: str = "plain"
@@ -151,7 +180,20 @@ def turn_radius_nm(tas_kt: float, bank_deg: float) -> float:
 def draw(
     resolved: ResolvedProcedure, params: DisplayParams = DEFAULT_PARAMS
 ) -> AirportDrawing:
-    """Draw every runway group, the shared tail and VCOA groups of a procedure.
+    """Draw every runway group, the shared tail and VCOA groups of a procedure,
+    heading-range wedges included.
+
+    Raises `Degenerate` if any construction is uncertain.
+    """
+    return lay_out_wedges(trace(resolved, params), params)
+
+
+def trace(
+    resolved: ResolvedProcedure, params: DisplayParams = DEFAULT_PARAMS
+) -> AirportDrawing:
+    """`draw`, with heading-range wedges left pending on the drawing, so that
+    parts of an airport drawn one at a time can be merged before
+    `lay_out_wedges` draws them.
 
     A runway whose departure is NA or flies a charted DP is not drawn.
     Raises `Degenerate` if any construction is uncertain.
@@ -176,11 +218,39 @@ def draw(
         resolved.airport_name,
         tuple(ctx.shapes),
         position=resolved.airport_position,
+        wedges=tuple(ctx.wedges),
     )
 
 
+def lay_out_wedges(
+    drawing: AirportDrawing, params: DisplayParams = DEFAULT_PARAMS
+) -> AirportDrawing:
+    """Draw the drawing's pending wedges: each sector's two limiting headings
+    and the arc between them, `heading_range_radius_nm` out, labelled with
+    the wedge's runways, each sector's headings and any altitude.
+
+    Wedges that read the same from turn-start points within
+    `SHARED_WEDGE_NM` of one another (parallel runways departing alike) are
+    drawn once, from the midpoint of those points. A wedge's labels stand
+    stacked together inside it, as near its apex as they fit clear of the
+    airport's other labels and lines, else just beyond its arc.
+    """
+    if not drawing.wedges:
+        return drawing
+    plane = LocalPlane(drawing.position or drawing.wedges[0].apex)
+    step = params.arc_step_deg
+    fans = [_Fan.of(plane, params, wedges) for wedges in _shared_wedges(drawing.wedges)]
+    lines = dict.fromkeys(line for fan in fans for line in fan.polylines(plane, step))
+    shapes = [*drawing.shapes, *lines]
+    for fan in fans:
+        others = [other for other in fans if other is not fan]
+        shapes += fan.labels(plane, _Clutter.of(plane, shapes, others), step)
+    return dataclasses.replace(drawing, shapes=tuple(shapes), wedges=())
+
+
 class _Context:
-    """The procedure being drawn, its plane, and the shapes emitted so far."""
+    """The procedure being drawn, its plane, and the shapes and wedges
+    emitted so far."""
 
     def __init__(self, resolved: ResolvedProcedure, params: DisplayParams) -> None:
         self.resolved = resolved
@@ -188,6 +258,7 @@ class _Context:
         self.plane = LocalPlane(resolved.airport_position)
         self.radius = turn_radius_nm(params.tas_kt, params.bank_deg)
         self.shapes: list[Polyline | Label] = []
+        self.wedges: list[Wedge] = []
 
     def xy(self, ident: str) -> Vec:
         return self.plane.to_xy(self.resolved.points[ident].position)
@@ -276,7 +347,7 @@ class _Pen:
     `straight_out` holds while every leg flown has kept to the runway's own
     course, from its DER. `open_heading` marks a route left on a heading
     printed with no terminator, which it holds until it intercepts the next
-    leg's radial.
+    leg's radial. `runways` are those the route departs from.
     """
 
     ctx: _Context
@@ -292,6 +363,7 @@ class _Pen:
     pending_direction: Turn | None = None
     open_heading: bool = False
     last_arrow: _Arrowhead | None = None
+    runways: tuple[str, ...] = ()
 
     def altitude_leg_nm(self, feet: int) -> float:
         """Along-track distance at which the climb reaches `feet`."""
@@ -380,13 +452,13 @@ def _draw_shared_tail(ctx: _Context, pens: list[_Pen], legs: tuple[Leg, ...]) ->
     first = _shared_radial_start(ctx, pens, legs[0]) or _converged(pens)
     _require_one_sense(ctx, pens, legs[0])
     first.straight_out = False
-    runways = (
+    first.runways = tuple(
         runway
         for group in ctx.resolved.procedure.runway_groups
         if group.legs and not group.graphic
         for runway in group.runways
     )
-    first.name = f"RWY {'/'.join(runways)}"
+    first.name = f"RWY {'/'.join(first.runways)}"
     _draw_legs(first, legs)
     _end_routes([first])
 
@@ -457,7 +529,7 @@ def _draw_vcoa(ctx: _Context, vcoa: VcoaGroup) -> None:
     """
     centre = ctx.xy(vcoa.cross.ident) if vcoa.cross else (0.0, 0.0)
     radius = ctx.params.vcoa_radius_nm
-    name = f"{_vcoa_runways_name(vcoa.runways)}: VCOA"
+    name = f"{_runways_name(vcoa.runways)}: VCOA"
     for start in _dash_starts(VCOA_DASHES):
         dash = ctx.arc(centre, radius, start, 180 / VCOA_DASHES)
         ctx.polyline(name, Style.VCOA, dash)
@@ -475,12 +547,13 @@ def _draw_vcoa(ctx: _Context, vcoa: VcoaGroup) -> None:
             0.0,
             vcoa.at_or_above,
             _Climb(ctx.params.default_gradient_ft_nm),
+            runways=vcoa.runways,
         )
         _draw_legs(pen, vcoa.then)
         _end_routes([pen])
 
 
-def _vcoa_runways_name(runways: tuple[str, ...]) -> str:
+def _runways_name(runways: tuple[str, ...]) -> str:
     """``RWY 15/33``, or ``ALL RWYS`` for a VCOA that names no runways."""
     return f"RWY {'/'.join(runways)}" if runways else "ALL RWYS"
 
@@ -533,6 +606,7 @@ def _start_runway(ctx: _Context, start: RunwayStart) -> _Pen:
         climb,
         runway_course=start.course_true,
         straight_out=True,
+        runways=(start.runway,),
     )
     turn_start = offset(der, start.course_true, _turn_start_nm(pen))
     ctx.polyline(f"{pen.name}: initial climb", Style.ROUTE, [der, turn_start])
@@ -706,12 +780,12 @@ def _climb_course(
 
 
 def _heading_range(pen: _Pen, leg: HeadingRange, direction: Turn | None) -> None:
-    """Each sector as a wedge from where the turn may begin: its two limiting
-    headings and the arc between them, `heading_range_radius_nm` out.
-
-    The label (and any altitude) sits just beyond the arc of the first sector.
-    """
+    """The sectors as a wedge fanning out from where the turn may begin, for
+    `lay_out_wedges` to draw once the airport's other shapes are known. The
+    route goes on into the wedge, so the arrowhead before it keeps its
+    setback."""
     ctx = pen.ctx
+    pen.last_arrow = None
     match leg.until:
         case None:
             pass
@@ -719,22 +793,19 @@ def _heading_range(pen: _Pen, leg: HeadingRange, direction: Turn | None) -> None
             _require_climb(pen, leg.until)
         case _:
             _unsupported(leg)
-    radius = ctx.params.heading_range_radius_nm
-    apex = pen.at
-    for index, sector in enumerate(leg.sectors):
-        start = ctx.heading_true(sector.start)
-        sweep = _sector_sweep(sector)
-        name = f"{_leg_name(pen, direction, 'heading')} {_sector_phrase(sector)}"
-        ctx.polyline(name, Style.RADIAL, [offset(apex, start, radius), apex])
-        ctx.polyline(name, Style.RADIAL, [apex, offset(apex, start + sweep, radius)])
-        ctx.polyline(name, Style.RADIAL, ctx.arc(apex, radius, start, sweep))
-        if index == 0:
-            outside = offset(
-                apex, start + sweep / 2, radius + ctx.params.label_offset_nm
-            )
-            ctx.label(
-                heading_range_label(leg, direction, ctx.params.label_style), outside
-            )
+    sectors = tuple(
+        (ctx.heading_true(sector.start), _sector_sweep(sector))
+        for sector in leg.sectors
+    )
+    style = ctx.params.label_style
+    wedge = Wedge(
+        pen.runways,
+        ctx.plane.to_latlon(*pen.at),
+        sectors,
+        heading_range_label(leg, direction, style),
+        heading_range_phrases(leg, direction, style),
+    )
+    ctx.wedges.append(wedge)
 
 
 def _sector_sweep(sector: HeadingSector) -> float:
@@ -747,10 +818,294 @@ def _sector_sweep(sector: HeadingSector) -> float:
     return -((sector.start - sector.end) % 360)
 
 
-def _sector_phrase(sector: HeadingSector) -> str:
-    """e.g. ``350 CW 162``."""
-    sense = "CW" if sector.clockwise else "CCW"
-    return f"{sector.start:03d} {sense} {sector.end:03d}"
+type _Box = tuple[float, float, float, float]
+type _Segment = tuple[Vec, Vec]
+
+
+def _shared_wedges(wedges: tuple[Wedge, ...]) -> list[list[Wedge]]:
+    """The wedges in drawing order, each grouped with the earlier ones it
+    can be drawn as."""
+    groups: list[list[Wedge]] = []
+    for wedge in wedges:
+        group = next((group for group in groups if _joins(wedge, group)), None)
+        if group is None:
+            groups.append([wedge])
+        else:
+            group.append(wedge)
+    return groups
+
+
+def _joins(wedge: Wedge, group: list[Wedge]) -> bool:
+    """Whether `wedge` reads the same as every wedge in `group`, from a
+    turn-start point within `SHARED_WEDGE_NM` of each of theirs, with all
+    their runways still fitting one label."""
+    runways = _runways_of([*group, wedge])
+    return runway_tag(runways) is not None and all(
+        (other.sectors, other.printed) == (wedge.sectors, wedge.printed)
+        and distance_nm(other.apex, wedge.apex) <= SHARED_WEDGE_NM
+        for other in group
+    )
+
+
+def _runways_of(wedges: Sequence[Wedge]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(runway for wedge in wedges for runway in wedge.runways))
+
+
+def _centroid(points: list[Vec]) -> Vec:
+    return (
+        sum(x for x, _ in points) / len(points),
+        sum(y for _, y in points) / len(points),
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class _Fan:
+    """Wedges that read alike, drawn as one on the plane: their `sectors`
+    fanning out `radius` NM from `apex`, the midpoint of their own apexes."""
+
+    wedges: tuple[Wedge, ...]
+    apex: Vec
+    radius: float
+
+    @classmethod
+    def of(cls, plane: LocalPlane, params: DisplayParams, wedges: list[Wedge]) -> _Fan:
+        """`wedges` drawn as one from the midpoint of their apexes."""
+        apex = _centroid([plane.to_xy(wedge.apex) for wedge in wedges])
+        return cls(tuple(wedges), apex, params.heading_range_radius_nm)
+
+    @property
+    def sectors(self) -> tuple[tuple[float, float], ...]:
+        return self.wedges[0].sectors
+
+    @property
+    def runways(self) -> tuple[str, ...]:
+        return _runways_of(self.wedges)
+
+    def texts(self) -> list[str]:
+        """The labels, top to bottom: the runways, then the range as printed."""
+        return heading_range_lines(self.runways, self.wedges[0].phrases)
+
+    def polylines(self, plane: LocalPlane, step: float) -> list[Polyline]:
+        """The rays and arcs, named for the runways and the range as printed."""
+        name = f"{_runways_name(self.runways)}: {self.wedges[0].printed}"
+        return [
+            Polyline(name, Style.RADIAL, tuple(plane.to_latlon(*p) for p in points))
+            for points in self.outline(step)
+        ]
+
+    def labels(self, plane: LocalPlane, clutter: _Clutter, step: float) -> list[Label]:
+        """`texts` stacked at `_label_spot`."""
+        texts = self.texts()
+        centre = _label_spot(self, _block_half_size(texts), clutter, step)
+        return [
+            Label(text, plane.to_latlon(*at))
+            for text, at in zip(texts, _block_lines(centre, len(texts)), strict=True)
+        ]
+
+    def rays(self) -> list[_Segment]:
+        """Each sector's limiting headings, drawn in to the apex and out again."""
+        return [
+            ray
+            for start, sweep in self.sectors
+            for ray in (
+                (offset(self.apex, start, self.radius), self.apex),
+                (self.apex, offset(self.apex, start + sweep, self.radius)),
+            )
+        ]
+
+    def outline(self, step: float) -> list[Sequence[Vec]]:
+        """The rays and each sector's arc, as polylines."""
+        arcs = [arc(self.apex, self.radius, *sector, step) for sector in self.sectors]
+        return [*self.rays(), *arcs]
+
+    def bearings(self, step: float) -> list[tuple[float, float]]:
+        """Bearings across each sector at most `step` apart, with their signed
+        angles from the sector's middle."""
+        return [
+            (start + sweep * i / steps, sweep * (i / steps - 0.5))
+            for start, sweep in self.sectors
+            for steps in [max(1, math.ceil(abs(sweep) / step))]
+            for i in range(steps + 1)
+        ]
+
+    def covers(self, p: Vec) -> bool:
+        """Whether the point `p` lies inside the wedge."""
+        heading = bearing(self.apex, p)
+        return distance(self.apex, p) <= self.radius and any(
+            _within_sweep(heading, start, sweep) for start, sweep in self.sectors
+        )
+
+
+def _within_sweep(heading: float, start: float, sweep: float) -> bool:
+    """Whether `heading` lies on the sector from `start` through `sweep`."""
+    turned = (heading - start) % 360 if sweep > 0 else (start - heading) % 360
+    return turned <= abs(sweep)
+
+
+@dataclasses.dataclass(frozen=True)
+class _Clutter:
+    """What a wedge's labels keep clear of: the airport's other labels and
+    the other wedges' apexes, as boxes; its lines, as segments, radials
+    (wedges among them) apart from the rest; and its other wedges."""
+
+    boxes: list[_Box]
+    segments: list[_Segment]
+    radial_segments: list[_Segment]
+    fans: list[_Fan]
+
+    @classmethod
+    def of(
+        cls, plane: LocalPlane, shapes: list[Polyline | Label], fans: list[_Fan]
+    ) -> _Clutter:
+        labels = [
+            _box(plane.to_xy(shape.at), _block_half_size([shape.text]))
+            for shape in shapes
+            if isinstance(shape, Label)
+        ]
+        apexes = [_box(fan.apex, (LABEL_LINE_NM, LABEL_LINE_NM)) for fan in fans]
+        lines = [shape for shape in shapes if isinstance(shape, Polyline)]
+        radials = [line for line in lines if line.style is Style.RADIAL]
+        others = [line for line in lines if line.style is not Style.RADIAL]
+        return cls(
+            [*labels, *apexes],
+            _plane_segments(plane, others),
+            _plane_segments(plane, radials),
+            fans,
+        )
+
+    def cost(self, box: _Box) -> float:
+        """How badly `box` is cluttered: by other labels it overlaps, or
+        would zoomed out, then by lines crossing it, then by standing inside
+        another wedge, where it could be read as that wedge's."""
+        return (
+            LABEL_OVERLAP_COST * sum(_overlap(box, other) for other in self.boxes)
+            + LABEL_MARGIN_COST
+            * sum(_overlap(_zoomed_out(box), _zoomed_out(o)) for o in self.boxes)
+            + LINE_CROSSING_COST * _crossing(self.segments, box)
+            + RADIAL_CROSSING_COST * _crossing(self.radial_segments, box)
+            + OTHER_WEDGE_COST * any(fan.covers(_centre(box)) for fan in self.fans)
+        )
+
+
+def _label_spot(fan: _Fan, half: Vec, clutter: _Clutter, step: float) -> Vec:
+    """Where a block of labels of half-size `half` goes: centred inside the
+    wedge or else just beyond its arc, wherever it is least cluttered,
+    nearest the apex and the middle of a sector."""
+    candidates = [
+        (spot, from_middle)
+        for heading, from_middle in fan.bearings(step)
+        for spot in (
+            *(offset(fan.apex, heading, reach) for reach in _label_reaches(fan.radius)),
+            _clear_of(fan.apex, fan.radius, heading, half),
+        )
+    ]
+
+    def cost(candidate: tuple[Vec, float]) -> float:
+        spot, from_middle = candidate
+        return (
+            clutter.cost(_box(spot, half))
+            + distance(fan.apex, spot)
+            + OFF_MIDDLE_COST * abs(from_middle)
+        )
+
+    return min(candidates, key=cost)[0]
+
+
+def _label_reaches(radius: float) -> list[float]:
+    """Distances out from the apex, up to `radius`, at which to try centring
+    a label inside the wedge."""
+    return [i * LABEL_STEP_NM for i in range(1, math.floor(radius / LABEL_STEP_NM) + 1)]
+
+
+def _clear_of(p: Vec, reach: float, heading: float, half: Vec) -> Vec:
+    """The centre of a box of half-size `half` whose near edge is
+    `LABEL_GAP_NM` beyond `reach` NM from `p` along `heading`."""
+    ux, uy = heading_to_unit(heading)
+    to_edge = min(
+        half[0] / abs(ux) if ux else math.inf, half[1] / abs(uy) if uy else math.inf
+    )
+    return offset(p, heading, reach + LABEL_GAP_NM + to_edge)
+
+
+def _block_half_size(texts: list[str]) -> Vec:
+    """Half the width and height, in NM, of labels stacked `LABEL_LINE_NM`
+    apart, at a nominal zoom of some 45 points to the NM (an iPad showing
+    about 20 NM across); tall enough for text drawn centred on its point or
+    standing on it."""
+    width = max(map(len, texts)) * LABEL_CHAR_NM
+    height = (len(texts) + 1) * LABEL_LINE_NM
+    return width / 2, height / 2
+
+
+def _block_lines(centre: Vec, count: int) -> list[Vec]:
+    """Where each of `count` stacked labels centred on `centre` stands, top
+    first."""
+    x, y = centre
+    return [(x, y + ((count - 1) / 2 - i) * LABEL_LINE_NM) for i in range(count)]
+
+
+def _zoomed_out(box: _Box) -> _Box:
+    """`box` grown about its centre as its label grows against the map when
+    zoomed out `ZOOMED_OUT` times."""
+    left, bottom, right, top = box
+    half = ZOOMED_OUT * (right - left) / 2, ZOOMED_OUT * (top - bottom) / 2
+    return _box(_centre(box), half)
+
+
+def _box(centre: Vec, half: Vec) -> _Box:
+    x, y = centre
+    return x - half[0], y - half[1], x + half[0], y + half[1]
+
+
+def _centre(box: _Box) -> Vec:
+    left, bottom, right, top = box
+    return (left + right) / 2, (bottom + top) / 2
+
+
+def _corners(box: _Box) -> list[Vec]:
+    left, bottom, right, top = box
+    return [(left, bottom), (left, top), (right, bottom), (right, top)]
+
+
+def _plane_segments(plane: LocalPlane, lines: list[Polyline]) -> list[_Segment]:
+    return [
+        segment
+        for line in lines
+        for segment in itertools.pairwise(plane.to_xy(p) for p in line.points)
+    ]
+
+
+def _overlap(box: _Box, other: _Box) -> float:
+    """The area two boxes share, in square NM."""
+    width = min(box[2], other[2]) - max(box[0], other[0])
+    height = min(box[3], other[3]) - max(box[1], other[1])
+    return max(0.0, width) * max(0.0, height)
+
+
+def _crossing(segments: list[_Segment], box: _Box) -> float:
+    """The length of `segments` inside `box`."""
+    return sum(_clipped_length(segment, box) for segment in segments)
+
+
+def _clipped_length(segment: _Segment, box: _Box) -> float:
+    """The length of `segment` inside `box` (Liang–Barsky clipping)."""
+    (x, y), (x2, y2) = segment
+    dx, dy = x2 - x, y2 - y
+    enter, leave = 0.0, 1.0
+    for toward, room in (
+        (-dx, x - box[0]),
+        (dx, box[2] - x),
+        (-dy, y - box[1]),
+        (dy, box[3] - y),
+    ):
+        if toward == 0:
+            if room < 0:
+                return 0.0
+        elif toward < 0:
+            enter = max(enter, room / toward)
+        else:
+            leave = min(leave, room / toward)
+    return max(0.0, leave - enter) * math.hypot(dx, dy)
 
 
 def _require_climb(pen: _Pen, altitude: Altitude) -> None:

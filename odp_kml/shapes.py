@@ -53,11 +53,34 @@ class Label:
 
 
 @dataclasses.dataclass(frozen=True)
+class Wedge:
+    """A heading range as one or more runways fly it: `sectors` of true
+    ``(start, signed sweep)`` degrees (positive clockwise) fanning out from
+    the turn-start point `apex`.
+
+    `printed` words the range as the text does, with any published turn
+    onto it and altitude to climb to in it, and `phrases` are the pieces of
+    `printed` a label may break between.
+    """
+
+    runways: tuple[str, ...]
+    apex: LatLon
+    sectors: tuple[tuple[float, float], ...]
+    printed: str
+    phrases: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True)
 class AirportDrawing:
-    """Everything drawn for one airport; becomes one KML Folder."""
+    """Everything drawn for one airport; becomes one KML Folder.
+
+    `wedges` are heading ranges still to be laid out as shapes, which waits
+    until every part of the airport is drawn (see `geometry.lay_out_wedges`).
+    """
 
     lid: str
     name: str
     shapes: tuple[Polyline | Label, ...]
     position: LatLon | None = None
     palette: int = 0
+    wedges: tuple[Wedge, ...] = ()

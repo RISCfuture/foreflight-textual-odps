@@ -2,6 +2,7 @@
 
 import itertools
 import math
+from collections import Counter
 
 import pytest
 
@@ -11,6 +12,7 @@ from odp_kml.geometry import (
     Degenerate,
     draw,
     format_altitude,
+    lay_out_wedges,
     turn_radius_nm,
 )
 from odp_kml.minimums import ClimbGradient
@@ -44,7 +46,7 @@ from odp_kml.procedure import (
     VcoaGroup,
 )
 from odp_kml.resolved import ResolvedPoint, ResolvedProcedure, RunwayStart
-from odp_kml.shapes import Label, Polyline, Style
+from odp_kml.shapes import AirportDrawing, Label, Polyline, Style, Wedge
 
 AIRPORT = LatLon(38.5, -117.5)
 PLANE = LocalPlane(AIRPORT)
@@ -629,21 +631,78 @@ def test_identical_shapes_are_drawn_once_and_labels_never_overprint():
 
 
 def test_heading_range_is_a_wedge_from_the_turn_start():
-    """RWY 36 may climb on any heading from 000° clockwise to 090° true."""
+    """RWY 36 turns left onto any heading from 000° clockwise to 090° true;
+    its labels stand stacked beside it, in the quarter it covers."""
     sector = HeadingSector(magnetic(0), magnetic(90), clockwise=True)
+    leg = ClimbingTurn(Turn.LEFT, HeadingRange((sector,), feet(7000)))
 
-    drawing = draw(resolved(group(HeadingRange((sector,), feet(7000)))))
+    drawing = draw(resolved(group(leg)))
 
     apex = (0.0, 2.0)
     wedge = [xy(p) for line in polylines(drawing, Style.RADIAL) for p in line.points]
     assert apex in [pytest.approx(v, abs=1e-6) for v in wedge]
     rim = [v for v in wedge if distance(v, apex) > 0.1]
-    assert all(distance(v, apex) == pytest.approx(3.0, abs=1e-6) for v in rim)
+    assert all(distance(v, apex) == pytest.approx(1.0, abs=1e-6) for v in rim)
     assert all(v[0] >= -1e-6 and v[1] >= apex[1] - 1e-6 for v in rim)
     assert [lbl.text for lbl in labels(drawing)] == [
-        f"hdg {magnetic(0):03d}° CW {magnetic(90):03d}° "
-        + format_altitude(feet(7000), "plain")
+        f"36 LT hdg {magnetic(0):03d}° CW {magnetic(90):03d}°",
+        format_altitude(feet(7000), "plain"),
     ]
+    spots = [xy(lbl.at) for lbl in labels(drawing)]
+    assert len({x for x, _ in spots}) == 1
+    assert [y for _, y in spots] == sorted((y for _, y in spots), reverse=True)
+    assert all(x > 0 and y > apex[1] and distance(apex, (x, y)) < 3 for x, y in spots)
+
+
+@pytest.mark.parametrize(
+    ("spacing", "tags"),
+    [(0.4, ["36L/R hdg"]), (4.0, ["36L hdg", "36R hdg"])],
+)
+def test_parallel_runways_departing_alike_share_one_wedge(spacing, tags):
+    """Drawn once from between the runways' turn-start points when they are
+    close, else once from each."""
+    sector = HeadingSector(magnetic(0), magnetic(90), clockwise=True)
+    parallels = (
+        runway("36L", der=(-spacing / 2, 0.0)),
+        runway("36R", der=(spacing / 2, 0.0)),
+    )
+
+    drawing = draw(
+        resolved(
+            group(HeadingRange((sector,)), runways=("36L", "36R")), runways=parallels
+        )
+    )
+
+    assert [lbl.text[: lbl.text.index("hdg") + 3] for lbl in labels(drawing)] == tags
+    ends = Counter(
+        (round(x, 6), round(y, 6))
+        for line in polylines(drawing, Style.RADIAL)
+        if len(line.points) == 2
+        for x, y in map(xy, line.points)
+    )
+    apexes = sorted(end for end, rays in ends.items() if rays == 2)
+    turn_starts = [(-spacing / 2, 2.0), (spacing / 2, 2.0)]
+    assert apexes == (turn_starts if len(tags) == 2 else [(0.0, 2.0)])
+
+
+def test_wedge_labels_sit_by_a_wide_wedge_clear_of_other_labels():
+    """Beside the apex of a three-quarter wedge, moving over for a label
+    already there."""
+    apex = (0.0, 2.0)
+    phrases = ("hdg 257° CW 167°",)
+    wedge = Wedge(("36",), at(*apex), ((270.0, 270.0),), "hdg", phrases)
+    lone = lay_out_wedges(AirportDrawing("TST", "TEST", (), AIRPORT, wedges=(wedge,)))
+    [tag] = [xy(lbl.at) for lbl in labels(lone)]
+    other = Label("hdg 999°", at(*tag))
+
+    crowded = lay_out_wedges(
+        AirportDrawing("TST", "TEST", (other,), AIRPORT, wedges=(wedge,))
+    )
+
+    [moved] = [xy(lbl.at) for lbl in labels(crowded) if lbl is not other]
+    assert distance(apex, tag) < 3.0
+    assert distance(apex, moved) < 3.0
+    assert distance(tag, moved) > 0.6
 
 
 def test_counterclockwise_sector_sweeps_the_other_way():
