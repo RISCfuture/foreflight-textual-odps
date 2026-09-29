@@ -2,7 +2,6 @@
 
 import itertools
 import math
-from collections import Counter
 
 import pytest
 
@@ -630,6 +629,16 @@ def test_identical_shapes_are_drawn_once_and_labels_never_overprint():
     assert len(drawing.shapes) == len(set(drawing.shapes))
 
 
+def wedge_limits(drawing, *, arrows=False) -> list[Polyline]:
+    """The route-weight lines along a wedge's limiting headings, or their
+    arrowheads."""
+    return [
+        line
+        for line in polylines(drawing)
+        if " CW " in line.name and line.name.endswith("arrow") == arrows
+    ]
+
+
 def test_heading_range_is_a_wedge_from_the_turn_start():
     """RWY 36 turns left onto any heading from 000° clockwise to 090° true;
     its labels stand stacked beside it, in the quarter it covers."""
@@ -639,11 +648,19 @@ def test_heading_range_is_a_wedge_from_the_turn_start():
     drawing = draw(resolved(group(leg)))
 
     apex = (0.0, 2.0)
-    wedge = [xy(p) for line in polylines(drawing, Style.RADIAL) for p in line.points]
-    assert apex in [pytest.approx(v, abs=1e-6) for v in wedge]
-    rim = [v for v in wedge if distance(v, apex) > 0.1]
-    assert all(distance(v, apex) == pytest.approx(1.0, abs=1e-6) for v in rim)
-    assert all(v[0] >= -1e-6 and v[1] >= apex[1] - 1e-6 for v in rim)
+    north, east = ([xy(p) for p in line.points] for line in wedge_limits(drawing))
+    reach = distance(north[-1], apex)
+    assert reach > 1.0  # widened to fit the full-radius left turn onto 090°
+    assert north == [pytest.approx(apex), pytest.approx((0.0, apex[1] + reach))]
+    assert distance(east[-1], apex) == pytest.approx(reach)
+    assert east[-1][1] == pytest.approx(east[-2][1])  # leaving on 090°
+    assert min(x for x, _ in east) < 0  # by the published left turn
+    arrow_tips = [xy(line.points[1]) for line in wedge_limits(drawing, arrows=True)]
+    assert arrow_tips == [north[-1], east[-1]]
+    dashes = [xy(p) for line in polylines(drawing, Style.RADIAL) for p in line.points]
+    assert len(polylines(drawing, Style.RADIAL)) > 1
+    assert all(distance(v, apex) == pytest.approx(reach, abs=1e-6) for v in dashes)
+    assert all(v[0] >= -1e-6 and v[1] >= east[-1][1] - 1e-6 for v in dashes)
     assert [lbl.text for lbl in labels(drawing)] == [
         f"36 LT hdg {magnetic(0):03d}° CW {magnetic(90):03d}°",
         format_altitude(feet(7000), "plain"),
@@ -674,13 +691,12 @@ def test_parallel_runways_departing_alike_share_one_wedge(spacing, tags):
     )
 
     assert [lbl.text[: lbl.text.index("hdg") + 3] for lbl in labels(drawing)] == tags
-    ends = Counter(
-        (round(x, 6), round(y, 6))
-        for line in polylines(drawing, Style.RADIAL)
-        if len(line.points) == 2
-        for x, y in map(xy, line.points)
+    apexes = sorted(
+        {
+            tuple(round(v, 6) for v in xy(line.points[0]))
+            for line in wedge_limits(drawing)
+        }
     )
-    apexes = sorted(end for end, rays in ends.items() if rays == 2)
     turn_starts = [(-spacing / 2, 2.0), (spacing / 2, 2.0)]
     assert apexes == (turn_starts if len(tags) == 2 else [(0.0, 2.0)])
 

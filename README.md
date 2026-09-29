@@ -65,8 +65,11 @@ with certainty:
   heading 167° to 3400 before turning left."), each drawn to its own stub.
 - Climb-in-hold racetracks.
 - Heading ranges ("climb on a heading between 350° CW to 162° from DER")
-  as a small closed pie slice from the turn-start point, beside the route
-  flown on "all other courses". Each slice is labelled with its runways
+  as a fan from the turn-start point, beside the route flown on "all
+  other courses": the route splits there into a line along each limiting
+  heading, each turning off the arriving course as any other turn does
+  (the published way, else the shorter) and ending in an arrowhead, with a
+  light dashed arc between them. Each fan is labelled with its runways
   and the range as printed, keeping every heading, CW/CCW, printed turn
   and altitude, on as few lines as ForeFlight shows whole (it elides the
   middle of a label over 22 characters): the runways lead the first line
@@ -74,14 +77,14 @@ with certainty:
   them or to save a line (`16L/R 213° CCW 353°`, `11 320° CW 220° 3000'`);
   otherwise they stand on a line of their own. Alternative sectors stay
   stacked under the first (`25 hdg 317° CW 083°` over `or 206° CCW 083°`).
-  Parallel runways that depart alike share one slice, drawn from between
+  Parallel runways that depart alike share one fan, drawn from between
   their turn-start points. The label stands in or just beyond its own
-  slice, clear of other labels, lines and slices where it can.
+  fan, clear of other labels, lines and fans where it can.
   A diverse departure limited to a sector ("diverse departures authorized
   300° to 120° CW") is drawn the same way. A minimum climb gradient given
   for the other headings instead ("or min. climb of 415 ft per NM to 1600
   for headings 101° through 314°") names no route, so only the
-  slice is drawn.
+  fan is drawn.
 - VCOA (visual climb over airport) circles, including airports whose only
   procedure is a VCOA and visual climbs written into the departure
   procedure itself ("..., or for climb in visual conditions: cross ...").
@@ -157,7 +160,8 @@ used whenever the text does not otherwise constrain the geometry:
 | Climb gradient for altitude legs | Published minimum up to the altitude it is published to, 200 ft/NM above it or when none is published |
 | Hold leg length | 1 minute (1.5 minutes above 14,000 ft; 1 minute to an unstated MEA, MCA or MOCA) |
 | VCOA circle | 2 NM schematic radius |
-| Heading-range wedge | 1 NM schematic radius from the turn start |
+| Heading-range wedge | 1 NM schematic radius from the turn start, or 0.3 NM beyond where the widest turn onto a limiting heading ends |
+| Wedge edges | Turn off the arriving course at the standard turn radius, like every other turn |
 | Shared heading-range wedge | Turn starts within 1.5 NM of each other |
 | Wedge label clearance | Labels sized for about 20 NM across an iPad screen |
 | Course printed as a compass direction ("before proceeding northbound") | The direction's true bearing, turned onto the shorter way unless the side is printed; no stub for two directions ("west or northwest") |

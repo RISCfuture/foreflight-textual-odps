@@ -112,6 +112,9 @@ ON_COURSE_DASH_SPACING_NM = (ON_COURSE_STUB_NM - ON_COURSE_DASH_NM) / (
 ON_COURSE_BEND_DEG = 45.0
 VCOA_DASHES = 36
 VCOA_LABEL_BEARINGS = (0.0, 180.0, 90.0, 270.0)
+WEDGE_DASH_NM = 0.12
+WEDGE_STRAIGHT_NM = 0.3
+WEDGE_GAP_NM = 0.1
 ARROW_ARM_NM = 0.25
 ARROW_SETBACK_NM = 0.5
 ARROW_SPLAY_DEG = 30.0
@@ -384,16 +387,12 @@ class _Pen:
         """Fly a fly-by arc onto `course`; return its vertices (from the
         current position) and the turn side (+1 right, -1 left, 0 none)."""
         delta = _signed_turn(self.course, course, direction)
-        side = sign(delta)
-        points = [self.at]
-        if side:
-            centre = offset(self.at, self.course + 90 * side, self.ctx.radius)
-            points = self.ctx.arc(
-                centre, self.ctx.radius, self.course - 90 * side, delta
-            )
-            self.along_nm += self.ctx.radius * math.radians(abs(delta))
+        points = _turn_arc(
+            self.at, self.course, delta, self.ctx.radius, self.ctx.params.arc_step_deg
+        )
+        self.along_nm += self.ctx.radius * math.radians(abs(delta))
         self.at, self.course = points[-1], course
-        return points, side
+        return points, sign(delta)
 
     def straight_to(self, end: Vec) -> None:
         length = distance(self.at, end)
@@ -804,6 +803,8 @@ def _heading_range(pen: _Pen, leg: HeadingRange, direction: Turn | None) -> None
         sectors,
         heading_range_label(leg, direction, style),
         heading_range_phrases(leg, direction, style),
+        course=pen.course,
+        turn=direction,
     )
     ctx.wedges.append(wedge)
 
@@ -866,12 +867,23 @@ class _Fan:
     wedges: tuple[Wedge, ...]
     apex: Vec
     radius: float
+    turn_radius: float
 
     @classmethod
     def of(cls, plane: LocalPlane, params: DisplayParams, wedges: list[Wedge]) -> _Fan:
-        """`wedges` drawn as one from the midpoint of their apexes."""
+        """`wedges` drawn as one from the midpoint of their apexes, reaching
+        `heading_range_radius_nm`, or farther when turning onto a limiting
+        heading takes the aircraft wider than that."""
         apex = _centroid([plane.to_xy(wedge.apex) for wedge in wedges])
-        return cls(tuple(wedges), apex, params.heading_range_radius_nm)
+        turn_radius = turn_radius_nm(params.tas_kt, params.bank_deg)
+        fan = cls(tuple(wedges), apex, params.heading_range_radius_nm, turn_radius)
+        widest = max(
+            distance(apex, fan.turn_onto(heading, params.arc_step_deg)[-1])
+            for heading in fan.limiting_headings()
+        )
+        return dataclasses.replace(
+            fan, radius=max(fan.radius, widest + WEDGE_STRAIGHT_NM)
+        )
 
     @property
     def sectors(self) -> tuple[tuple[float, float], ...]:
@@ -886,12 +898,71 @@ class _Fan:
         return heading_range_lines(self.runways, self.wedges[0].phrases)
 
     def polylines(self, plane: LocalPlane, step: float) -> list[Polyline]:
-        """The rays and arcs, named for the runways and the range as printed."""
+        """The route splitting at the apex into a route-weight line along each
+        limiting heading, each ending in an arrowhead, with a light dashed arc
+        between them; named for the runways and the range as printed."""
         name = f"{_runways_name(self.runways)}: {self.wedges[0].printed}"
-        return [
-            Polyline(name, Style.RADIAL, tuple(plane.to_latlon(*p) for p in points))
-            for points in self.outline(step)
+
+        def line(style: Style, points: Sequence[Vec], suffix: str = "") -> Polyline:
+            latlons = tuple(plane.to_latlon(*p) for p in points)
+            return Polyline(f"{name}{suffix}", style, latlons)
+
+        tips = {}
+        limits = []
+        for heading in self.limiting_headings():
+            points = self.edge(heading, step)
+            tips[heading] = points[-1]
+            limits += [
+                line(Style.ROUTE, points),
+                line(Style.ROUTE, _arrow_arms(points[-1], heading), " arrow"),
+            ]
+        dashes = [
+            line(Style.RADIAL, dash)
+            for start, sweep in self.sectors
+            for dash in _dashed_arc(
+                self.apex, self.radius, *self.between(tips, start, sweep), step
+            )
         ]
+        return [*limits, *dashes]
+
+    def turn_onto(self, heading: float, step: float) -> list[Vec]:
+        """The aircraft's turn from the apex onto `heading` (the published
+        way, else the shorter), flown like every other turn in the drawing."""
+        delta = _signed_turn(self.course, heading, self.turn)
+        return _turn_arc(self.apex, self.course, delta, self.turn_radius, step)
+
+    def edge(self, heading: float, step: float) -> list[Vec]:
+        """The turn onto `heading`, then straight on until `radius` out."""
+        points = self.turn_onto(heading, step)
+        return [*points, _out_to(self.apex, points[-1], heading, self.radius)]
+
+    def between(
+        self, tips: dict[float, Vec], start: float, sweep: float
+    ) -> tuple[float, float]:
+        """The sector's arc as a start bearing and sweep between its tips."""
+        first = bearing(self.apex, tips[round(start % 360, 6)])
+        last = bearing(self.apex, tips[round((start + sweep) % 360, 6)])
+        return first, sweep + wrap180(last - (start + sweep)) - wrap180(first - start)
+
+    @property
+    def course(self) -> float:
+        """The course flown into the apex (averaged over merged runways)."""
+        x = sum(math.sin(math.radians(wedge.course)) for wedge in self.wedges)
+        y = sum(math.cos(math.radians(wedge.course)) for wedge in self.wedges)
+        return math.degrees(math.atan2(x, y)) % 360
+
+    @property
+    def turn(self) -> Turn | None:
+        return Turn(self.wedges[0].turn) if self.wedges[0].turn else None
+
+    def limiting_headings(self) -> list[float]:
+        """Each distinct limiting heading once: "or" sectors share an end."""
+        headings = (
+            heading % 360
+            for start, sweep in self.sectors
+            for heading in (start, start + sweep)
+        )
+        return list(dict.fromkeys(round(heading, 6) for heading in headings))
 
     def labels(self, plane: LocalPlane, clutter: _Clutter, step: float) -> list[Label]:
         """`texts` stacked at `_label_spot`."""
@@ -901,22 +972,6 @@ class _Fan:
             Label(text, plane.to_latlon(*at))
             for text, at in zip(texts, _block_lines(centre, len(texts)), strict=True)
         ]
-
-    def rays(self) -> list[_Segment]:
-        """Each sector's limiting headings, drawn in to the apex and out again."""
-        return [
-            ray
-            for start, sweep in self.sectors
-            for ray in (
-                (offset(self.apex, start, self.radius), self.apex),
-                (self.apex, offset(self.apex, start + sweep, self.radius)),
-            )
-        ]
-
-    def outline(self, step: float) -> list[Sequence[Vec]]:
-        """The rays and each sector's arc, as polylines."""
-        arcs = [arc(self.apex, self.radius, *sector, step) for sector in self.sectors]
-        return [*self.rays(), *arcs]
 
     def bearings(self, step: float) -> list[tuple[float, float]]:
         """Bearings across each sector at most `step` apart, with their signed
@@ -934,6 +989,40 @@ class _Fan:
         return distance(self.apex, p) <= self.radius and any(
             _within_sweep(heading, start, sweep) for start, sweep in self.sectors
         )
+
+
+def _out_to(apex: Vec, start: Vec, heading: float, reach: float) -> Vec:
+    """The point on `heading` from `start` that lies `reach` from `apex`."""
+    ux, uy = heading_to_unit(heading)
+    dx, dy = start[0] - apex[0], start[1] - apex[1]
+    along = dx * ux + dy * uy
+    return offset(
+        start,
+        heading,
+        -along + math.sqrt(max(0.0, along**2 - dx**2 - dy**2 + reach**2)),
+    )
+
+
+def _arrow_arms(tip: Vec, course: float) -> list[Vec]:
+    """A two-armed "V" with its point at `tip`, pointing along `course`."""
+    back = course + 180
+    return [
+        offset(tip, back - ARROW_SPLAY_DEG, ARROW_ARM_NM),
+        tip,
+        offset(tip, back + ARROW_SPLAY_DEG, ARROW_ARM_NM),
+    ]
+
+
+def _dashed_arc(
+    centre: Vec, radius: float, start: float, sweep: float, step: float
+) -> list[list[Vec]]:
+    """The arc from `start` through `sweep` degrees as dashes about
+    `WEDGE_DASH_NM` long, `WEDGE_GAP_NM` apart, starting and ending on a dash."""
+    length = radius * math.radians(abs(sweep))
+    count = max(2, round((length + WEDGE_GAP_NM) / (WEDGE_DASH_NM + WEDGE_GAP_NM)))
+    period = sweep / (count - WEDGE_GAP_NM / (WEDGE_DASH_NM + WEDGE_GAP_NM))
+    dash = period * WEDGE_DASH_NM / (WEDGE_DASH_NM + WEDGE_GAP_NM)
+    return [arc(centre, radius, start + i * period, dash, step) for i in range(count)]
 
 
 def _within_sweep(heading: float, start: float, sweep: float) -> bool:
@@ -1740,13 +1829,19 @@ def _end_routes(pens: list[_Pen]) -> None:
 def _draw_arrow(
     ctx: _Context, name: str, style: Style, tip: Vec, course: float
 ) -> Polyline:
-    back = course + 180
-    arms = [
-        offset(tip, back - ARROW_SPLAY_DEG, ARROW_ARM_NM),
-        tip,
-        offset(tip, back + ARROW_SPLAY_DEG, ARROW_ARM_NM),
-    ]
-    return ctx.polyline(f"{name} arrow", style, arms)
+    return ctx.polyline(f"{name} arrow", style, _arrow_arms(tip, course))
+
+
+def _turn_arc(
+    at: Vec, course: float, delta: float, radius: float, step: float
+) -> list[Vec]:
+    """The fly-by arc from `at` on `course` turning `delta` degrees (positive
+    right) at `radius`; just `at` when there is no turn."""
+    side = sign(delta)
+    if not side:
+        return [at]
+    centre = offset(at, course + 90 * side, radius)
+    return arc(centre, radius, course - 90 * side, delta, step)
 
 
 def _signed_turn(course: float, target: float, direction: Turn | None) -> float:

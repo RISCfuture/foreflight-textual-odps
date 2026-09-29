@@ -60,7 +60,8 @@ class Wedge:
 
     `printed` words the range as the text does, with any published turn
     onto it and altitude to climb to in it, and `phrases` are the pieces of
-    `printed` a label may break between.
+    `printed` a label may break between. `course` is the true course flown
+    into the apex and `turn` any published turn onto the range ("L", "R").
     """
 
     runways: tuple[str, ...]
@@ -68,6 +69,8 @@ class Wedge:
     sectors: tuple[tuple[float, float], ...]
     printed: str
     phrases: tuple[str, ...]
+    course: float = 0.0
+    turn: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)
