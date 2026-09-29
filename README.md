@@ -161,20 +161,21 @@ used whenever the text does not otherwise constrain the geometry:
 | Turn radius | 25° bank or standard rate, whichever is larger |
 | Turn start | 400 ft above the DER (departure end of runway) |
 | Climb gradient for altitude legs | Published minimum up to the altitude it is published to, 200 ft/NM above it or when none is published |
+| Climb naming no heading or route ("climb to 1200 before turning left") | Straight out along the runway's course while every earlier leg has held it; refused anywhere else |
+| Intercept heading not printed ("climbing left turn to intercept PUB R-274") | 45° to the radial, on the side of it the turn leaves the aircraft: the optimum angle FAA Order 8260.3F ¶13-3-3b(2) takes "when a heading is not defined" (minimum 15°, optimum 30°–45°). Not drawn if the turn onto it exceeds 270°, or differs by more than 45° from the turn onto the radial's course |
+| Turn rolling out close beside the radial to intercept | Within 0.5 NM of it: roll out on the radial's course, then converge on the radial at 20° |
+| Printed heading already on its radial | Joined there when a runway's route has rolled out within 0.5 NM and 3° of the radial, inside the half-scale deflection at which a pilot counts as established on a course |
+| Radial sense not printed, flown to an altitude | Within 60° of the printed heading, else of a runway route's course, or 60°–120° into its stated turn (all routes into a shared tail agreeing) |
+| Course printed as a compass direction ("before proceeding northbound") | The direction's true bearing, turned onto the shorter way unless the side is printed; no stub for two directions ("west or northwest") |
 | Hold leg length | 1 minute (1.5 minutes above 14,000 ft; 1 minute to an unstated MEA, MCA or MOCA) |
 | VCOA circle | 2 NM schematic radius |
 | Heading-range wedge | 1 NM schematic radius from the turn start, or 0.3 NM beyond where the widest turn onto a limiting heading ends |
-| Runway-group shades | Same perceived lightness as the airport's color; hue within 15° of it and at most a third of the way to a comparably vivid palette color; chroma down to 60% from four groups on |
 | Wedge edges | Turn off the arriving course at the standard turn radius, like every other turn |
 | Shared heading-range wedge | Turn starts within 1.5 NM of each other |
 | Wedge label clearance | Labels sized for about 20 NM across an iPad screen |
-| Course printed as a compass direction ("before proceeding northbound") | The direction's true bearing, turned onto the shorter way unless the side is printed; no stub for two directions ("west or northwest") |
-| Climb naming no heading or route | Straight out along the runway's course while every earlier leg has held it; refused anywhere else |
-| Intercept heading not printed | 45° to the radial on the side the turn ends; 20° after rolling out within 0.5 NM of it. Not drawn if the turn onto it is over 270° or over 45° off the turn onto the radial's course |
+| Runway-group shades | Same perceived lightness as the airport's color; hue within 15° of it and at most a third of the way to a comparably vivid palette color; chroma down to 60% from four groups on |
 | Magnetic headings | Airport's variation of record (WMM if unpublished) |
 | Magnetic radials | Referenced navaid's own station declination |
-| Intercept heading rolled out on its radial | Radial joined there, if a runway's route is within 0.5 NM and 3° of it |
-| Unprinted radial sense, flown to an altitude | Within 60° of the printed heading, else of a runway route's course or 60°–120° into its stated turn (all routes into a shared tail agreeing) |
 
 ## Data sources
 

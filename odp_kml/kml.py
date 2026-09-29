@@ -1,12 +1,14 @@
 """Hand-written KML 2.2 writer, limited to the subset ForeFlight renders.
 
-ForeFlight silently ignores KML elements outside a small subset, so this
-writer emits only that subset: Document, Folder, Style/LineStyle/IconStyle,
-Placemark, LineString, and Point. Anything else (description, ExtendedData,
-LabelStyle, altitudeMode, tessellate, extrude, Icon, BalloonStyle, gx:*) is
-never written. ForeFlight draws a point's label in its icon's color, so a
-label takes its airport's color from IconStyle, with the icon scaled down
-until ForeFlight stops drawing it.
+ForeFlight silently ignores KML outside the subset its Pilot's Guide
+(§20.7) lists: Point, LineString, LinearRing, Polygon, MultiGeometry,
+Style, StyleMap (its normal style only), LineStyle, PolyStyle, IconStyle
+and gx:LabelVisibility. This writer emits Document, Folder, Placemark,
+Style with LineStyle or IconStyle, LineString and Point; anything else
+(description, ExtendedData, LabelStyle, altitudeMode, tessellate, extrude,
+Icon, BalloonStyle) is never written. ForeFlight draws a point's label in
+its icon's color, so a label takes its airport's color from IconStyle,
+with the icon scaled down until ForeFlight stops drawing it.
 """
 
 from __future__ import annotations
