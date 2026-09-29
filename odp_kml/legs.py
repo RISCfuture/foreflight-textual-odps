@@ -85,6 +85,8 @@ _NAVAID_TYPES = (
 )
 NAVAID_TYPE_WORDS = frozenset(words[0] for words, _ in _NAVAID_TYPES)
 VISUAL_CLIMB = ("for", "climb", "in", "visual", "conditions")
+# Leg words, printed in lowercase, that continue a sentence without a separator.
+_UNSEPARATED_LEG_WORDS = frozenset({"climb", "climbing"})
 ENROUTE_MINIMUMS = frozenset({"mea", "mca", "moca"})
 CONTINUATION_WORDS = frozenset(
     {"climb", "climbing", "continue", "proceed", "direct", "cross"}
@@ -196,11 +198,24 @@ class LegParser(TokenStream):
         return True
 
     def _leg_separator(self, *, required: bool) -> None:
-        """separator := ("," | ";") ["then"] | "then" | "and" """
+        """separator := ("," | ";") ["then"] | "then" | "and" | ↓
+
+        ↓: none before a lowercase "climb" or "climbing", which goes on with
+        the same sentence ("climb heading 256° to 800 climbing right turn
+        ..."); a capitalized one may open a sentence for other runways.
+        """
         if self._accept_any(",", ";"):
             self._accept("then")
-        elif not self._accept_any("then", "and") and required:
+        elif (
+            not self._accept_any("then", "and")
+            and required
+            and not self._peek_unseparated_leg()
+        ):
             raise self._unmatched()
+
+    def _peek_unseparated_leg(self) -> bool:
+        token = self._token()
+        return token is not None and token.text in _UNSEPARATED_LEG_WORDS
 
     def _peek_range_alternative(self, legs: list[Leg]) -> bool:
         """After a heading range: ``, all other courses ...`` or ``or climb …``."""
@@ -282,11 +297,13 @@ class LegParser(TokenStream):
         """A new sentence that goes on flying the route: "... direct RSK VORTAC.
         Continue climb in RSK VORTAC holding pattern ..."."""
         return (
-            self._index > 0
-            and self._tokens[self._index - 1].text == "."
+            self._follows_period()
             and (self._peek_any_of(CONTINUATION_WORDS) or self._peek_if_required())
             and not self._peek(*VISUAL_CLIMB[1:])
         )
+
+    def _follows_period(self) -> bool:
+        return self._index > 0 and self._tokens[self._index - 1].text == "."
 
     def _continuation(self) -> tuple[Leg, ...]:
         return self._legs([self._leg()])
@@ -319,7 +336,7 @@ class LegParser(TokenStream):
               "proceeding" ("on course" | "enroute" | direction | direct)
             | "climbing on course"
             | "turning" [turn-word] (direct | [direction] ["on course"])
-            | "turn")
+            | [turn-word] "turn")
 
         A compass direction ("before turning southbound") is read but not
         drawn; a turn direction bends the on-course stub. "Before turning
@@ -335,6 +352,9 @@ class LegParser(TokenStream):
             return ProceedOnCourse()
         if self._accept("climbing", "on", "course") or self._accept("turn"):
             return ProceedOnCourse()
+        for word, turn in _TURN_WORDS.items():
+            if self._accept(word, "turn"):
+                return ProceedOnCourse(turn)
         self._expect("turning")
         token = self._token()
         turn = None
@@ -466,11 +486,7 @@ class LegParser(TokenStream):
 
     def _peek_speed_sentence(self) -> bool:
         """ "... on course. Do not exceed 150 KIAS until reaching 1700 MSL." """
-        return (
-            self._index > 0
-            and self._tokens[self._index - 1].text == "."
-            and self._peek("do", "not", "exceed")
-        )
+        return self._follows_period() and self._peek("do", "not", "exceed")
 
     def _with_speed_sentence(self, legs: tuple[Leg, ...]) -> tuple[Leg, ...]:
         """`legs` with a speed-limit sentence applied to the last leg flown."""
@@ -735,9 +751,10 @@ class LegParser(TokenStream):
         return self._peek("heading", offset=offset) or self._peek("hdg", offset=offset)
 
     def _heading(self) -> int:
-        """heading := ("heading" | "hdg") nnn ["°"]"""
+        """heading := ("heading" | "hdg") ["of"] nnn ["°"]"""
         if not self._accept_any("heading", "hdg"):
             raise self._unmatched()
+        self._accept("of")
         heading = self._integer()
         self._accept("°")
         return heading
@@ -973,7 +990,9 @@ class LegParser(TokenStream):
     # --- Leg terminators ---------------------------------------------------
 
     def _until(self) -> Until | None:
-        """until := "to" (altitude | cross-radial | dme | target)"""
+        """until := "to" (altitude | cross-radial | dme | target) | until-altitude"""
+        if self._peek("until") and self._peek_integer(1):
+            return self._until_altitude()
         if not self._peek("to"):
             return None
         if self._peek_integer(1):
@@ -994,6 +1013,14 @@ class LegParser(TokenStream):
         """to-altitude := "to" nnnn"""
         start = self._position()
         self._expect("to")
+        feet = self._integer()
+        return Altitude(feet, AltitudeKind.TO, self._slice_from(start))
+
+    def _until_altitude(self) -> Altitude:
+        """until-altitude := "until" nnnn, a climb-to altitude: "climb on
+        heading 208° until 5500"."""
+        start = self._position()
+        self._expect("until")
         feet = self._integer()
         return Altitude(feet, AltitudeKind.TO, self._slice_from(start))
 

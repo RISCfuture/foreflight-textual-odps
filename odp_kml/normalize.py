@@ -103,6 +103,19 @@ def _spell_out_min_climb(text: str) -> str:
     return re.sub(r"\b(?:w/ ?|with a )min\b\.?", "with a min.", text)
 
 
+def _spell_vcoa(text: str) -> str:
+    """``VOCA``, its letters transposed, reads ``VCOA``."""
+    return re.sub(r"\bVOCA\b", "VCOA", text)
+
+
+def _climb_runway_heading_to(text: str) -> str:
+    """``runway heading 3200``, the ``to`` left out before a number too large
+    to be a heading, reads ``runway heading to 3200``."""
+    return re.sub(
+        r"\b(runway heading)\s+(?=[1-9]\d{3,4}\b)", r"\1 to ", text, flags=re.IGNORECASE
+    )
+
+
 def _expand_fractions(text: str) -> str:
     """``2¾`` becomes ``2 3/4`` and a bare ``¾`` becomes ``3/4``."""
     for glyph, ascii_fraction in _FRACTIONS.items():
@@ -171,6 +184,8 @@ _SUBSTITUTIONS: tuple[Callable[[str], str], ...] = (
     _spell_speed_limits,
     _single_periods,
     _spell_out_min_climb,
+    _spell_vcoa,
+    _climb_runway_heading_to,
     _expand_fractions,
     _drop_foot_marks,
     _collapse_horizontal_whitespace,

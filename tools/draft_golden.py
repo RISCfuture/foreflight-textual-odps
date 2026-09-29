@@ -766,7 +766,8 @@ Output: one Procedure object matching the response schema. Every object carries
   ClimbInHold at MQO; hold is the side, turns and inbound course as printed,
   null when the text gives none), CrossAt ("Cross LIN VOR/DME at or above
   5000" after reaching LIN), ProceedOnCourse
-  (turn_restriction L/R only for "before turning left/right"; null otherwise),
+  (turn_restriction L/R only for "before turning left/right" or "before
+  left/right turn"; null otherwise),
   and Thence (the "thence..." marker leading into a shared tail).
 - "All other courses: ..." (or "or climb on a heading between ...") after a
   HeadingRange is a further runway group for the same runways. So is "or min.
@@ -779,13 +780,14 @@ Output: one Procedure object matching the response schema. Every object carries
 - shared_tail: the legs after a leading "..." or "All aircraft" line that every
   group continues with; null when there is none. Before an "All aircraft" tail
   every group with legs ends in Thence, said or not.
-- until ends a leg: Altitude ("to 2000" is kind "to", "at 2000" is "at",
-  "at or above 9300" is "at_or_above", "at or below" is "at_or_below"; phrase
-  is the exact words),
+- until ends a leg: Altitude ("to 2000" and "until 2000" are kind "to",
+  "at 2000" is "at", "at or above 9300" is "at_or_above", "at or below" is
+  "at_or_below"; phrase is the exact words),
   EnrouteAltitude ("at or above MEA/MCA for route of flight": names ["MEA",
-  "MCA"] as printed, kind as for Altitude; "at or above 4000 or MEA" also
-  sets feet 4000), AtFix ("to RESER INT" is the fix RESER), Dme ("to MLF 12 DME"; "to CARRO
-  INT/OLM 19.43 DME" also sets fix CARRO), or
+  "MCA"] as printed, each MEA, MCA or MOCA; kind as for Altitude; "at or
+  above 4000 or MEA" also sets feet 4000), AtFix ("to RESER INT" is the fix
+  RESER), Dme ("to MLF 12 DME"; "to CARRO INT/OLM 19.43 DME" also sets fix
+  CARRO), or
   CrossRadial ("to cross LAS VORTAC R-110").
 - altitude on a Radial or HeadingAndRadial is the altitude climbed to on the
   way to the fix or DME distance ending the leg ("to 3000 via FSM R-064 to FSM
@@ -808,7 +810,9 @@ Output: one Procedure object matching the response schema. Every object carries
   the crossing in the VCOA section puts on the visual climb, else null. A visual
   climb written into the DEPARTURE PROCEDURE section ("..., or for climb in
   visual conditions: cross ...") is a vcoa group for that runway, listed before
-  the VCOA section's groups.
+  the VCOA section's groups; an "Or for climb in visual conditions ..." sentence
+  straight after a shared tail that ends on course is a vcoa group for the
+  runways whose groups continue into that tail.
 - source_span on every leg and until node: the exact words of the input the node
   came from, copied character for character (including °, parentheses, and
   capitalization). Together the spans must cover every word of the DEPARTURE

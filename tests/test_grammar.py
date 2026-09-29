@@ -487,6 +487,50 @@ def test_parses_fixture_procedures(name):
             ),
             id="shared tail joining a radial",
         ),
+        pytest.param(
+            "Rwy 25, climb heading of 249° to 1700 before turning right.\n"
+            "Rwy 21, climb on heading 208° until 5500 before turning right.",
+            [
+                RunwayGroup(
+                    ("25",), (ClimbHeading(249, to(1700)), ProceedOnCourse(Turn.RIGHT))
+                ),
+                RunwayGroup(
+                    ("21",),
+                    (
+                        ClimbHeading(
+                            208, Altitude(5500, AltitudeKind.TO, "until 5500")
+                        ),
+                        ProceedOnCourse(Turn.RIGHT),
+                    ),
+                ),
+            ],
+            None,
+            id="heading of, until an altitude",
+        ),
+        pytest.param(
+            "Rwy 26, climb heading 256° to 800 climbing right turn on heading 080° "
+            "to intercept LIN R-290 to LIN VOR/DME.",
+            [
+                RunwayGroup(
+                    ("26",),
+                    (
+                        ClimbHeading(256, to(800)),
+                        ClimbingTurn(
+                            Turn.RIGHT,
+                            HeadingAndRadial(
+                                80,
+                                NavaidRef("LIN"),
+                                290,
+                                outbound=False,
+                                until=AtFix(NavaidRef("LIN", NavaidType.VOR_DME)),
+                            ),
+                        ),
+                    ),
+                )
+            ],
+            None,
+            id="lowercase climbing turn without a separator",
+        ),
     ],
 )
 def test_parses_leg_shapes(text, groups, shared_tail):
@@ -636,6 +680,42 @@ def test_parses_leg_shapes(text, groups, shared_tail):
                 "VORTAC."
             ),
             'unmatched phrase ". rwy <n>,"',
+        ),
+        (
+            (
+                "Rwy 30, climb direct MSO VOR/DME Climb in MSO VOR/DME holding "
+                "pattern (southeast, right turn, 340° inbound) to 13000."
+            ),
+            'unmatched phrase "climb in <id> vor"',
+        ),
+        (
+            (
+                "Rwy 2, climb on a heading between 100° CW 200°.\n"
+                "All aircraft, climb direct EED VORTAC before proceeding on course. "
+                "Or for climb in visual conditions cross Needles airport at or "
+                "above 3400 before proceeding on course."
+            ),
+            'unmatched phrase "or for climb in"',
+        ),
+        (
+            (
+                "Rwy 29, climbing right turn direct EED VORTAC, thence ...\n"
+                "... Climb direct EED VORTAC, or for climb in visual conditions "
+                "cross Needles airport at or above 3400, then climb in EED holding "
+                "pattern (hold NW, right turns, 139° inbound) to 5000 before "
+                "proceeding on course."
+            ),
+            'unmatched phrase ", or for climb"',
+        ),
+        (
+            (
+                "Rwy 29, climbing right turn direct EED VORTAC, thence ...\n"
+                "... Climb heading 090° to 5000 before proceeding on course. "
+                "Do not exceed 200 KIAS until reaching 5000. Or for climb in visual "
+                "conditions cross Needles airport at or above 3400 before "
+                "proceeding on course."
+            ),
+            'unmatched phrase "or for climb in"',
         ),
     ],
 )
@@ -868,6 +948,8 @@ def test_parses_heading_ranges(text, groups):
         ("prior to turning northbound.", (ProceedOnCourse(),)),
         ("prior to turn.", (ProceedOnCourse(),)),
         ("before turning right", (ProceedOnCourse(Turn.RIGHT),)),
+        ("before right turn.", (ProceedOnCourse(Turn.RIGHT),)),
+        ("prior to left turn.", (ProceedOnCourse(Turn.LEFT),)),
         (
             "before proceeding direct OED VORTAC.",
             (Direct(NavaidRef("OED", NavaidType.VORTAC)),),
@@ -1471,6 +1553,27 @@ def _vcoa(runways, feet, then=None, cross=None, bound=None):
             [_vcoa((), 5600, cross=FixRef("ADKIN"), bound=Compass8.W)],
             id="full VCOA wording inside the section, crossing a fix",
         ),
+        pytest.param(
+            "Rwy 2, use SQUAT DEPARTURE.\n"
+            "Rwys 11, 20, climbing left turn direct EED VORTAC, thence ...\n"
+            "... Climb in EED holding pattern (hold NW, right turns, 139° inbound) "
+            "to 5000 before proceeding on course. Or for climb in visual conditions "
+            "cross Needles airport at or above 3400 before proceeding on course.",
+            [
+                RunwayGroup(("2",), (GraphicDeparture("SQUAT"),)),
+                RunwayGroup(
+                    ("11", "20"),
+                    (
+                        ClimbingTurn(
+                            Turn.LEFT, Direct(NavaidRef("EED", NavaidType.VORTAC))
+                        ),
+                        Thence(),
+                    ),
+                ),
+            ],
+            [_vcoa(("11", "20"), 3400)],
+            id="after the shared tail, for the runways flying it",
+        ),
     ],
 )
 def test_parses_visual_climbs_written_into_the_departure_procedure(text, groups, vcoa):
@@ -1573,14 +1676,25 @@ def test_vcoa_navaid_named_without_ident_needs_the_departure_procedure():
     assert error.value.detail == "TONOPAH VORTAC"
 
 
-def test_parses_vcoa_for_all_runways():
-    text = (
-        "All runways, obtain ATC approval for VCOA when requesting IFR clearance. "
-        "Climb in visual conditions to cross Roanoke/Blacksburg Rgnl (Woodrum Fld) "
-        "at or above 3600 MSL before proceeding on course. When executing VCOA, "
-        "notify ATC prior to departure."
-    )
-
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param(
+            "All runways, obtain ATC approval for VCOA when requesting IFR clearance. "
+            "Climb in visual conditions to cross Roanoke/Blacksburg Rgnl (Woodrum "
+            "Fld) at or above 3600 MSL before proceeding on course. When executing "
+            "VCOA, notify ATC prior to departure.",
+            id="comma",
+        ),
+        pytest.param(
+            "All Runways: obtain ATC approval for VCOA when requesting IFR clearance. "
+            "Climb in visual conditions to cross Kokhanok Airport or above 3600 before "
+            "proceeding on course.",
+            id="colon, crossing without at",
+        ),
+    ],
+)
+def test_parses_vcoa_for_all_runways(text):
     assert parse_vcoa(text) == (VcoaGroup((), None, 3600, (ProceedOnCourse(),)),)
 
 
@@ -1748,15 +1862,24 @@ def test_in_part_keeps_the_runways_it_reads():
             "Rwy 2, climb direct ABC VOR, thence...\n"
             "Rwy 15, climb heading 150° to 5000 before proceeding on course.\n"
             "All aircraft banana.",
-            [("1",), ("2",), ("15",)],
+            [(("1",), False), (("2",), False), (("15",), False)],
             id="thence into an all-aircraft tail",
         ),
         pytest.param(
             "Rwy 1, climb direct ABC VOR.\n"
             "Rwy 15, climb heading 150° to 5000 before proceeding on course.\n"
             "All aircraft banana.",
-            [("1",), ("15",)],
+            [(("1",), False), (("15",), False)],
             id="every runway into an all-aircraft tail",
+        ),
+        pytest.param(
+            "Rwys 11, 20, climbing left turn direct EED VORTAC, thence ...\n"
+            "... Climb in EED holding pattern (hold NW, right turns, 139° inbound) "
+            "to 5000 before proceeding on course. Or for climb in visual conditions "
+            "cross Needles airport at or above 3400 before proceeding on course. "
+            "VCOA not authorized at night.",
+            [(("11", "20"), False), (("11", "20"), True)],
+            id="the visual climb after a tail followed by an unread sentence",
         ),
     ],
 )
@@ -1764,11 +1887,9 @@ def test_in_part_drops_the_runways_that_continue_into_an_unread_tail(text, dropp
     procedure, unparsed = read_in_part(text)
 
     kept = [group.runways for group in procedure.runway_groups]
-    assert (procedure.shared_tail, [runways for runways, _, _ in unparsed]) == (
-        None,
-        dropped,
-    )
-    assert not set(kept) & set(dropped)
+    assert (procedure.shared_tail, procedure.vcoa) == (None, ())
+    assert [(runways, vcoa) for runways, _, vcoa in unparsed] == dropped
+    assert not set(kept) & {runways for runways, _ in dropped}
 
 
 def test_in_part_never_leaves_text_after_the_tail_unread():

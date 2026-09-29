@@ -36,6 +36,7 @@ from .procedure import (
     Leg,
     NavaidRef,
     Procedure,
+    ProceedOnCourse,
     Radial,
     RunwayGroup,
     Thence,
@@ -275,6 +276,7 @@ class _Parser(LegParser):
         super().__init__(text, known_navaids)
         self._inline_vcoa: list[VcoaGroup] = []
         self._visual_climb_end: int | None = None
+        self._tail_vcoa: VcoaGroup | None = None
         self._in_part = in_part
         self.unparsed: list[Unparsed] = []
         self._continuations: set[str] = set()
@@ -283,7 +285,8 @@ class _Parser(LegParser):
     @property
     def inline_vcoa(self) -> tuple[VcoaGroup, ...]:
         """VCOA groups the DEPARTURE PROCEDURE section wrote in, in text order."""
-        return tuple(self._inline_vcoa)
+        tail = () if self._tail_vcoa is None else (self._tail_vcoa,)
+        return (*self._inline_vcoa, *tail)
 
     # --- Departure procedure -----------------------------------------------
 
@@ -371,7 +374,8 @@ class _Parser(LegParser):
         tail that failed, or into none, ending in a turn with no route of its
         own and no tail to take one from, beside a charted DP for every
         runway, or read two ways (see `_require_sole_reading`), joins
-        `unparsed`; so does a visual climb from a runway with no route."""
+        `unparsed`; so does a visual climb from a runway with no route, and
+        the visual climb written after a tail that failed."""
         if shared_tail is not None and _ends_with_thence(shared_tail):
             tail_error = ParseError('"thence" inside the shared tail')
             shared_tail = None
@@ -400,6 +404,8 @@ class _Parser(LegParser):
             else:
                 self.unparsed.append(Unparsed(group.runways, error))
         self._withhold_vcoa_from_closed_runways(groups)
+        if tail_error is not None:
+            self._withhold_tail_vcoa(tail_error)
         return tuple(readable), shared_tail
 
     def _require_sole_reading(
@@ -426,6 +432,11 @@ class _Parser(LegParser):
             except ParseError as error:
                 self._inline_vcoa.remove(vcoa)
                 self.unparsed.append(Unparsed(vcoa.runways, error, vcoa=True))
+        if self._tail_vcoa is not None:
+            try:
+                _require_vcoa_runways_open(self._tail_vcoa, groups)
+            except ParseError as error:
+                self._withhold_tail_vcoa(error)
 
     def _runways_at(self, index: int) -> tuple[str, ...]:
         """The runways a header at token `index` names, or none if it names
@@ -456,6 +467,11 @@ class _Parser(LegParser):
             if trailing or vcoa.runways == runways:
                 self._inline_vcoa.remove(vcoa)
                 self.unparsed.append(Unparsed(vcoa.runways, error, vcoa=True))
+
+    def _withhold_tail_vcoa(self, error: ParseError) -> None:
+        if self._tail_vcoa is not None:
+            self.unparsed.append(Unparsed(self._tail_vcoa.runways, error, vcoa=True))
+            self._tail_vcoa = None
 
     def _header_after(self, index: int) -> bool:
         """Whether a runway header opens a line or sentence after `index`."""
@@ -1000,14 +1016,19 @@ class _Parser(LegParser):
         )
 
     def _shared_tail(self, groups: list[RunwayGroup]) -> tuple[tuple[Leg, ...], bool]:
-        """shared-tail := ("..." ["thence"] [all-aircraft] | all-aircraft
-        | ↓) legs
+        """shared-tail := ("..." ["thence"] [all-aircraft] | all-aircraft | ↓)
+                       legs [tail-vcoa]
 
         all-aircraft := "All aircraft" ["," | ":"]
 
         ↓: the legs follow the last group's "thence ..." directly.
-        Returns the tail and whether it names "all aircraft", which every
-        flown runway group then continues into.
+
+        tail-vcoa := "Or" inline-vcoa, a sentence of its own straight after
+        tail legs that end on course ("... before proceeding on course. Or for
+        climb in visual conditions cross ..."). It is read only when every
+        runway group drawing a route continues into the tail, and is for
+        those runways. Returns the tail and whether it names "all aircraft",
+        which every flown runway group then continues into.
         """
         after_thence = self._peek_tail_after_thence()
         if (self._peek("...") or after_thence) and not _all_flown_end_with_thence(
@@ -1022,19 +1043,30 @@ class _Parser(LegParser):
             self._accept_any(",", ":")
         elif not dotted:
             raise self._unmatched()
-        entering = [
-            group
-            for group in (map(_continued_to_tail, groups) if for_all else groups)
-            if _ends_with_thence(group.legs)
-        ]
+        continuing = list(map(_continued_to_tail, groups)) if for_all else groups
+        entering = [group for group in continuing if _ends_with_thence(group.legs)]
         self._last_fix = _common_end_fix(entering)
         legs = self._legs([self._leg()])
+        ends_on_speed = False
         while self._peek_continuation() or self._peek_speed_sentence():
-            if self._peek_speed_sentence():
+            if ends_on_speed := self._peek_speed_sentence():
                 legs = self._with_speed_sentence(legs)
             else:
                 legs += self._continuation()
+        if not ends_on_speed and self._peek_tail_vcoa(legs, continuing):
+            self._expect("or")
+            self._tail_vcoa = self._inline_visual_climb(_runways_of(entering))
         return legs, for_all
+
+    def _peek_tail_vcoa(
+        self, tail: tuple[Leg, ...], continuing: list[RunwayGroup]
+    ) -> bool:
+        return (
+            self._follows_period()
+            and isinstance(tail[-1], ProceedOnCourse)
+            and self._peek("or", *VISUAL_CLIMB)
+            and _every_route_enters_tail(continuing)
+        )
 
     def _require_tail_for_thence(
         self, groups: list[RunwayGroup], shared_tail: tuple[Leg, ...] | None
@@ -1103,14 +1135,14 @@ class _Parser(LegParser):
         return dataclasses.replace(group, speed=speed)
 
     def _vcoa_runways(self) -> tuple[str, ...]:
-        """vcoa-runways := runway-header | "All" ("Rwys" | "runways") ","
+        """vcoa-runways := runway-header | "All" ("Rwys" | "runways") ("," | ":")
 
         An empty tuple means every runway.
         """
         if self._peek("rwy") or self._peek("rwys"):
             return self._runway_header()
         if self._accept("all", "rwys") or self._accept("all", "runways"):
-            self._expect(",")
+            self._expect_any(",", ":")
         return ()
 
     def _atc_approval(self) -> None:
@@ -1129,14 +1161,18 @@ class _Parser(LegParser):
         return self._crossing(runways)
 
     def _crossing(self, runways: tuple[str, ...]) -> VcoaGroup:
-        """crossing := (FIX | airport-name) [bound] "at or above" nnnn ["MSL"] legs
+        """crossing := (FIX | airport-name) [bound] ["at"] "or above" nnnn ["MSL"]
+        legs
 
-        Legs that continue into the DEPARTURE PROCEDURE's shared tail
-        ("..., thence ...") are refused: the tail is drawn from the runways.
+        "at" is sometimes left out ("cross Telluride RGNL airport westbound or
+        above 14300"). Legs that continue into the DEPARTURE PROCEDURE's
+        shared tail ("..., thence ...") are refused: the tail is drawn from
+        the runways.
         """
         cross = self._vcoa_crossing()
         bound = self._bound()
-        self._expect("at", "or", "above")
+        self._accept("at")
+        self._expect("or", "above")
         feet = self._integer()
         self._accept("msl")
         self._last_fix = None
@@ -1242,6 +1278,18 @@ def _continued_to_tail(group: RunwayGroup) -> RunwayGroup:
     if not _flies_route(group) or _ends_with_thence(group.legs):
         return group
     return dataclasses.replace(group, legs=(*group.legs, Thence()))
+
+
+def _every_route_enters_tail(groups: list[RunwayGroup]) -> bool:
+    """At least one runway group continues into the shared tail, and every
+    group drawing a route (a heading range included) does."""
+    drawn = [group for group in groups if _withholdable(group)]
+    return bool(drawn) and all(_ends_with_thence(group.legs) for group in drawn)
+
+
+def _runways_of(groups: list[RunwayGroup]) -> tuple[str, ...]:
+    """Every runway the groups name, in order, each once."""
+    return tuple(dict.fromkeys(runway for group in groups for runway in group.runways))
 
 
 def _common_end_fix(groups: list[RunwayGroup]) -> NavaidRef | FixRef | None:
