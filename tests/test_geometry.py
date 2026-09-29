@@ -660,6 +660,27 @@ def test_altitude_reached_before_joining_a_radial_ends_the_leg_at_the_join():
     assert "5500'" in [lbl.text for lbl in labels(drawing)]
 
 
+def test_altitude_climbed_on_the_way_to_a_fix_is_labelled_and_held_there():
+    """5500 ft comes before R-180 is joined, yet the leg still ends at the VOR,
+    and the climb to 7500 after it starts from 5500 there."""
+    vor = NavaidRef("VOR")
+    leg = HeadingAndRadial(
+        magnetic(90), vor, magnetic(180), False, AtFix(vor), altitude=feet(5500)
+    )
+    after = ClimbHeading(magnetic(90), feet(7500))
+
+    drawing = draw(
+        resolved(group(leg, after), points=(point("VOR", 3.0, 20.0, VARIATION),))
+    )
+
+    placed = {lbl.text: xy(lbl.at) for lbl in labels(drawing)}
+    assert distance(placed["5500'"], (3.0, 20.0)) == pytest.approx(0.35)
+    straight = 2000 / 200 - R * math.pi / 2
+    assert route_vertices(drawing)[-1] == pytest.approx(
+        (3.0 + R + straight, 20.0 + R), abs=1e-6
+    )
+
+
 def test_tail_along_a_radial_starts_where_the_first_route_joined_it():
     """RWY 36 joins R-180 (true) south of where RWY 18 does; both fly it north."""
     vor = NavaidRef("VOR")

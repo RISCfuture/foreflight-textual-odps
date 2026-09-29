@@ -195,7 +195,9 @@ class Radial:
     """Fly a navaid's radial, inbound or outbound.
 
     `outbound` is ``None`` when the text prints neither; the drawing then
-    takes it from where the leg ends, or refuses the leg.
+    takes it from where the leg ends, or refuses the leg. `altitude` is the
+    altitude climbed to on the way to a fix or DME distance that ends the
+    leg: "to 3000 via FSM R-064 to FSM VORTAC".
     """
 
     navaid: NavaidRef
@@ -203,11 +205,16 @@ class Radial:
     outbound: bool | None
     until: Until | None = None
     speed: SpeedRestriction | None = None
+    altitude: Altitude | None = None
 
 
 @dataclasses.dataclass(frozen=True)
 class HeadingAndRadial:
-    """Fly a heading until intercepting a navaid's radial."""
+    """Fly a heading until intercepting a navaid's radial.
+
+    `altitude` is as for `Radial`: "to 6000 via heading 310° and ENI R-073 to
+    ENI VORTAC".
+    """
 
     heading: int
     navaid: NavaidRef
@@ -215,6 +222,7 @@ class HeadingAndRadial:
     outbound: bool | None
     until: Until | None = None
     speed: SpeedRestriction | None = None
+    altitude: Altitude | None = None
 
 
 @dataclasses.dataclass(frozen=True)

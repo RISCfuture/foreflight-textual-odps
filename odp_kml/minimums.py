@@ -1,7 +1,9 @@
-"""Published minimum climb gradients from TAKEOFF MINIMUMS text.
+"""Published minimum climb gradients from TAKEOFF MINIMUMS text, and the
+speed limits it sets.
 
 The section is advisory for gradients only, so unlike the procedure grammar
-this extractor skips what it does not recognize.
+this extractor skips what it does not recognize. The pipeline does not read
+a speed limit, so one there withholds every route it may bind.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ _TAKEOFF_MINIMUMS_ENTRY = re.compile(
 )
 _STANDARD_MIN_CLIMB = re.compile(r"\bstd\. with a min\. climb of (\d+) ft per NM")
 _RUNWAY_ID = re.compile(r"(\d{1,2})([LRC]?)((?:/[LRC])*)")
+_SPEED = re.compile(r"\b\d{2,3} ?(?:K|KIAS|KTS?|knots)\b", re.IGNORECASE)
 
 
 def parse_takeoff_minimums(text: str) -> dict[str, float]:
@@ -25,6 +28,33 @@ def parse_takeoff_minimums(text: str) -> dict[str, float]:
         if (climb := _STANDARD_MIN_CLIMB.search(entry["body"]))
         for runway in _runway_ids(entry["runways"])
     }
+
+
+def speed_limit_for(text: str, runways: tuple[str, ...]) -> str | None:
+    """The first line of `text` setting a speed limit that may bind `runways`
+    ("Rwy 10, ... do not exceed 210 KIAS until intercepting the ENI R-073"),
+    or ``None``. A line naming no runway may bind any, and every line may
+    bind a route for all runways (empty `runways`)."""
+    return next(
+        (
+            line
+            for line in text.splitlines()
+            if _SPEED.search(line) and _may_bind(_named_runways(line), runways)
+        ),
+        None,
+    )
+
+
+def _named_runways(line: str) -> set[str]:
+    return {
+        runway
+        for entry in _TAKEOFF_MINIMUMS_ENTRY.finditer(line)
+        for runway in _runway_ids(entry["runways"])
+    }
+
+
+def _may_bind(named: set[str], runways: tuple[str, ...]) -> bool:
+    return not named or not runways or not named.isdisjoint(runways)
 
 
 def _runway_ids(runway_list: str) -> list[str]:

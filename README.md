@@ -38,7 +38,8 @@ with certainty:
   before turning left"), drawn straight out along the runway and labelled
   with its altitude alone.
 - Radial intercepts and tracking to an altitude, fix, DME distance, or
-  the navaid.
+  the navaid; an altitude climbed to on the way to a fix ("to 3000 via FSM
+  R-064 to FSM VORTAC") is labelled where the leg ends.
 - "Proceed on course" after a runway's legs as a short dashed stub, bent
   toward any published turn restriction. A VCOA that only proceeds on
   course draws just its circle.
@@ -72,7 +73,10 @@ reference a graphic ODP instead of text ("use LUNDI DEPARTURE"), and
 airway routing after the ODP ends. A runway that flies a graphic ODP is
 drawn from none of its text; an airport whose every runway does is left
 out of the coverage percentage and counted on its own in the report,
-since ForeFlight charts graphic ODPs itself.
+since ForeFlight charts graphic ODPs itself. A speed limit printed in a
+runway's takeoff minimums ("do not exceed 210K until intercepting the ENI
+R-073") is not read either, so it withholds that runway's route and
+visual climb.
 
 ## How it decides what to draw
 

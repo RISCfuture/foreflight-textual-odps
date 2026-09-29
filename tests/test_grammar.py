@@ -300,6 +300,76 @@ def test_parses_fixture_procedures(name):
             (Direct(NavaidRef("ILA", NavaidType.VORTAC)), ProceedOnCourse()),
             id="continue climb direct",
         ),
+        pytest.param(
+            "Rwy 4, climbing right turn to 3000 via FSM R-064 to FSM VORTAC before "
+            "proceeding on course.",
+            [
+                RunwayGroup(
+                    ("4",),
+                    (
+                        ClimbingTurn(
+                            Turn.RIGHT,
+                            Radial(
+                                NavaidRef("FSM"),
+                                64,
+                                outbound=False,
+                                until=AtFix(NavaidRef("FSM", NavaidType.VORTAC)),
+                                altitude=to(3000),
+                            ),
+                        ),
+                        ProceedOnCourse(),
+                    ),
+                )
+            ],
+            None,
+            id="altitude leading a radial to a fix",
+        ),
+        pytest.param(
+            fixture_text("bwc"),
+            [
+                RunwayGroup(
+                    ("8",),
+                    (
+                        ClimbingTurn(
+                            Turn.RIGHT,
+                            HeadingAndRadial(
+                                120,
+                                NavaidRef("IPL", NavaidType.VORTAC),
+                                9,
+                                outbound=False,
+                                until=AtFix(NavaidRef("IPL", NavaidType.VORTAC)),
+                                altitude=to(3000),
+                            ),
+                        ),
+                        ProceedOnCourse(),
+                    ),
+                )
+            ],
+            None,
+            id="altitude between a radial and its fix",
+        ),
+        pytest.param(
+            "Rwy 36, climb direct DSD VORTAC, to cross DSD VORTAC at or above MEA for "
+            "route of flight.",
+            [
+                RunwayGroup(
+                    ("36",),
+                    (
+                        Direct(NavaidRef("DSD", NavaidType.VORTAC)),
+                        CrossAt(
+                            NavaidRef("DSD", NavaidType.VORTAC),
+                            EnrouteAltitude(
+                                ("MEA",),
+                                AltitudeKind.AT_OR_ABOVE,
+                                "at or above MEA for route of flight",
+                            ),
+                        ),
+                    ),
+                )
+            ],
+            None,
+            id="crossing the fix just reached",
+        ),
     ],
 )
 def test_parses_leg_shapes(text, groups, shared_tail):
@@ -313,8 +383,18 @@ def test_parses_leg_shapes(text, groups, shared_tail):
     ("text", "signature"),
     [
         (fixture_text("bur"), 'unsupported routing "then westbound on"'),
-        (fixture_text("bwc"), 'unsupported "to <alt> to <fix>" double terminator'),
-        (fixture_text("3u3"), 'unsupported "to <alt>" with fix terminator'),
+        (
+            "Rwy 8, climb heading 120° to 3000 to IPL VORTAC.",
+            'unsupported "to <alt> to <fix>" double terminator',
+        ),
+        (
+            "Rwy 17, climbing left turn to 10200 via heading 100° to CPN VOR/DME.",
+            'unsupported "to <alt>" with fix terminator',
+        ),
+        (
+            "Rwy 14, climb on heading 141° to 5000 and SNS R-355 to SNS VORTAC.",
+            'unmatched phrase "<id> r-<n> to <id>"',
+        ),
         (
             (
                 "Rwy 7, climb direct CHE VOR/DME, or for climb in visual "
@@ -667,6 +747,14 @@ def test_parses_what_follows_the_climb(ending, legs):
             "to MEA/MOCA for route of flight",
             EnrouteAltitude(
                 ("MEA", "MOCA"), AltitudeKind.TO, "to MEA/MOCA for route of flight"
+            ),
+        ),
+        (
+            ", to cross BQU VOR/DME at or above MEA for route of flight",
+            EnrouteAltitude(
+                ("MEA",),
+                AltitudeKind.AT_OR_ABOVE,
+                "at or above MEA for route of flight",
             ),
         ),
     ],

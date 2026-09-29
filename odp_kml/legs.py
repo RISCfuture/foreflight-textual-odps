@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import re
 from collections.abc import Mapping
+from typing import TypeGuard
 
 from .procedure import (
     Altitude,
@@ -109,8 +110,8 @@ class LegParser(TokenStream):
     # --- Leg sequences -----------------------------------------------------
 
     def _legs(self, legs: list[Leg]) -> tuple[Leg, ...]:
-        """legs := leg ((separator leg) | before | speed | and-hold)* ("." | thence
-        | ↓)
+        """legs := leg ((separator leg) | before | speed | and-hold
+                   | fix-crossing)* ("." | thence | ↓)
 
         ↓: the legs also end, unconsumed, where an inline VCOA alternative
         ("..., or for climb in visual conditions") begins. Tracks the fix
@@ -134,6 +135,8 @@ class LegParser(TokenStream):
                 legs[-1] = self._with_speed(legs[-1], self._speed_restriction())
             elif legs and self._peek("and", "hold"):
                 self._append(legs, self._and_hold())
+            elif legs and self._peek_fix_crossing():
+                self._append(legs, self._fix_crossing())
             else:
                 self._reject_airway_routing()
                 self._leg_separator(required=bool(legs))
@@ -247,6 +250,20 @@ class LegParser(TokenStream):
         """cross-at := "cross" target altitude-constraint"""
         self._expect("cross")
         return CrossAt(self._target(), self._altitude_constraint())
+
+    def _peek_fix_crossing(self) -> bool:
+        offset = 1 if self._peek(",") else 0
+        return self._peek("to", "cross", offset=offset) and self._peek_navaid(
+            offset + 2
+        )
+
+    def _fix_crossing(self) -> CrossAt:
+        """fix-crossing := [","] "to" cross-at, after a leg flown to that fix:
+        "direct ALW VOR/DME to cross ALW VOR/DME at or above MEA"; the drawing
+        refuses one the route has not reached."""
+        self._accept(",")
+        self._expect("to")
+        return self._cross_at()
 
     def _peek_continuation(self) -> bool:
         """A new sentence that goes on flying the route: "... direct RSK VORTAC.
@@ -508,7 +525,10 @@ class LegParser(TokenStream):
         leg: HeadingAndRadial | Radial | ClimbHeading | RunwayHeading | HeadingRange,
         altitude: Altitude,
     ) -> HeadingAndRadial | Radial | ClimbHeading | RunwayHeading | HeadingRange:
-        """A leading altitude terminates a leg that has no other terminator."""
+        """A leading altitude terminates a leg that has no other terminator;
+        a radial leg flown to a fix or DME distance climbs to it on the way."""
+        if _ends_at_a_point(leg):
+            return self._with_altitude(leg, altitude)
         if isinstance(leg.until, AtFix):
             raise self._error('unsupported "to <alt>" with fix terminator')
         if leg.until is not None:
@@ -704,7 +724,8 @@ class LegParser(TokenStream):
         return heading
 
     def _heading_leg(self) -> ClimbHeading | HeadingAndRadial:
-        """heading-leg := heading [("and" | "to intercept") radial-course] [until]"""
+        """heading-leg := heading [("and" | "to intercept") radial-course
+        [altitude-before-fix]] [until]"""
         heading = self._heading()
         if self._peek("and") and self._peek_navaid(offset=1):
             self._expect("and")
@@ -715,15 +736,42 @@ class LegParser(TokenStream):
 
     def _heading_and_radial(self, heading: int) -> HeadingAndRadial:
         navaid, radial, direction = self._radial_course()
+        altitude = self._altitude_before_fix()
         until = self._until()
         outbound = self._outbound(direction, navaid, until)
-        return HeadingAndRadial(heading, navaid, radial, outbound, until)
+        return HeadingAndRadial(
+            heading, navaid, radial, outbound, until, altitude=altitude
+        )
+
+    def _with_altitude(
+        self, leg: Radial | HeadingAndRadial, altitude: Altitude
+    ) -> Radial | HeadingAndRadial:
+        """`leg`, ending at a fix or DME distance, climbing to `altitude` on
+        the way there."""
+        if leg.altitude is not None:
+            raise self._error("leg with two altitudes")
+        return dataclasses.replace(leg, altitude=altitude)
 
     def _radial_leg(self) -> Radial:
-        """radial-leg := radial-course [until]"""
+        """radial-leg := radial-course [altitude-before-fix] [until]"""
         navaid, radial, direction = self._radial_course()
+        altitude = self._altitude_before_fix()
         until = self._until()
-        return Radial(navaid, radial, self._outbound(direction, navaid, until), until)
+        outbound = self._outbound(direction, navaid, until)
+        return Radial(navaid, radial, outbound, until, altitude=altitude)
+
+    def _altitude_before_fix(self) -> Altitude | None:
+        """altitude-before-fix := to-altitude, before an until naming a fix or
+        DME distance: "R-009 to 3000 to IPL VORTAC" ends at the fix, climbing
+        to the altitude on the way."""
+        if not (
+            self._peek("to")
+            and self._peek_integer(1)
+            and self._peek("to", offset=2)
+            and self._peek_navaid(3)
+        ):
+            return None
+        return self._to_altitude()
 
     def _radial_course(self) -> tuple[NavaidRef, int, bool | None]:
         """radial-course := navaid "R-nnn" ["outbound" | "inbound"]"""
@@ -851,7 +899,10 @@ class LegParser(TokenStream):
     def _climb_in_hold(
         self, leading: Altitude | EnrouteAltitude | None = None
     ) -> ClimbInHold:
-        """in-hold := hold-fix [hold-until] [[","] hold-spec [","]] [hold-until]
+        """in-hold := hold-fix [hold-until] [[","] hold-spec [","]] [[","] hold-until]
+
+        The comma before the last hold-until is read only after a hold-spec or
+        before "to cross" or "to depart".
 
         The hold's fix is whichever of these the text names, and they must
         agree: before "holding pattern", inside the hold-spec ("(GKN VOR/DME
@@ -868,6 +919,8 @@ class LegParser(TokenStream):
             if until is None and self._peek(",") and self._peek_hold_until(1):
                 self._accept(",")
         if until is None:
+            if self._peek(",", "to", "cross") or self._peek(",", "to", "depart"):
+                self._expect(",")
             until, crossed = self._hold_until()
         if leading is not None:
             if until is not None:
@@ -1176,6 +1229,14 @@ def _side_agrees(side: Compass8, inbound: int) -> bool:
     point off could be a misprint of either, so it contradicts the course."""
     bearing = list(Compass8).index(side) * _COMPASS_POINT_DEG
     return abs((bearing - inbound) % 360 - 180) <= _SIDE_TOLERANCE_DEG
+
+
+def _ends_at_a_point(leg: Leg) -> TypeGuard[Radial | HeadingAndRadial]:
+    """Whether a radial leg ends at a fix or DME distance, which an altitude
+    climbed to on the way does not move."""
+    return isinstance(leg, Radial | HeadingAndRadial) and isinstance(
+        leg.until, AtFix | Dme
+    )
 
 
 def _same_facility(target: NavaidRef | FixRef, navaid: NavaidRef | FixRef) -> bool:

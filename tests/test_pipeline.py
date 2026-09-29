@@ -90,6 +90,16 @@ def with_unreadable_runway(block):
     )
 
 
+def with_rwy_15_speed_limit(block):
+    """`block` with a speed limit in runway 15's takeoff minimums."""
+    return dataclasses.replace(
+        block,
+        text=block.text.replace(
+            "320' per NM to 9100", "320' per NM to 9100, do not exceed 210K until 9100"
+        ),
+    )
+
+
 def tph_block():
     blocks, _ = extract_blocks(FIXTURES / "pdf" / "SW4TO-excerpt.pdf", "SW4")
     return next(block for block in blocks if block.lid == "TPH")
@@ -187,6 +197,24 @@ class TestFindings:
         assert ("05U", "metafile airport has no block") in signatures
         assert ("JTC", "airport not in metafile") in signatures
         assert ("TPH", "airport not in metafile") not in signatures
+
+    def test_takeoff_minimums_speed_limit_withholds_the_parts_it_may_bind(self):
+        options = BuildOptions(cycle=CYCLE, cache_dir=Path("unused"))
+
+        outcome = process_block(
+            with_rwy_15_speed_limit(tph_block()), fixture_nasr(), options
+        )
+
+        assert [finding.detail.split(":")[0] for finding in outcome.findings] == [
+            "RWY 15",
+            "VCOA",
+        ]
+        assert {finding.signature for finding in outcome.findings} == {
+            "unread speed limit in takeoff minimums"
+        }
+        lines = {s.name for s in outcome.drawing.shapes if isinstance(s, Polyline)}
+        assert any(name.startswith("RWY 33") for name in lines)
+        assert not any(name.startswith("RWY 15") for name in lines)
 
 
 class TestReport:

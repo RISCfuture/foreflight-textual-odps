@@ -204,9 +204,10 @@ class _Context:
 class _Pen:
     """Where the aircraft is: position, true course, and climb bookkeeping.
 
-    `along_nm` is the along-track distance flown since `base_alt_ft`, the
-    altitude at which the climb at `gradient` began. `straight_out` holds while
-    every leg flown has kept to the runway's own course, from its DER.
+    `along_nm` is the along-track distance flown since the climb at
+    `gradient` passed `base_alt_ft`, negative while it has yet to reach it.
+    `straight_out` holds while every leg flown has kept to the runway's own
+    course, from its DER.
     """
 
     ctx: _Context
@@ -227,6 +228,12 @@ class _Pen:
         if length > MAX_ALTITUDE_LEG_NM:
             raise Degenerate("altitude leg capped", f"{feet} ft needs {length:.1f} NM")
         return length
+
+    def level_at(self, feet: int) -> None:
+        """Climb no higher than `feet` until a later leg climbs on: level off
+        there if the climb has reached it, else keep climbing toward it."""
+        still_to_climb_nm = (feet - self.base_alt_ft) / self.gradient - self.along_nm
+        self.base_alt_ft, self.along_nm = feet, min(0.0, -still_to_climb_nm)
 
     def turn_onto(self, course: float, direction: Turn | None) -> tuple[list[Vec], int]:
         """Fly a fly-by arc onto `course`; return its vertices (from the
@@ -767,7 +774,9 @@ def _track_radial(
     the route and the radial itself.
 
     An altitude the climb already reached before joining the radial ends the
-    leg where it joins, as a heading leg's does where its turn ends.
+    leg where it joins, as a heading leg's does where its turn ends. One
+    climbed to on the way to a fix or DME distance is labelled beside where
+    the leg ends, and the climb goes no higher until a later leg climbs on.
     """
     ctx = pen.ctx
     navaid = ctx.xy(leg.navaid.ident)
@@ -780,6 +789,12 @@ def _track_radial(
     _arrowhead(ctx, name, Style.ROUTE, end, pen.course)
     if terminator := _terminator_label(ctx, leg.until):
         ctx.label(terminator, end)
+    if leg.altitude is not None:
+        _require_climb(pen, leg.altitude)
+        pen.level_at(leg.altitude.feet)
+        _offset_label(
+            pen, format_altitude(leg.altitude, ctx.params.label_style), end, 0
+        )
     far = max(joined, end, key=lambda p: distance(navaid, p))
     _draw_radial(ctx, leg, navaid, far)
 

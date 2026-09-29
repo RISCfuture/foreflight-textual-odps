@@ -773,6 +773,10 @@ Output: one Procedure object matching the response schema. Every object carries
   sets feet 4000), AtFix ("to RESER INT" is the fix RESER), Dme ("to MLF 12 DME"; "to CARRO
   INT/OLM 19.43 DME" also sets fix CARRO), or
   CrossRadial ("to cross LAS VORTAC R-110").
+- altitude on a Radial or HeadingAndRadial is the altitude climbed to on the
+  way to the fix or DME distance ending the leg ("to 3000 via FSM R-064 to FSM
+  VORTAC", "R-009 to 3000 to IPL VORTAC"); null otherwise. "..., to cross LIN
+  VOR/DME at or above MEA" after a leg reaching LIN is a CrossAt.
 - Navaids: ident is the three-letter identifier; name only when the text spells
   it out ("TONOPAH (TPH) VORTAC" gives name TONOPAH); type only when the text
   states it next to that mention. Fixes are five-letter identifiers. A navaid

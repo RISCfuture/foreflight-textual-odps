@@ -21,10 +21,10 @@ from .findings import Finding, Kind, Report
 from .geo import destination
 from .geometry import DEFAULT_PARAMS, Degenerate, DisplayParams, draw
 from .grammar import ParseError, Unparsed, parse_procedure_in_part
-from .minimums import parse_takeoff_minimums
+from .minimums import parse_takeoff_minimums, speed_limit_for
 from .normalize import normalize
 from .palette import assign_palettes
-from .procedure import Procedure, Thence
+from .procedure import Procedure, RunwayGroup, Thence
 from .resolve import ResolveError, resolve
 from .sections import Sections, split_sections
 from .shapes import AirportDrawing, Label, Polyline
@@ -155,13 +155,14 @@ def process_block(
     if procedure.graphic_only and not unparsed:
         return BlockOutcome(entry, graphic_only=True)
     unread = [(_unparsed_part(part), part.error) for part in unparsed]
+    procedure, withheld = _without_speed_limited(procedure, sections)
     try:
         drawing, failed = _draw_in_part(
             block.lid, procedure, sections, nasr_data, options.params
         )
     except (ResolveError, Degenerate) as error:
         drawing, failed = None, [("", error)]
-    failed = [*unread, *failed]
+    failed = [*unread, *withheld, *failed]
     if drawing is None and not failed:
         return BlockOutcome(entry)
     if drawing is None:
@@ -300,6 +301,38 @@ def _sections_entry(lid: str, sections: Sections) -> SectionsEntry:
 
 
 type Failure = tuple[str, ParseError | ResolveError | Degenerate]
+
+
+def _without_speed_limited(
+    procedure: Procedure, sections: Sections
+) -> tuple[Procedure, list[Failure]]:
+    """`procedure` without the runway routes and VCOAs that a speed limit in
+    the takeoff minimums may bind, each a failure: the pipeline does not
+    read those limits, and a route is never drawn without one it has."""
+    minimums = sections.takeoff_minimums or ""
+    routes = [
+        (group, speed_limit_for(minimums, group.runways) if _flies(group) else None)
+        for group in procedure.runway_groups
+    ]
+    vcoas = [(vcoa, speed_limit_for(minimums, vcoa.runways)) for vcoa in procedure.vcoa]
+    kept = dataclasses.replace(
+        procedure,
+        runway_groups=tuple(group for group, line in routes if line is None),
+        vcoa=tuple(vcoa for vcoa, line in vcoas if line is None),
+    )
+    withheld = [
+        *((_runways_part(group.runways), line) for group, line in routes if line),
+        *((VCOA_PART, line) for _, line in vcoas if line),
+    ]
+    return kept, [(part, _unread_speed_limit(line)) for part, line in withheld]
+
+
+def _unread_speed_limit(line: str) -> ParseError:
+    return ParseError("unread speed limit in takeoff minimums", line)
+
+
+def _flies(group: RunwayGroup) -> bool:
+    return bool(group.legs) and not group.graphic
 
 
 def _draw_in_part(
