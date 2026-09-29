@@ -169,7 +169,7 @@ def test_open_heading_and_speed_limit_are_labelled_beside_the_turn():
     heading, speed_limit = placed.values()
     assert list(placed) == [
         f"hdg {magnetic(90):03d}°",
-        "max 200 KIAS until 9000'",
+        "≤200 KIAS until 9000'",
     ]
     assert heading == pytest.approx((R, 2.0 + R + 0.35), abs=1e-6)
     assert speed_limit == pytest.approx((-0.35, 2.0), abs=1e-6)
@@ -487,7 +487,7 @@ VCOA_LABEL = (
         (None, [VCOA_LABEL]),
         (
             SpeedRestriction(180, "reaching 7000 MSL"),
-            [VCOA_LABEL, ("max 180 KIAS until 7000'", (0.0, -2.0))],
+            [VCOA_LABEL, ("≤180 KIAS until 7000'", (0.0, -2.0))],
         ),
     ],
 )

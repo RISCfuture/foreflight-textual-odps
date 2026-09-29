@@ -58,12 +58,13 @@ with certainty:
 - Climb-in-hold racetracks.
 - Heading ranges ("climb on a heading between 350° CW to 162° from DER")
   as a thin wedge from the turn-start point, labelled as printed
-  (`hdg 350° CW 162°`), beside the route flown on "all other courses".
-  A diverse departure limited to a sector ("diverse departures authorized
-  300° to 120° CW") is drawn the same way.
-  A minimum climb gradient given for the other headings instead ("or min.
-  climb of 415 ft per NM to 1600 for headings 101° through 314°") names no
-  route, so only the wedge is drawn.
+  (`hdg 350° CW 162°`, leaving out `hdg` where only that fits the label
+  in ForeFlight's 22 characters), beside the route flown on "all other
+  courses". A diverse departure limited to a sector ("diverse departures
+  authorized 300° to 120° CW") is drawn the same way. A minimum climb
+  gradient given for the other headings instead ("or min. climb of 415 ft
+  per NM to 1600 for headings 101° through 314°") names no route, so only
+  the wedge is drawn.
 - VCOA (visual climb over airport) circles, including airports whose only
   procedure is a VCOA and visual climbs written into the departure
   procedure itself ("..., or for climb in visual conditions: cross ...").
@@ -79,9 +80,9 @@ with certainty:
   and plain digits for "climb to" and "at."
 - Labels for everything a pilot programs: headings (`hdg 120°`),
   radials with their navaid (`SAU R-035`), DME terminators (`BAM 10 DME`),
-  and speed limits (`max 200 KIAS until 9000'`). Fixes aren't
-  labelled because ForeFlight's own chart names them. Leg lengths aren't
-  labelled.
+  and speed limits (`≤200 KIAS until 9000'`, or just `≤200 KIAS` when the
+  limit ends anywhere but at an altitude). Fixes aren't labelled because
+  ForeFlight's own chart names them. Leg lengths aren't labelled.
 - Each airport's lines take one of six colors, chosen so that no two
   airports within 40 NM share a color.
 

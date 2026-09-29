@@ -26,6 +26,10 @@ from .procedure import (
     Until,
 )
 
+LABEL_LIMIT = 22
+"""The most characters of a label ForeFlight shows; it elides a longer one
+from the middle."""
+
 PLAIN_PREFIXES = {
     AltitudeKind.AT_OR_ABOVE: "≥",
     AltitudeKind.AT_OR_BELOW: "≤",
@@ -68,6 +72,11 @@ def format_feet(feet: int, kind: AltitudeKind, style: str) -> str:
     return f"{PLAIN_PREFIXES[kind]}{feet}'"
 
 
+def fits(label: str) -> bool:
+    """Whether ForeFlight shows all of `label`."""
+    return len(label) <= LABEL_LIMIT
+
+
 def heading_label(magnetic: int) -> str:
     """A heading to fly, e.g. ``hdg 077°``."""
     return f"hdg {magnetic:03d}°"
@@ -75,17 +84,24 @@ def heading_label(magnetic: int) -> str:
 
 def heading_range_label(leg: HeadingRange, direction: Turn | None, style: str) -> str:
     """The sectors as printed, e.g. ``hdg 350° CW 162°`` or, with a published
-    turn and altitude, ``LT hdg 256° CW 054° or 179° CW 254° 7700'``."""
+    turn and altitude, ``LT hdg 256° CW 054° or 179° CW 254° 7700'``.
+
+    The word ``hdg`` is left out where only that makes the label fit
+    `LABEL_LIMIT`: ``336° CCW 177° 8800'``.
+    """
     sectors = " or ".join(
         f"{s.start:03d}° {'CW' if s.clockwise else 'CCW'} {s.end:03d}°"
         for s in leg.sectors
     )
-    label = f"hdg {sectors}"
-    if direction is not None:
-        label = f"{direction}T {label}"
-    if isinstance(leg.until, Altitude):
-        label += f" {format_altitude(leg.until, style)}"
-    return label
+    turn = f"{direction}T " if direction is not None else ""
+    altitude = (
+        f" {format_altitude(leg.until, style)}"
+        if isinstance(leg.until, Altitude)
+        else ""
+    )
+    label = f"{turn}hdg {sectors}{altitude}"
+    shorter = f"{turn}{sectors}{altitude}"
+    return shorter if fits(shorter) and not fits(label) else label
 
 
 def radial_label(radial: int) -> str:
@@ -121,15 +137,13 @@ REACHING_ALTITUDE = re.compile(r"reaching (\d+)(?: MSL)?", re.IGNORECASE)
 
 
 def speed_label(speed: SpeedRestriction) -> str:
-    """e.g. ``max 200 KIAS until 9000'`` for "until reaching 9000 MSL", or
-    ``max 200 KIAS until established on course``."""
-    return f"max {speed.kias} KIAS until {_speed_until(speed.until_phrase)}"
-
-
-def _speed_until(phrase: str) -> str:
-    if altitude := REACHING_ALTITUDE.fullmatch(phrase):
-        return f"{altitude[1]}'"
-    return phrase
+    """The limit and, when it holds to an altitude, that altitude: ``≤200 KIAS
+    until 9000'`` for "until reaching 9000 MSL". Any other end ("until
+    established on course") does not fit `LABEL_LIMIT`, so reads ``≤200 KIAS``."""
+    label = f"≤{speed.kias} KIAS"
+    if altitude := REACHING_ALTITUDE.fullmatch(speed.until_phrase):
+        label += f" until {altitude[1]}'"
+    return label
 
 
 def vcoa_label(at_or_above: int, style: str, bound: Compass8 | None = None) -> str:

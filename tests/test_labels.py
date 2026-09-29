@@ -2,12 +2,20 @@
 
 import pytest
 
-from odp_kml.labels import format_altitude, hold_label, speed_label, vcoa_label
+from odp_kml.labels import (
+    format_altitude,
+    heading_range_label,
+    hold_label,
+    speed_label,
+    vcoa_label,
+)
 from odp_kml.procedure import (
     Altitude,
     AltitudeKind,
     Compass8,
     EnrouteAltitude,
+    HeadingRange,
+    HeadingSector,
     HoldSpec,
     SpeedRestriction,
     Turn,
@@ -65,9 +73,24 @@ def test_vcoa_label_wraps_the_altitude_in_parentheses():
 @pytest.mark.parametrize(
     ("until_phrase", "expected"),
     [
-        ("reaching 9000 MSL", "max 200 KIAS until 9000'"),
-        ("established on course", "max 200 KIAS until established on course"),
+        ("reaching 9000 MSL", "≤200 KIAS until 9000'"),
+        ("established on course", "≤200 KIAS"),
     ],
 )
-def test_speed_label_spells_a_reaching_altitude_in_feet(until_phrase, expected):
+def test_speed_label_gives_only_a_reaching_altitude_in_feet(until_phrase, expected):
     assert speed_label(SpeedRestriction(200, until_phrase)) == expected
+
+
+@pytest.mark.parametrize(
+    ("clockwise", "expected"),
+    [(True, "hdg 177° CW 336° 8800'"), (False, "336° CCW 177° 8800'")],
+)
+def test_heading_range_label_drops_hdg_where_it_would_overflow(clockwise, expected):
+    sector = (
+        HeadingSector(177, 336, True) if clockwise else HeadingSector(336, 177, False)
+    )
+    until = Altitude(8800, AltitudeKind.TO, "to 8800")
+
+    assert (
+        heading_range_label(HeadingRange((sector,), until), None, "plain") == expected
+    )
