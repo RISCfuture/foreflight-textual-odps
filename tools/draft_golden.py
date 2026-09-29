@@ -734,8 +734,13 @@ Output: one Procedure object matching the response schema. Every object carries
 "node" naming its type. Rules:
 
 - runway_groups: one group per runway header ("Rwy 15," / "Rwys 4, 35,"), runway
-  ids as strings in text order. A runway marked "NA - Obstacles" (or similar)
-  gets a group with no legs. A runway told to "use LUNDI DEPARTURE" (a charted
+  ids as strings in text order. A runway marked "NA - Obstacles" (or similar),
+  "right turn on departure NA", or with a diverse departure on any heading or
+  none ("diverse departure authorized", "diverse departures NA"), gets a group
+  with no legs; a section that is only "NA." is one such group with no
+  runways. A diverse
+  departure limited to headings ("diverse departures authorized 300° to 120°
+  CW") is a HeadingRange. A runway told to "use LUNDI DEPARTURE" (a charted
   DP) gets a group whose only leg is GraphicDeparture, name as printed before
   the word DEPARTURE ("ELIM (RNAV)"); with no runway header, or "All Rwys,",
   the group's runways are empty.
@@ -762,6 +767,9 @@ Output: one Procedure object matching the response schema. Every object carries
   and Thence (the "thence..." marker leading into a shared tail).
 - "All other courses: ..." (or "or climb on a heading between ...") after a
   HeadingRange is a further runway group for the same runways.
+- Sentences that change nothing drawn have no node: "DME required." and
+  "Diverse departures NA." "If required, continue climb in ... holding
+  pattern" is the ClimbInHold.
 - shared_tail: the legs after a leading "..." or "All aircraft" line that every
   group continues with; null when there is none. Before an "All aircraft" tail
   every group with legs ends in Thence, said or not.

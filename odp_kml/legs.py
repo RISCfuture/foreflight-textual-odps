@@ -114,14 +114,17 @@ class LegParser(TokenStream):
                    | fix-crossing)* ("." | thence | ↓)
 
         ↓: the legs also end, unconsumed, where an inline VCOA alternative
-        ("..., or for climb in visual conditions") begins. Tracks the fix
-        each leg ends at, for a hold that names none.
+        ("..., or for climb in visual conditions") begins, and where the text
+        ends right after a "before ..." clause that lacks its period. Tracks
+        the fix each leg ends at, for a hold that names none.
         """
         self._last_fix = end_fix(legs[-1]) if legs else None
         while True:
             if self._peek_before() or (self._peek(",") and self._peek_before_at(1)):
                 self._accept(",")
                 self._append(legs, self._before())
+                if self._at_end():
+                    return tuple(legs)
             elif (
                 (legs and self._peek_vcoa_alternative())
                 or self._peek_range_alternative(legs)
@@ -227,7 +230,7 @@ class LegParser(TokenStream):
 
     def _leg(self) -> Leg:
         """leg := climbing-turn | climb | continue-climb | proceed | direct
-        | bare-turn | cross-at"""
+        | bare-turn | cross-at | if-required"""
         if self._peek("climbing"):
             return self._climbing_turn()
         if self._peek("climb"):
@@ -244,6 +247,8 @@ class LegParser(TokenStream):
             return self._bare_turn()
         if self._peek("cross") and self._peek_navaid(1):
             return self._cross_at()
+        if self._peek_if_required():
+            return self._if_required()
         raise self._unmatched()
 
     def _cross_at(self) -> CrossAt:
@@ -271,12 +276,27 @@ class LegParser(TokenStream):
         return (
             self._index > 0
             and self._tokens[self._index - 1].text == "."
-            and self._peek_any_of(CONTINUATION_WORDS)
+            and (self._peek_any_of(CONTINUATION_WORDS) or self._peek_if_required())
             and not self._peek(*VISUAL_CLIMB[1:])
         )
 
     def _continuation(self) -> tuple[Leg, ...]:
         return self._legs([self._leg()])
+
+    def _peek_if_required(self) -> bool:
+        return self._peek("if", "required", "continue", "climb") or self._peek(
+            "if", "required", ",", "continue", "climb"
+        )
+
+    def _if_required(self) -> ClimbInHold:
+        """if-required := "if required" [","] continue-climb
+
+        A climb in a hold ends once its altitude is reached, so "If required,
+        continue climb in ABQ VORTAC holding pattern ..." is that climb.
+        """
+        self._expect("if", "required")
+        self._accept(",")
+        return self._continue_climb()
 
     def _peek_before(self) -> bool:
         return self._peek_before_at(0)

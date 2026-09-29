@@ -139,6 +139,7 @@ def draw(
 ) -> AirportDrawing:
     """Draw every runway group, the shared tail and VCOA groups of a procedure.
 
+    A runway whose departure is NA or flies a charted DP is not drawn.
     Raises `Degenerate` if any construction is uncertain.
     """
     ctx = _Context(resolved, params)
@@ -146,7 +147,7 @@ def draw(
     pens = [
         pen
         for runway_group in procedure.runway_groups
-        if not runway_group.graphic
+        if runway_group.legs and not runway_group.graphic
         for pen in _draw_runway_group(ctx, runway_group)
         if _continues_to_tail(runway_group)
     ]
@@ -300,7 +301,7 @@ def _draw_shared_tail(ctx: _Context, pens: list[_Pen], legs: tuple[Leg, ...]) ->
     runways = (
         runway
         for group in ctx.resolved.procedure.runway_groups
-        if not group.graphic
+        if group.legs and not group.graphic
         for runway in group.runways
     )
     first.name = f"RWY {'/'.join(runways)}"

@@ -150,6 +150,14 @@ def _drop_doubled_of(text: str) -> str:
     return re.sub(r"\bof of\b", "of", text)
 
 
+def _join_hold_spec(text: str) -> str:
+    """A period printed between ``holding pattern`` and the parenthesized
+    hold that describes it (``holding pattern. (Hold W, ...)``) is dropped."""
+    return re.sub(
+        r"\b(holding pattern)\. (\(hold\b)", r"\1 \2", text, flags=re.IGNORECASE
+    )
+
+
 _SUBSTITUTIONS: tuple[Callable[[str], str], ...] = (
     _straighten_quotes,
     _expand_ellipsis,
@@ -171,6 +179,7 @@ _SUBSTITUTIONS: tuple[Callable[[str], str], ...] = (
     _climb_on_course,
     _collapse_blank_lines,
     _drop_doubled_of,
+    _join_hold_spec,
     str.strip,
 )
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 
 from .legs import (
     CONTINUATION_WORDS,
@@ -32,6 +32,7 @@ from .procedure import (
     GraphicDeparture,
     HeadingAndRadial,
     HeadingRange,
+    HeadingSector,
     Leg,
     NavaidRef,
     Procedure,
@@ -138,10 +139,28 @@ def _parse_procedure(
             raise
         return procedure, [*unparsed, Unparsed((), error, vcoa=True)]
     repeated = set(procedure.vcoa)
-    procedure = dataclasses.replace(
-        procedure, vcoa=procedure.vcoa + tuple(g for g in vcoa if g not in repeated)
+    added, refused = _open_runway_vcoa(
+        [g for g in vcoa if g not in repeated], procedure.runway_groups
     )
-    return _carry_radial_senses(procedure), unparsed
+    if refused and not in_part:
+        raise refused[0].error
+    procedure = dataclasses.replace(procedure, vcoa=procedure.vcoa + added)
+    return _carry_radial_senses(procedure), [*unparsed, *refused]
+
+
+def _open_runway_vcoa(
+    vcoa: list[VcoaGroup], groups: tuple[RunwayGroup, ...]
+) -> tuple[tuple[VcoaGroup, ...], list[Unparsed]]:
+    """The VCOA section's groups split into those from runways the departure
+    procedure leaves open and those it refuses."""
+    kept, refused = [], []
+    for group in vcoa:
+        try:
+            _require_vcoa_runways_open(group, groups)
+            kept.append(group)
+        except ParseError as error:
+            refused.append(Unparsed(group.runways, error, vcoa=True))
+    return tuple(kept), refused
 
 
 def _departure_procedure(
@@ -239,6 +258,8 @@ _DP_NAME_MAX_TOKENS = 8
 # Lowercase words inside an airport name: "Augusta Rgnl at Bush Fld",
 # "Prairie du Chien Muni".
 _AIRPORT_NAME_CONNECTORS = frozenset({"at", "du"})
+_DEPARTURE_WORDS = ("departure", "departures")
+_NA_REASONS = ("obstacles", "atc", "terrain", "environmental")
 
 
 class _Parser(LegParser):
@@ -256,6 +277,7 @@ class _Parser(LegParser):
         self._in_part = in_part
         self.unparsed: list[Unparsed] = []
         self._continuations: set[str] = set()
+        self._unrouted: set[str] = set()
 
     @property
     def inline_vcoa(self) -> tuple[VcoaGroup, ...]:
@@ -267,12 +289,15 @@ class _Parser(LegParser):
     def departure_procedure(
         self,
     ) -> tuple[tuple[RunwayGroup, ...], tuple[Leg, ...] | None]:
-        """procedure := [graphic-dp] runway-group* [shared-tail]
+        """procedure := no-departure
+                      | [graphic-dp] (statement | runway-group)* [shared-tail]
 
         A leading graphic-dp names the charted DP every runway flies.
         """
         if self._at_end():
             raise ParseError("empty departure procedure")
+        if self._no_departure():
+            return (RunwayGroup((), ()),), None
         groups: list[RunwayGroup] = []
         if self._peek_graphic_departure():
             groups.append(RunwayGroup((), (self._graphic_departure(),)))
@@ -281,6 +306,8 @@ class _Parser(LegParser):
         while not self._at_end():
             start, kept, inline = self._index, len(groups), len(self._inline_vcoa)
             try:
+                if self._statement():
+                    continue
                 if self._peek(*VISUAL_CLIMB):
                     raise self._error("visual climb without a runway")
                 if self._starts_shared_tail():
@@ -326,6 +353,11 @@ class _Parser(LegParser):
         self._expect_end()
         self._require_tail_for_thence(groups, shared_tail)
         _require_routes_for_turns(groups, shared_tail)
+        for group in groups:
+            _require_no_dp_for_every_runway(group, groups)
+            self._require_sole_reading(group, groups, tail=shared_tail is not None)
+        for vcoa in self._inline_vcoa:
+            _require_vcoa_runways_open(vcoa, groups)
         return tuple(groups), shared_tail
 
     def _readable(
@@ -335,8 +367,10 @@ class _Parser(LegParser):
         tail_error: ParseError | None,
     ) -> tuple[tuple[RunwayGroup, ...], tuple[Leg, ...] | None]:
         """The groups whose whole route was read: a group continuing into a
-        tail that failed, or into none, or ending in a turn with no route
-        of its own and no tail to take one from, joins `unparsed`."""
+        tail that failed, or into none, ending in a turn with no route of its
+        own and no tail to take one from, beside a charted DP for every
+        runway, or read two ways (see `_require_sole_reading`), joins
+        `unparsed`; so does a visual climb from a runway with no route."""
         if shared_tail is not None and _ends_with_thence(shared_tail):
             tail_error = ParseError('"thence" inside the shared tail')
             shared_tail = None
@@ -352,13 +386,45 @@ class _Parser(LegParser):
             else:
                 try:
                     _require_routes_for_turns([group], shared_tail)
-                except ParseError as routeless:
-                    error = routeless
+                    _require_no_dp_for_every_runway(group, groups)
+                    self._require_sole_reading(
+                        group,
+                        groups,
+                        tail=shared_tail is not None or tail_error is not None,
+                    )
+                except ParseError as refused:
+                    error = refused
             if error is None:
                 readable.append(group)
             else:
                 self.unparsed.append(Unparsed(group.runways, error))
+        self._withhold_vcoa_from_closed_runways(groups)
         return tuple(readable), shared_tail
+
+    def _require_sole_reading(
+        self, group: RunwayGroup, groups: list[RunwayGroup], *, tail: bool
+    ) -> None:
+        """A runway given no route ("Rwy 10, NA." or "Rwys 10L/R, right turn
+        on departure NA.") and a route elsewhere in the section could fly
+        either, so both are refused. So is a runway that departs with no
+        route of its own beside a shared tail, which may be its route."""
+        if any(
+            other is not group
+            and not (group.legs and other.legs)
+            and set(group.runways) & set(other.runways)
+            for other in groups
+        ):
+            raise ParseError("runway both routed and given no route", "", 0)
+        if tail and not group.legs and self._unrouted & set(group.runways):
+            raise ParseError("runway with no route beside a shared tail", "", 0)
+
+    def _withhold_vcoa_from_closed_runways(self, groups: list[RunwayGroup]) -> None:
+        for vcoa in list(self._inline_vcoa):
+            try:
+                _require_vcoa_runways_open(vcoa, groups)
+            except ParseError as error:
+                self._inline_vcoa.remove(vcoa)
+                self.unparsed.append(Unparsed(vcoa.runways, error, vcoa=True))
 
     def _runways_at(self, index: int) -> tuple[str, ...]:
         """The runways a header at token `index` names, or none if it names
@@ -483,8 +549,10 @@ class _Parser(LegParser):
         )
 
     def _runway_groups(self) -> list[RunwayGroup]:
-        """runway-group := runway-header (not-available | graphic-dp | vcoa-only
-                           | legs range-alternative* [vcoa-alternative])
+        """runway-group := runway-header [equipment] (not-available
+                           | unrouted | diverse-range
+                           | graphic-dp | vcoa-only | [diverse-lead-in] legs
+                             range-alternative* [vcoa-alternative])
                          | all-runways (graphic-dp | vcoa-only)
 
         A runway whose only procedure is a visual climb yields no runway group;
@@ -496,13 +564,19 @@ class _Parser(LegParser):
             self._expect(",")
             return self._all_runways_group()
         runways = self._runway_header()
+        self._equipment_note()
         if self._not_available():
             return [RunwayGroup(runways, ())]
+        if self._departs_without_route():
+            self._unrouted.update(runways)
+            return [RunwayGroup(runways, ())]
+        if (diverse_range := self._diverse_range()) is not None:
+            return [RunwayGroup(runways, (diverse_range,))]
         if self._peek_graphic_departure():
             return [RunwayGroup(runways, (self._graphic_departure(),))]
         if self._vcoa_only(runways):
             return []
-        groups = [RunwayGroup(runways, self._flown_legs())]
+        groups = [RunwayGroup(runways, self._first_legs(runways))]
         while _has_heading_range(groups[-1]) and self._range_alternative():
             groups.append(RunwayGroup(runways, self._flown_legs()))
         self._vcoa_alternative(runways)
@@ -702,14 +776,170 @@ class _Parser(LegParser):
         )
 
     def _not_available(self) -> bool:
-        """not-available := "NA" "-" ("Obstacles" | "ATC") "." """
-        if not self._accept("na"):
+        """not-available := [departure-word] "NA" ["-" na-reason] "."
+
+        na-reason := "Obstacles" | "ATC" | "Terrain" | "Environmental"
+        """
+        start = self._index
+        self._accept_any(*_DEPARTURE_WORDS)
+        if self._accept("na", ".") or any(
+            self._accept("na", "-", reason, ".") for reason in _NA_REASONS
+        ):
+            return True
+        self._index = start
+        return False
+
+    def _departs_without_route(self) -> bool:
+        """unrouted := turn-not-available | diverse-na
+                     | "diverse" departure-word ("authorized" | "auth") "."
+
+        turn-not-available := ("left" | "right") ("turn" | "turns")
+                              "on departure NA."
+
+        A runway restricted only in which way it may turn, or whose diverse
+        departure is on any heading or none (a charted DP the text does not
+        name), departs with no route to draw. It is read only when nothing
+        else in the section routes it: see `_require_sole_reading`.
+        """
+        return (
+            self._turn_not_available()
+            or self._diverse_departures_na()
+            or self._accept_diverse("authorized", ".")
+            or self._accept_diverse("auth", ".")
+        )
+
+    def _turn_not_available(self) -> bool:
+        start = self._index
+        if (
+            self._accept_any("left", "right")
+            and self._accept_any("turn", "turns")
+            and self._accept("on", "departure", "na", ".")
+        ):
+            return True
+        self._index = start
+        return False
+
+    def _accept_diverse(self, *words: str) -> bool:
+        """Consume "diverse departure" or "diverse departures" and `words`."""
+        return any(
+            self._accept("diverse", departure, *words) for departure in _DEPARTURE_WORDS
+        )
+
+    def _diverse_departures_na(self) -> bool:
+        """diverse-na := "diverse" departure-word "NA" ("." [use-published]
+        | "," use-published)"""
+        if not self._accept_diverse("na"):
             return False
-        self._expect("-")
-        if not self._accept_any("atc", "obstacles"):
-            raise self._unmatched()
+        if self._accept(","):
+            self._use_published_departure()
+            return True
         self._expect(".")
+        if self._peek("use", "published") or self._peek("use", "radar"):
+            self._use_published_departure()
         return True
+
+    def _use_published_departure(self) -> None:
+        """use-published := "use" ["RADAR vectors or"] "published departure"
+        ["procedure" | "procedures"] ["(DP)"] ["for obstacle avoidance"] "."
+
+        A charted DP the text does not name, flown instead of a diverse
+        departure.
+        """
+        self._expect("use")
+        self._accept("radar", "vectors", "or")
+        self._expect("published", "departure")
+        self._accept_any("procedure", "procedures")
+        self._accept("(", "dp", ")")
+        self._accept("for", "obstacle", "avoidance")
+        self._expect(".")
+
+    def _diverse_range(self) -> HeadingRange | None:
+        """diverse-range := "diverse" departure-word ["authorized"] ["only"]
+        ["from" | "between"] diverse-sector "."
+
+        The headings a diverse departure may turn to ("diverse departures
+        authorized 300° to 120° CW"), flown as a heading range. ``None`` when
+        the text names no headings.
+        """
+        start = self._index
+        if not self._accept_diverse():
+            return None
+        self._accept("authorized")
+        self._accept("only")
+        self._accept_any("from", "between")
+        if not self._peek_integer():
+            self._index = start
+            return None
+        sector = self._diverse_sector()
+        self._expect(".")
+        return HeadingRange((sector,))
+
+    def _diverse_sector(self) -> HeadingSector:
+        """diverse-sector := sector | nnn ["°"] ("to" | "through") nnn ["°"]
+        ("CW" | "CCW")
+
+        A sector printed with no sweep sense ("140° to 290°") could run either
+        way round, so it is refused.
+        """
+        start = self._index
+        first = self._compass_heading()
+        if not self._accept_any("to", "through"):
+            self._index = start
+            return self._sector()
+        last = self._compass_heading()
+        if self._accept("cw"):
+            return HeadingSector(first, last, clockwise=True)
+        if self._accept("ccw"):
+            return HeadingSector(first, last, clockwise=False)
+        raise self._error("heading sector without CW or CCW")
+
+    def _first_legs(self, runways: tuple[str, ...]) -> tuple[Leg, ...]:
+        """[diverse-lead-in] legs
+
+        diverse-lead-in := "diverse" departure-word "authorized" ","
+
+        A lead-in bounds a diverse departure by the heading range the legs
+        climb within ("diverse departure authorized, climb on heading between
+        080° CW to 259° from DER"), so the legs must include one.
+        """
+        start = self._index
+        if not self._accept_diverse("authorized", ","):
+            return self._flown_legs()
+        legs = self._flown_legs()
+        if not _has_heading_range(RunwayGroup(runways, legs)):
+            self._index = start
+            raise self._error("diverse departure beside a route")
+        return legs
+
+    def _equipment_note(self) -> None:
+        """equipment := "DME required" ("," | "."), which changes nothing drawn."""
+        if self._accept("dme", "required"):
+            self._expect_any(",", ".")
+
+    def _no_departure(self) -> bool:
+        """no-departure := (not-available | "diverse" departure-word
+        "authorized all runways.") ↓
+
+        ↓: the sentence is the whole section, so no runway has a route. Beside
+        any other text it is left unread, withholding the routes it may modify.
+        """
+        start = self._index
+        if (
+            self._not_available()
+            or self._accept_diverse("authorized", "all", "runways", ".")
+        ) and self._at_end():
+            return True
+        self._index = start
+        return False
+
+    def _statement(self) -> bool:
+        """statement := "DME required." | diverse-na
+
+        A sentence naming no runway that changes nothing drawn: an equipment
+        requirement, or that no runway has a diverse departure (only the
+        routes the runway groups give may be flown).
+        """
+        return self._accept("dme", "required", ".") or self._diverse_departures_na()
 
     def _starts_shared_tail(self) -> bool:
         return (
@@ -835,7 +1065,9 @@ class _Parser(LegParser):
         self._expect("when", "requesting", "ifr", "clearance", ".")
 
     def _visual_climb(self, runways: tuple[str, ...]) -> VcoaGroup:
-        """visual-climb := "climb in visual conditions to cross" crossing"""
+        """visual-climb := [equipment] "climb in visual conditions to cross"
+        crossing"""
+        self._equipment_note()
         self._expect("climb", "in", "visual", "conditions", "to", "cross")
         return self._crossing(runways)
 
@@ -974,6 +1206,32 @@ def _require_routes_for_turns(
                 last = index == len(legs) - 1
                 if not (last and shared_tail and _ends_with_thence(group.legs)):
                     raise ParseError("turn without a route", "", 0)
+
+
+def _require_no_dp_for_every_runway(
+    group: RunwayGroup, groups: list[RunwayGroup]
+) -> None:
+    """A runway route beside a charted DP that names no runway could be flown
+    instead of the DP, or the DP instead of it ("Rwy 25, diverse departure
+    authorized 120° to 330° CW. All Rwys, use NASWI TWO (OBSTACLE)
+    DEPARTURE."), so it is refused."""
+    if _withholdable(group) and any(
+        other.graphic and not other.runways for other in groups
+    ):
+        raise ParseError("route beside a charted DP for every runway", "", 0)
+
+
+def _require_vcoa_runways_open(vcoa: VcoaGroup, groups: Iterable[RunwayGroup]) -> None:
+    """A visual climb from a runway the section gives no route (NA, or with
+    a turn it may not make) is refused, as is one for every runway beside
+    such a runway, or any beside a section that gives no runway a route: the
+    restriction may apply to it."""
+    closed = [group.runways for group in groups if not group.legs]
+    if any(
+        not runways or not vcoa.runways or set(runways) & set(vcoa.runways)
+        for runways in closed
+    ):
+        raise ParseError("visual climb from a runway with no route", "", 0)
 
 
 def _has_heading_range(group: RunwayGroup) -> bool:

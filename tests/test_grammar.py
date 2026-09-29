@@ -113,17 +113,44 @@ def test_parses_fixture_procedures(name):
             id="runway sides printed apart from the number",
         ),
         pytest.param(
-            "Rwy 22, NA - Obstacles. Rwys 2L/R, NA-ATC.\n"
+            "Rwy 22, NA - Obstacles. Rwys 2L/R, NA-ATC.\nRwy 26, NA.\n"
+            "Rwys 8, 9, departures NA.\nRwy 16, NA - Terrain.\n"
+            "Rwys 10L/R, right turn on departure NA.\n"
+            "Rwys 3, 21, diverse departures NA. Use published departure procedure.\n"
+            "Rwy 7, diverse departure authorized.\nRwy 28, diverse departures auth.\n"
             "Rwy 4: Climb heading 154° to 2500 before turning left.",
             [
                 RunwayGroup(("22",), ()),
                 RunwayGroup(("2L", "2R"), ()),
+                RunwayGroup(("26",), ()),
+                RunwayGroup(("8", "9"), ()),
+                RunwayGroup(("16",), ()),
+                RunwayGroup(("10L", "10R"), ()),
+                RunwayGroup(("3", "21"), ()),
+                RunwayGroup(("7",), ()),
+                RunwayGroup(("28",), ()),
                 RunwayGroup(
                     ("4",), (ClimbHeading(154, to(2500)), ProceedOnCourse(Turn.LEFT))
                 ),
             ],
             None,
             id="NA groups and climb heading without on",
+        ),
+        pytest.param("NA.", [RunwayGroup((), ())], None, id="no runway departs"),
+        pytest.param(
+            "Diverse departures NA, use RADAR vectors or published Departure "
+            "Procedures (DP) for obstacle avoidance.\nDME required.\n"
+            "Rwy 3, DME required, climb direct ABC VOR, thence...\n"
+            "...climb in ABC VOR holding pattern (hold NW, LT, 159° inbound) to 9000.",
+            [RunwayGroup(("3",), (Direct(NavaidRef("ABC", NavaidType.VOR)), Thence()))],
+            (
+                ClimbInHold(
+                    NavaidRef("ABC", NavaidType.VOR),
+                    HoldSpec(Compass8.NW, Turn.LEFT, 159),
+                    to(9000),
+                ),
+            ),
+            id="sentences that change nothing drawn",
         ),
         pytest.param(
             "Rwy 16, climb via hdg 154° to 2500, do not exceed 200 KIAS until "
@@ -450,6 +477,28 @@ def test_parses_leg_shapes(text, groups, shared_tail):
             "DME from a fix",
         ),
         (
+            "Rwy 21, diverse departures authorized 140° to 290°.",
+            "heading sector without CW or CCW",
+        ),
+        (
+            "Rwy 4, diverse departure authorized, climb heading 040° to 2000.",
+            "diverse departure beside a route",
+        ),
+        (
+            (
+                "Rwy 10, climb heading 100° to 900 before proceeding on course.\n"
+                "Rwy 10, right turn on departure NA."
+            ),
+            "runway both routed and given no route",
+        ),
+        (
+            (
+                "Rwys 2, 10, right turn on departure NA.\n"
+                "All aircraft climb direct ABC VOR."
+            ),
+            "runway with no route beside a shared tail",
+        ),
+        (
             "Rwy 15, climbing left turn direct TPH VORTAC thence...",
             '"thence" without a shared tail',
         ),
@@ -580,6 +629,20 @@ def _ccw(start, end):
             id="hdg without to",
         ),
         pytest.param(
+            "Rwy 30, diverse departures authorized 300° to 120° CW.\n"
+            "Rwy 2, diverse departures authorized only from 026° CW to 206°.\n"
+            "Rwy 10, diverse departures only between 096° through 275° CW.\n"
+            "Rwy 4, diverse departure authorized, climb on heading between 035° CCW "
+            "to 218° from DER.",
+            [
+                RunwayGroup(("30",), (HeadingRange((_cw(300, 120),)),)),
+                RunwayGroup(("2",), (HeadingRange((_cw(26, 206),)),)),
+                RunwayGroup(("10",), (HeadingRange((_cw(96, 275),)),)),
+                RunwayGroup(("4",), (HeadingRange((_ccw(35, 218),)),)),
+            ],
+            id="diverse departure within headings",
+        ),
+        pytest.param(
             "Rwy 20L, climb heading 196° to 1100, then climb on a heading between "
             "226° counter clockwise to 016° from DER.",
             [
@@ -679,6 +742,7 @@ def test_parses_heading_ranges(text, groups):
         ("; then on assigned route.", (ProceedOnCourse(),)),
         ("prior to turning northbound.", (ProceedOnCourse(),)),
         ("prior to turn.", (ProceedOnCourse(),)),
+        ("before turning right", (ProceedOnCourse(Turn.RIGHT),)),
         (
             "before proceeding direct OED VORTAC.",
             (Direct(NavaidRef("OED", NavaidType.VORTAC)),),
@@ -960,6 +1024,12 @@ MEA_MCA = EnrouteAltitude(
             "BRK VOR/DME at or above MEA/MCA for route of flight.",
             ClimbInHold(BRK, HOLD_NW, MEA_MCA),
             id="commas left out or added",
+        ),
+        pytest.param(
+            "...if required, continue climb in holding pattern (hold NW, LT, 159° "
+            "inbound) to cross BRK VOR/DME at or above MEA/MCA for route of flight.",
+            ClimbInHold(BRK, HOLD_NW, MEA_MCA),
+            id="if required",
         ),
     ],
 )
@@ -1509,7 +1579,7 @@ ROUTE_19 = "Rwy 19, climb heading 190° to 5000 before proceeding on course."
             id="between runways, the one before",
         ),
         pytest.param(
-            f"Diverse departures NA.\n{ROUTE_1}",
+            f"Banana.\n{ROUTE_1}",
             (HEADING_010,),
             [()],
             id="before any runway, none",

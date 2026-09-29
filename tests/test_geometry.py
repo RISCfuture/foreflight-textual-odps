@@ -130,9 +130,17 @@ def test_turn_radius_uses_standard_rate_at_150_kt():
 
 @pytest.mark.parametrize(("gradient", "stub_nm"), [(None, 2.0), (320.0, 1.25)])
 def test_initial_stub_reaches_400_ft_above_der(gradient, stub_nm):
-    drawing = draw(resolved(group(), runways=(runway(gradient=gradient),)))
+    runway_heading = ClimbHeading(magnetic(0))
+
+    drawing = draw(
+        resolved(group(runway_heading), runways=(runway(gradient=gradient),))
+    )
 
     assert route_vertices(drawing)[-1] == pytest.approx((0.0, stub_nm), abs=1e-6)
+
+
+def test_runway_whose_departure_is_na_is_not_drawn():
+    assert draw(resolved(group())).shapes == ()
 
 
 def test_climb_heading_ends_where_gradient_reaches_altitude():

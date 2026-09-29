@@ -58,6 +58,10 @@ class TestNormalize:
             ("climb of 230’/NM", "climb of 230 ft/NM"),
             ("Rwys 13, 31 ,\t 2600-3", "Rwys 13, 31 , 2600-3"),
             ("direct of of TPH", "direct of TPH"),
+            (
+                "ABQ VORTAC holding pattern. (Hold W, left turns",
+                "ABQ VORTAC holding pattern (Hold W, left turns",
+            ),
             ("  Rwy 4, std.  ", "Rwy 4, std."),
             ("Rwy 4, std.\nRwy 22, NA.", "Rwy 4, std.\nRwy 22, NA."),
             ("Rwy 4,  std.  \n  Rwy 22, NA.", "Rwy 4, std.\nRwy 22, NA."),

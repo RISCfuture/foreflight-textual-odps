@@ -47,6 +47,8 @@ with certainty:
 - Heading ranges ("climb on a heading between 350° CW to 162° from DER")
   as a thin wedge from the turn-start point, labelled as printed
   (`hdg 350° CW 162°`), beside the route flown on "all other courses".
+  A diverse departure limited to a sector ("diverse departures authorized
+  300° to 120° CW") is drawn the same way.
 - VCOA (visual climb over airport) circles, including airports whose only
   procedure is a VCOA and visual climbs written into the departure
   procedure itself ("..., or for climb in visual conditions: cross ...").
