@@ -379,7 +379,7 @@ def _parts(procedure: Procedure) -> list[tuple[str, Procedure]]:
     continues into it, and each VCOA group, as a procedure of its own."""
     parts = []
     for group in procedure.runway_groups:
-        if not group.legs or group.graphic:
+        if not group.legs or group.graphic or group.climb_gradient_only:
             continue
         tail = procedure.shared_tail if isinstance(group.legs[-1], Thence) else None
         part = dataclasses.replace(

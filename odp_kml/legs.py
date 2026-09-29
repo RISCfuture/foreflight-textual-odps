@@ -31,6 +31,7 @@ from .procedure import (
     HeadingSector,
     HoldSpec,
     Leg,
+    MinimumClimb,
     NavaidRef,
     NavaidType,
     ProceedOnCourse,
@@ -414,8 +415,9 @@ class LegParser(TokenStream):
         return SpeedRestriction(kias, self._slice_from(start))
 
     def _speed_until(self) -> None:
-        """speed-until := "established on" ("course" | heading | radial-course)
-        | "reaching" nnnn ["MSL"] | nn.n "DME" | ["crossing" | "passing"] target"""
+        """speed-until := "established on" ("course" | heading | radial-course
+        [bound]) | "established" flight-direction | "reaching" nnnn ["MSL"]
+        | nn.n "DME" | ["crossing" | "passing"] target"""
         if self._accept("established", "on"):
             self._accept("the")
             if self._accept("course"):
@@ -424,6 +426,10 @@ class LegParser(TokenStream):
                 self._heading()
                 return
             self._radial_course()
+            self._bound()
+            return
+        if self._accept("established"):
+            self._flight_direction()
             return
         if self._accept("reaching"):
             self._integer()
@@ -436,6 +442,20 @@ class LegParser(TokenStream):
             return
         self._accept_any("crossing", "passing")
         self._target()
+
+    def _flight_direction(self) -> None:
+        """flight-direction := bound | compass ("-" | "/") compass "bound",
+        a point of the sixteen that a cardinal and the intercardinal beside
+        it name: "south-southwest bound" or "south/southwest bound"."""
+        if self._bound() is not None:
+            return
+        start = self._index
+        cardinal = self._compass()
+        self._expect_any("-", "/")
+        if not _names_sixteenth_point(cardinal, self._compass()):
+            self._index = start
+            raise self._unmatched()
+        self._expect("bound")
 
     def _peek_speed_sentence(self) -> bool:
         """ "... on course. Do not exceed 150 KIAS until reaching 1700 MSL." """
@@ -731,6 +751,57 @@ class LegParser(TokenStream):
         self._accept("to")
         self._accept_any("heading", "hdg")
         return HeadingSector(start, self._compass_heading(), clockwise)
+
+    def _peek_minimum_climb(self) -> bool:
+        return any(self._peek(*words) for words in MINIMUM_CLIMB)
+
+    def _minimum_climb(self, ranges: tuple[HeadingSector, ...]) -> MinimumClimb:
+        """minimum-climb := ("min" ["."] | "minimum") "climb of" nnn "ft"
+        ("per" | "/") "NM" to-altitude "for" other-headings "."
+
+        `ranges` are the sectors of the heading ranges it is the alternative to.
+        """
+        if not self._accept("minimum"):
+            self._expect("min")
+            self._accept(".")
+        self._expect("climb", "of")
+        ft_per_nm = self._integer()
+        self._expect("ft")
+        self._expect_any("per", "/")
+        self._expect("nm")
+        until = self._to_altitude()
+        self._expect("for")
+        self._other_headings(ranges)
+        self._expect(".")
+        return MinimumClimb(ft_per_nm, until)
+
+    def _other_headings(self, ranges: tuple[HeadingSector, ...]) -> None:
+        """other-headings := "all other" ("courses" | "headings") | named-headings
+
+        Named headings must be exactly those `ranges` leave out.
+        """
+        if self._accept("all", "other"):
+            self._expect_any("courses", "headings")
+            return
+        start = self._index
+        if _headings(self._named_headings()) != _ALL_HEADINGS - _headings(*ranges):
+            self._index = start
+            raise self._error("minimum climb headings not left out by the range")
+
+    def _named_headings(self) -> HeadingSector:
+        """named-headings := "headings" ("from" sector | nnn ["°"] "through"
+        nnn ["°"]) | "a heading between" sector
+
+        "A through B" counts the headings up from A, clockwise.
+        """
+        if self._accept("a", "heading", "between"):
+            return self._sector()
+        self._expect("headings")
+        if self._accept("from"):
+            return self._sector()
+        start = self._compass_heading()
+        self._expect("through")
+        return HeadingSector(start, self._compass_heading(), clockwise=True)
 
     def _compass_heading(self) -> int:
         """nnn ["°"], a magnetic heading from 0 to 360."""
@@ -1219,12 +1290,35 @@ class LegParser(TokenStream):
         return known
 
 
+MINIMUM_CLIMB = (("min", ".", "climb"), ("min", "climb"), ("minimum", "climb"))
 RANGE_ALTERNATIVES = (
     ("all", "other", "courses"),
     ("all", "other", "headings"),
     ("or", "climb"),
     ("or", "climbing"),
+    *(("or", *words) for words in MINIMUM_CLIMB),
 )
+_ALL_HEADINGS = frozenset(range(360))
+
+
+def _headings(*sectors: HeadingSector) -> frozenset[int]:
+    """The whole-degree headings the sectors sweep, ends included, with 360
+    counted as 0."""
+    swept = set()
+    for sector in sectors:
+        first, last = (
+            (sector.start, sector.end)
+            if sector.clockwise
+            else (sector.end, sector.start)
+        )
+        swept.update((first + step) % 360 for step in range((last - first) % 360 + 1))
+    return frozenset(swept)
+
+
+def _names_sixteenth_point(cardinal: Compass8, intercardinal: Compass8) -> bool:
+    """Whether "<cardinal>-<intercardinal>" names a point of the sixteen, as
+    "south-southwest" does."""
+    return len(cardinal) == 1 and len(intercardinal) == 2 and cardinal in intercardinal
 
 
 def _compass_bearing(point: Compass8) -> int:

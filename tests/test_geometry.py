@@ -27,6 +27,7 @@ from odp_kml.procedure import (
     HeadingRange,
     HeadingSector,
     HoldSpec,
+    MinimumClimb,
     NavaidRef,
     Procedure,
     ProceedOnCourse,
@@ -330,16 +331,32 @@ def test_shared_tail_is_drawn_once_from_where_the_groups_converge():
     assert raised.value.signature == "shared tail start mismatch"
 
 
-def test_vcoa_then_on_course_draws_only_the_circle_and_label():
-    vcoa = VcoaGroup((), None, 7000, (ProceedOnCourse(),))
+VCOA_LABEL = (
+    "VCOA (" + format_altitude(feet(7000, AltitudeKind.AT_OR_ABOVE), "plain") + ")",
+    (0.0, 2.0),
+)
+
+
+@pytest.mark.parametrize(
+    ("speed", "placed"),
+    [
+        (None, [VCOA_LABEL]),
+        (
+            SpeedRestriction(180, "reaching 7000 MSL"),
+            [VCOA_LABEL, ("max 180 KIAS until 7000'", (0.0, -2.0))],
+        ),
+    ],
+)
+def test_vcoa_then_on_course_draws_only_the_circle_and_labels(speed, placed):
+    vcoa = VcoaGroup((), None, 7000, (ProceedOnCourse(),), speed=speed)
 
     drawing = draw(resolved(vcoa=(vcoa,)))
 
     assert {line.name for line in polylines(drawing, Style.VCOA)} == {"ALL RWYS: VCOA"}
     assert len(polylines(drawing, Style.VCOA)) == 36
     assert polylines(drawing) == []
-    assert [lbl.text for lbl in labels(drawing)] == [
-        "VCOA (" + format_altitude(feet(7000, AltitudeKind.AT_OR_ABOVE), "plain") + ")"
+    assert [(lbl.text, xy(lbl.at)) for lbl in labels(drawing)] == [
+        (text, pytest.approx(at_xy, abs=1e-6)) for text, at_xy in placed
     ]
 
 
@@ -470,6 +487,12 @@ def test_only_proceed_on_course_may_follow_a_heading_range():
         draw(resolved(group(HeadingRange((sector,)), after)))
 
     assert raised.value.signature == "leg after a heading range"
+
+
+def test_minimum_climb_on_the_headings_a_range_leaves_out_draws_nothing():
+    other_headings = group(MinimumClimb(415, feet(1600)))
+
+    assert draw(resolved(other_headings)).shapes == ()
 
 
 def test_empty_heading_sector_is_degenerate():

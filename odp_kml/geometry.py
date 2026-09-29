@@ -264,7 +264,13 @@ class _Pen:
 
 
 def _draw_runway_group(ctx: _Context, runway_group: RunwayGroup) -> list[_Pen]:
-    """Draw the group's legs from each of its runways; return where each ended."""
+    """Draw the group's legs from each of its runways; return where each ended.
+
+    A minimum climb on the headings a heading range leaves out names no
+    route, so its group draws nothing.
+    """
+    if runway_group.climb_gradient_only:
+        return []
     pens = [
         _start_runway(ctx, ctx.resolved.runways[name]) for name in runway_group.runways
     ]
@@ -357,6 +363,8 @@ def _draw_vcoa(ctx: _Context, vcoa: VcoaGroup) -> None:
         vcoa_label(vcoa.at_or_above, ctx.params.label_style, vcoa.bound),
         offset(centre, 0.0, radius),
     )
+    if vcoa.speed is not None:
+        ctx.label(speed_label(vcoa.speed), offset(centre, 180.0, radius))
     if _departs_toward_something(vcoa.then):
         outward = _departure_bearing(ctx, centre, vcoa.then[0])
         pen = _Pen(

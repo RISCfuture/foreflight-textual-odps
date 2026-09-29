@@ -49,10 +49,14 @@ with certainty:
   (`hdg 350° CW 162°`), beside the route flown on "all other courses".
   A diverse departure limited to a sector ("diverse departures authorized
   300° to 120° CW") is drawn the same way.
+  A minimum climb gradient given for the other headings instead ("or min.
+  climb of 415 ft per NM to 1600 for headings 101° through 314°") names no
+  route, so only the wedge is drawn.
 - VCOA (visual climb over airport) circles, including airports whose only
   procedure is a VCOA and visual climbs written into the departure
   procedure itself ("..., or for climb in visual conditions: cross ...").
-  A published crossing direction joins the label: `VCOA (≥8200' SE bound)`.
+  A published crossing direction joins the label: `VCOA (≥8200' SE bound)`,
+  and a speed limit on the visual climb is labelled below the circle.
 - Altitude labels in plain text (ForeFlight renders neither rich text nor
   combining marks): `7000'` for "climb to," `≥7000'` for "at or above,"
   `≤7000'` for "at or below," and `at 7000'` for a mandatory altitude;

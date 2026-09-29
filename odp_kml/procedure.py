@@ -180,6 +180,19 @@ class HeadingRange:
 
     sectors: tuple[HeadingSector, ...]
     until: Until | None = None
+    speed: SpeedRestriction | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class MinimumClimb:
+    """Climb at a minimum gradient on the headings the heading ranges before
+    it leave out: "or min. climb of 415 ft per NM to 1600 for headings 101°
+    through 314°" after "between 315° CW to 100°", or "... for all other
+    courses". It names no route to draw.
+    """
+
+    ft_per_nm: int
+    until: Altitude
 
 
 @dataclasses.dataclass(frozen=True)
@@ -298,6 +311,7 @@ Leg = (
     | RunwayHeading
     | StraightAhead
     | HeadingRange
+    | MinimumClimb
     | Direct
     | Radial
     | HeadingAndRadial
@@ -322,6 +336,14 @@ class RunwayGroup:
         """Whether these runways fly a charted DP rather than text legs."""
         return any(isinstance(leg, GraphicDeparture) for leg in self.legs)
 
+    @property
+    def climb_gradient_only(self) -> bool:
+        """Whether these legs are only a minimum climb on the headings a
+        heading range leaves out, which names no route to draw."""
+        return bool(self.legs) and all(
+            isinstance(leg, MinimumClimb) for leg in self.legs
+        )
+
 
 @dataclasses.dataclass(frozen=True)
 class VcoaGroup:
@@ -329,6 +351,8 @@ class VcoaGroup:
 
     An empty ``runways`` means every runway. ``bound`` is the direction to
     cross in ("cross … southeast bound at or above 8200"), if the text gives one.
+    ``speed`` is a limit the VCOA section's next sentence puts on the visual
+    climb ("Do not exceed 180 KIAS until reaching 1800 MSL.").
     """
 
     runways: tuple[str, ...]
@@ -336,6 +360,7 @@ class VcoaGroup:
     at_or_above: int
     then: tuple[Leg, ...]
     bound: Compass8 | None = None
+    speed: SpeedRestriction | None = None
 
 
 @dataclasses.dataclass(frozen=True)

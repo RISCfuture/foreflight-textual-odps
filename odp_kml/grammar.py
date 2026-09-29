@@ -274,6 +274,7 @@ class _Parser(LegParser):
     ):
         super().__init__(text, known_navaids)
         self._inline_vcoa: list[VcoaGroup] = []
+        self._visual_climb_end: int | None = None
         self._in_part = in_part
         self.unparsed: list[Unparsed] = []
         self._continuations: set[str] = set()
@@ -578,7 +579,7 @@ class _Parser(LegParser):
             return []
         groups = [RunwayGroup(runways, self._first_legs(runways))]
         while _has_heading_range(groups[-1]) and self._range_alternative():
-            groups.append(RunwayGroup(runways, self._flown_legs()))
+            groups.append(RunwayGroup(runways, self._alternative_legs(groups)))
         self._vcoa_alternative(runways)
         return groups
 
@@ -589,20 +590,38 @@ class _Parser(LegParser):
         route, when every route ends at the same fix it starts from, or when
         it repeats word for word a sentence read for an earlier runway; after
         the last of several routes that end apart it could otherwise mean all
-        of them, so it is left unread.
+        of them, so it is left unread. A speed limit sentence may also limit
+        a heading range, so for one a heading range counts as a route; one
+        that could limit more than the last group is left unread too.
         """
+        speed = self._peek_speed_sentence()
+        takes = _takes_speed_limit if speed else _flies_route
         last = groups[-1] if groups else None
-        if last is None or not _flies_route(last) or _ends_with_thence(last.legs):
+        if last is None or not takes(last) or _ends_with_thence(last.legs):
+            return False
+        if speed and self._speed_limit_may_mean_others(groups):
             return False
         if self._later_runway_header():
             return True
-        routes = [group for group in groups if _flies_route(group)]
+        routes = [group for group in groups if takes(group)]
         ends = {end_fix(group.legs[-1]) for group in routes}
         return (
             len(routes) == 1
             or (len(ends) == 1 and None not in ends)
             or self._sentence() in self._continuations
         )
+
+    def _speed_limit_may_mean_others(self, groups: list[RunwayGroup]) -> bool:
+        """Whether a speed limit sentence here could limit more than the last
+        group: it follows a visual climb written into the section, or the
+        last group is one of several alternatives for the same runways."""
+        last = groups[-1]
+        alternatives = [
+            group
+            for group in groups
+            if group.runways == last.runways and _takes_speed_limit(group)
+        ]
+        return self._index == self._visual_climb_end or len(alternatives) > 1
 
     def _sentence(self) -> str:
         """The words from here to the end of the sentence, spaced as one line."""
@@ -666,6 +685,14 @@ class _Parser(LegParser):
         self._last_fix = None
         return self._legs([self._leg()])
 
+    def _alternative_legs(self, groups: list[RunwayGroup]) -> tuple[Leg, ...]:
+        """The legs flown instead of the heading ranges in `groups`, or the
+        minimum climb the headings they leave out need ("or min. climb of 250
+        ft per NM to 2000 for all other courses")."""
+        if self._peek_minimum_climb():
+            return (self._minimum_climb(_range_sectors(groups)),)
+        return self._flown_legs()
+
     def _range_alternative(self) -> bool:
         """range-alternative := ["," | ";"] ("all other" ("courses" | "headings")
         [":" | ","] | "or"), leading the legs flown instead of a heading range.
@@ -693,10 +720,10 @@ class _Parser(LegParser):
     def _vcoa_only(self, runways: tuple[str, ...]) -> bool:
         """vcoa-only := inline-vcoa | atc-approval visual-climb [notify-atc]"""
         if self._peek(*VISUAL_CLIMB):
-            self._inline_vcoa.append(self._inline_visual_climb(runways))
+            self._add_inline_vcoa(self._inline_visual_climb(runways))
             return True
         if self._peek("obtain", "atc"):
-            self._inline_vcoa.append(self._vcoa_group(runways))
+            self._add_inline_vcoa(self._vcoa_group(runways))
             return True
         return False
 
@@ -706,8 +733,21 @@ class _Parser(LegParser):
             for conjunction in ((), ("or",)):
                 if self._peek(*lead, *conjunction, *VISUAL_CLIMB):
                     self._index += len(lead) + len(conjunction)
-                    self._inline_vcoa.append(self._inline_visual_climb(runways))
+                    self._add_inline_vcoa(self._inline_visual_climb(runways))
                     return
+
+    def _add_inline_vcoa(self, group: VcoaGroup) -> None:
+        """Keep a visual climb written into the section.
+
+        A speed limit sentence right after it could limit the runway's route
+        as well as the climb: before another runway header, that runway is
+        left unread; after the last, the sentence is, which withholds every
+        route and visual climb it may modify.
+        """
+        if self._peek_speed_sentence() and self._later_runway_header():
+            raise self._error("speed limit after a visual climb")
+        self._inline_vcoa.append(group)
+        self._visual_climb_end = self._index
 
     def _inline_visual_climb(self, runways: tuple[str, ...]) -> VcoaGroup:
         """inline-vcoa := "for climb in visual conditions" [":" | ","] ["to"]
@@ -1007,7 +1047,7 @@ class _Parser(LegParser):
     # --- VCOA --------------------------------------------------------------
 
     def vcoa(self) -> tuple[VcoaGroup, ...]:
-        """vcoa := (vcoa-group continuation*)+
+        """vcoa := (vcoa-group continuation* [speed-sentence])+
 
         A sentence going on with a group's route ("... to DSD VORTAC.
         Continue climb in DSD holding pattern ...") belongs to that group
@@ -1024,7 +1064,7 @@ class _Parser(LegParser):
                 not groups or self._later_runway_header()
             ):
                 group = self._continued_vcoa(group)
-            groups.append(group)
+            groups.append(self._with_speed_limit(group, first=not groups))
         return tuple(groups)
 
     def _continued_vcoa(self, group: VcoaGroup) -> VcoaGroup:
@@ -1044,6 +1084,23 @@ class _Parser(LegParser):
         group = self._visual_climb(runways)
         self._notify_atc()
         return group
+
+    def _with_speed_limit(self, group: VcoaGroup, *, first: bool) -> VcoaGroup:
+        """speed-sentence := speed "."
+
+        The VCOA section's visual climb with the speed limit the sentence
+        after it puts on it ("Do not exceed 180 KIAS until reaching 1800
+        MSL.") when it is the section's first or another runway header
+        follows; after the last of several the sentence could mean any of
+        them, so the section is left unread.
+        """
+        if not self._peek_speed_sentence():
+            return group
+        if not first and not self._later_runway_header():
+            raise self._error("speed limit after several visual climbs")
+        speed = self._speed_restriction()
+        self._expect(".")
+        return dataclasses.replace(group, speed=speed)
 
     def _vcoa_runways(self) -> tuple[str, ...]:
         """vcoa-runways := runway-header | "All" ("Rwys" | "runways") ","
@@ -1154,13 +1211,9 @@ class _Parser(LegParser):
 
 
 def _all_flown_end_with_thence(groups: list[RunwayGroup]) -> bool:
-    """Every runway group that flies a route (not an NA, charted-DP or
-    heading-range group) ends in "thence"."""
-    flown = [
-        group
-        for group in groups
-        if group.legs and not group.graphic and not _has_heading_range(group)
-    ]
+    """Every runway group that flies a route (not an NA, charted-DP,
+    heading-range or minimum-climb group) ends in "thence"."""
+    flown = [group for group in groups if _flies_route(group)]
     return bool(flown) and all(_ends_with_thence(group.legs) for group in flown)
 
 
@@ -1170,18 +1223,23 @@ def _withholdable(group: RunwayGroup) -> bool:
 
 
 def _flies_route(group: RunwayGroup) -> bool:
-    return bool(group.legs) and not group.graphic and not _has_heading_range(group)
+    return (
+        _withholdable(group)
+        and not _has_heading_range(group)
+        and not group.climb_gradient_only
+    )
+
+
+def _takes_speed_limit(group: RunwayGroup) -> bool:
+    """Whether the group flies a route or a heading range, either of which a
+    speed limit sentence could apply to."""
+    return _withholdable(group) and not group.climb_gradient_only
 
 
 def _continued_to_tail(group: RunwayGroup) -> RunwayGroup:
     """A group flying a route that "all aircraft" continue from: it ends in
     "thence" whether or not the text said so."""
-    if (
-        not group.legs
-        or group.graphic
-        or _has_heading_range(group)
-        or _ends_with_thence(group.legs)
-    ):
+    if not _flies_route(group) or _ends_with_thence(group.legs):
         return group
     return dataclasses.replace(group, legs=(*group.legs, Thence()))
 
@@ -1239,6 +1297,21 @@ def _has_heading_range(group: RunwayGroup) -> bool:
     return any(
         isinstance(leg.then if isinstance(leg, ClimbingTurn) else leg, HeadingRange)
         for leg in group.legs
+    )
+
+
+def _range_sectors(groups: list[RunwayGroup]) -> tuple[HeadingSector, ...]:
+    """The sectors of every heading range the groups climb within."""
+    turned = (
+        leg.then if isinstance(leg, ClimbingTurn) else leg
+        for group in groups
+        for leg in group.legs
+    )
+    return tuple(
+        sector
+        for leg in turned
+        if isinstance(leg, HeadingRange)
+        for sector in leg.sectors
     )
 
 

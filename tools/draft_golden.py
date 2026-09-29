@@ -766,7 +766,10 @@ Output: one Procedure object matching the response schema. Every object carries
   (turn_restriction L/R only for "before turning left/right"; null otherwise),
   and Thence (the "thence..." marker leading into a shared tail).
 - "All other courses: ..." (or "or climb on a heading between ...") after a
-  HeadingRange is a further runway group for the same runways.
+  HeadingRange is a further runway group for the same runways. So is "or min.
+  climb of 415 ft per NM to 1600 for all other courses" (or for the headings the
+  ranges leave out, "for headings 101° through 314°"), whose only leg is
+  MinimumClimb: ft_per_nm and until the altitude.
 - Sentences that change nothing drawn have no node: "DME required." and
   "Diverse departures NA." "If required, continue climb in ... holding
   pattern" is the ClimbInHold.
@@ -798,9 +801,11 @@ Output: one Procedure object matching the response schema. Every object carries
 - vcoa: one group per VCOA runway list; cross is the fix crossed, or null when
   climbing over the airport; at_or_above is the crossing altitude; bound is the
   direction to cross in ("southeast bound" is SE), null when not given; then is
-  the legs that follow. A visual climb written into the DEPARTURE PROCEDURE
-  section ("..., or for climb in visual conditions: cross ...") is a vcoa group
-  for that runway, listed before the VCOA section's groups.
+  the legs that follow; speed is the limit a "Do not exceed ..." sentence after
+  the crossing in the VCOA section puts on the visual climb, else null. A visual
+  climb written into the DEPARTURE PROCEDURE section ("..., or for climb in
+  visual conditions: cross ...") is a vcoa group for that runway, listed before
+  the VCOA section's groups.
 - source_span on every leg and until node: the exact words of the input the node
   came from, copied character for character (including °, parentheses, and
   capitalization). Together the spans must cover every word of the DEPARTURE

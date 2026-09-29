@@ -1,5 +1,6 @@
 """Parsing DEPARTURE PROCEDURE and VCOA text into the procedure AST."""
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -31,6 +32,7 @@ from odp_kml.procedure import (
     HeadingRange,
     HeadingSector,
     HoldSpec,
+    MinimumClimb,
     NavaidRef,
     NavaidType,
     Procedure,
@@ -715,6 +717,41 @@ def _ccw(start, end):
             ],
             id="or climbing turn alternative",
         ),
+        pytest.param(
+            "Rwy 13, climbing left turn on a heading between 315° CW to 100° from "
+            "DER, or min. climb of 415 ft per NM to 1600 for headings 101° through "
+            "314°.",
+            [
+                RunwayGroup(
+                    ("13",), (ClimbingTurn(Turn.LEFT, HeadingRange((_cw(315, 100),))),)
+                ),
+                RunwayGroup(("13",), (MinimumClimb(415, to(1600)),)),
+            ],
+            id="minimum climb on the headings left out",
+        ),
+        pytest.param(
+            "Rwy 3, climb on a heading between 030° CW 210° from DER or min climb of "
+            "315 ft/NM to 3100 for headings from 211° CW 029°.",
+            [
+                RunwayGroup(("3",), (HeadingRange((_cw(30, 210),)),)),
+                RunwayGroup(("3",), (MinimumClimb(315, to(3100)),)),
+            ],
+            id="minimum climb per NM written with a slash, headings from a sector",
+        ),
+        pytest.param(
+            "Rwy 34, climb on heading between 070° CW to 155° from DER or climb on "
+            "heading between 155° CW to 330° from DER to 3600 before proceeding on "
+            "course or minimum climb of 240 ft per NM to 3200 for all other courses.",
+            [
+                RunwayGroup(("34",), (HeadingRange((_cw(70, 155),)),)),
+                RunwayGroup(
+                    ("34",),
+                    (HeadingRange((_cw(155, 330),), to(3600)), ProceedOnCourse()),
+                ),
+                RunwayGroup(("34",), (MinimumClimb(240, to(3200)),)),
+            ],
+            id="minimum climb for all other courses after two ranges",
+        ),
     ],
 )
 def test_parses_heading_ranges(text, groups):
@@ -1181,13 +1218,59 @@ def test_speed_limit_sentence_applies_to_the_last_leg_flown(sentence, until):
     assert on_course == ProceedOnCourse()
 
 
-def test_all_other_courses_needs_a_heading_range_before_it():
+def test_speed_limit_sentence_before_the_next_runway_limits_its_heading_range():
     text = (
-        "Rwy 8, climb heading 080° to 5000. All other courses: climbing left turn "
-        "direct DEN VOR/DME."
+        "Rwy 10R, climb on a heading between 160° CW to 278° from DER. Do not exceed "
+        "150 KIAS until established south-southwest bound.\nRwy 14, climb on a "
+        "heading between 147° CW to 320° from DER."
     )
 
-    assert signature_of(text) == 'unmatched phrase "all other courses:"'
+    groups = parse_departure_procedure(
+        text, airport="DJT", amendment=None
+    ).runway_groups
+
+    speed = SpeedRestriction(150, "established south-southwest bound")
+    assert groups[0].legs == (HeadingRange((_cw(160, 278),), speed=speed),)
+
+
+@pytest.mark.parametrize(
+    ("text", "signature"),
+    [
+        pytest.param(
+            "Rwy 8, climb heading 080° to 5000. All other courses: climbing left "
+            "turn direct DEN VOR/DME.",
+            'unmatched phrase "all other courses:"',
+            id="a route for all other courses",
+        ),
+        pytest.param(
+            "Rwy 8, climb heading 080° to 5000 or min. climb of 300 ft per NM to "
+            "3000 for all other courses.",
+            'unmatched phrase "or min. climb"',
+            id="a minimum climb for all other courses",
+        ),
+        pytest.param(
+            "Rwy 13, climb on a heading between 315° CW to 100° from DER, or min. "
+            "climb of 415 ft per NM to 1600 for all other courses. All other "
+            "courses: climb heading 130° to 3000 before proceeding on course.",
+            'unmatched phrase "all other courses:"',
+            id="a route for all other courses after a minimum climb",
+        ),
+    ],
+)
+def test_alternatives_for_other_courses_need_a_heading_range_before_them(
+    text, signature
+):
+    assert signature_of(text) == signature
+
+
+@pytest.mark.parametrize("headings", ["101° through 200°", "314° through 101°"])
+def test_minimum_climb_names_only_the_headings_the_range_leaves_out(headings):
+    text = (
+        "Rwy 13, climb on a heading between 315° CW to 100° from DER, or min. "
+        f"climb of 415 ft per NM to 1600 for headings {headings}."
+    )
+
+    assert signature_of(text) == "minimum climb headings not left out by the range"
 
 
 def test_heading_range_group_need_not_continue_to_the_shared_tail():
@@ -1354,7 +1437,16 @@ def test_vcoa_section_repeating_an_inline_visual_climb_is_drawn_once():
 
 @pytest.mark.parametrize(
     "until",
-    ["reaching 4000", "crossing ABC VOR", "ABC VOR", "12 DME", "established on course"],
+    [
+        "reaching 4000",
+        "crossing ABC VOR",
+        "ABC VOR",
+        "12 DME",
+        "established on course",
+        "established on ABC R-336 southeast bound",
+        "established south-southwest bound",
+        "established south/southwest bound",
+    ],
 )
 def test_speed_restriction_until_named_shapes(until):
     text = f"Rwy 16, climb heading 154° to 2500, do not exceed 200 KIAS until {until}."
@@ -1364,6 +1456,15 @@ def test_speed_restriction_until_named_shapes(until):
     ).runway_groups
 
     assert group.legs == (ClimbHeading(154, to(2500), SpeedRestriction(200, until)),)
+
+
+def test_speed_restriction_until_a_direction_naming_no_compass_point_is_unread():
+    text = (
+        "Rwy 16, climb heading 154° to 2500, do not exceed 200 KIAS until "
+        "established north-south bound."
+    )
+
+    assert signature_of(text) == 'unmatched phrase "north-south bound"'
 
 
 def test_rejects_any_unconsumed_word():
@@ -1422,6 +1523,52 @@ def test_vcoa_sentence_after_the_last_of_several_groups_is_not_read():
 
     with pytest.raises(ParseError):
         parse_vcoa(text)
+
+
+def _vcoa_text(runway, feet):
+    return (
+        f"Rwy {runway}, obtain ATC approval for VCOA when requesting IFR clearance. "
+        f"Climb in visual conditions to cross Test airport at or above {feet} "
+        "before proceeding on course."
+    )
+
+
+VCOA_SPEED = "Do not exceed 180 KIAS until reaching 1800 MSL."
+
+
+@pytest.mark.parametrize(
+    ("text", "groups"),
+    [
+        pytest.param(
+            f"{_vcoa_text(21, 1800)} {VCOA_SPEED}",
+            [_vcoa(("21",), 1800)],
+            id="the only one",
+        ),
+        pytest.param(
+            f"{_vcoa_text(21, 1800)} {VCOA_SPEED}\n{_vcoa_text(3, 2400)}",
+            [_vcoa(("21",), 1800), _vcoa(("3",), 2400)],
+            id="before another runway",
+        ),
+    ],
+)
+def test_speed_limit_sentence_after_a_vcoa_crossing_limits_the_visual_climb(
+    text, groups
+):
+    speed = SpeedRestriction(180, "reaching 1800 MSL")
+
+    assert parse_vcoa(text) == (
+        dataclasses.replace(groups[0], speed=speed),
+        *groups[1:],
+    )
+
+
+def test_speed_limit_sentence_after_the_last_of_several_vcoa_crossings_is_unread():
+    text = f"{_vcoa_text(3, 2400)}\n{_vcoa_text(21, 1800)} {VCOA_SPEED}"
+
+    with pytest.raises(ParseError) as error:
+        parse_vcoa(text)
+
+    assert error.value.signature == "speed limit after several visual climbs"
 
 
 def test_vcoa_crossing_a_navaid_is_not_the_airport():
@@ -1590,6 +1737,37 @@ ROUTE_19 = "Rwy 19, climb heading 190° to 5000 before proceeding on course."
             (HEADING_010,),
             [("19",)],
             id="after thence before another runway, the one before",
+        ),
+        pytest.param(
+            f"{ROUTE_1}\nRwy 19, climb on heading between 150° CW to 210° from DER. "
+            "Do not exceed 150 KIAS until reaching 1700 MSL.",
+            (),
+            [("1",), ("19",)],
+            id="a speed limit after the last runway's heading range, every route",
+        ),
+        pytest.param(
+            "Rwy 34, climb on heading between 070° CW to 155° from DER or climb on "
+            "heading between 155° CW to 330° from DER to 3600 before proceeding on "
+            f"course. Do not exceed 200 KIAS until reaching 3600 MSL.\n{ROUTE_1}",
+            (HEADING_010,),
+            [("34",), ("34",)],
+            id="a speed limit after a runway's alternatives, that runway's",
+        ),
+        pytest.param(
+            "Rwy 5, for climb in visual conditions: cross Test airport at or above "
+            "2300 before proceeding on course. Do not exceed 180 KIAS until "
+            f"established on course.\n{ROUTE_1}",
+            (HEADING_010,),
+            [("5",)],
+            id="a speed limit after a visual climb, that runway's",
+        ),
+        pytest.param(
+            f"{ROUTE_1}\nRwy 19, for climb in visual conditions: cross Test airport "
+            "at or above 1700 before proceeding on course. Do not exceed 180 KIAS "
+            "until reaching 1700 MSL.",
+            (),
+            [("1",), ("19",)],
+            id="a speed limit after the last runway's visual climb, every route",
         ),
     ],
 )
