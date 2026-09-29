@@ -194,7 +194,9 @@ used whenever the text does not otherwise constrain the geometry:
   magnetic variation.
 - FAA Orders 8260.3G (TERPS) and 8260.46K, and Instrument Flight
   Procedures Information Bulletin (IFP IB / IAC) 7, for the construction
-  rules a textual ODP follows.
+  rules a textual ODP follows. The intercept-angle rule quoted under
+  Depiction assumptions comes from the previous edition, 8260.3F
+  ¶13-3-3b(2).
 
 FAA aeronautical data is in the public domain.
 
