@@ -47,10 +47,14 @@ def format_altitude(alt: Altitude | EnrouteAltitude, style: str) -> str:
     A climb-to altitude (`AltitudeKind.TO`) is the bare figure in both styles.
     An FMS has no suffix for a mandatory altitude, so `AltitudeKind.AT` is
     also bare digits in the "fms" style; only the plain style tells it apart.
-    An en-route minimum reads as its names, e.g. ``≥MEA/MCA`` or ``MEA/MCA A``.
+    An en-route minimum reads as its names, e.g. ``≥MEA/MCA`` or ``MEA/MCA A``,
+    after any figure printed with them, which drops its foot mark to keep a
+    hold's label short: ``≥4000/MEA``.
     """
     if isinstance(alt, EnrouteAltitude):
         names = "/".join(alt.names)
+        if alt.feet is not None:
+            names = f"{alt.feet}/{names}"
         if style == "fms":
             return f"{names} {FMS_SUFFIXES[alt.kind]}".rstrip()
         return f"{PLAIN_PREFIXES[alt.kind]}{names}"

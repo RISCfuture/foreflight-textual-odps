@@ -80,11 +80,14 @@ _NAVAID_TYPES = (
 )
 NAVAID_TYPE_WORDS = frozenset(words[0] for words, _ in _NAVAID_TYPES)
 VISUAL_CLIMB = ("for", "climb", "in", "visual", "conditions")
-ENROUTE_MINIMUMS = frozenset({"mea", "mca"})
+ENROUTE_MINIMUMS = frozenset({"mea", "mca", "moca"})
 CONTINUATION_WORDS = frozenset(
     {"climb", "climbing", "continue", "proceed", "direct", "cross"}
 )
-ENROUTE_LEADS = frozenset({"the", "airway", "appropriate"})
+ENROUTE_LEADS = frozenset({"airway", "appropriate"})
+_CROSSINGS = frozenset({"cross", "depart"})
+_COMPASS_POINT_DEG = 45
+_SIDE_TOLERANCE_DEG = 30
 BOUND_WORDS = {
     f"{word}bound": point for word, point in COMPASS_WORDS.items() if len(word) > 2
 }
@@ -106,7 +109,8 @@ class LegParser(TokenStream):
     # --- Leg sequences -----------------------------------------------------
 
     def _legs(self, legs: list[Leg]) -> tuple[Leg, ...]:
-        """legs := leg ((separator leg) | before | speed)* ("." | thence | ↓)
+        """legs := leg ((separator leg) | before | speed | and-hold)* ("." | thence
+        | ↓)
 
         ↓: the legs also end, unconsumed, where an inline VCOA alternative
         ("..., or for climb in visual conditions") begins. Tracks the fix
@@ -128,6 +132,8 @@ class LegParser(TokenStream):
                 return (*legs, Thence())
             elif legs and self._peek_speed_restriction():
                 legs[-1] = self._with_speed(legs[-1], self._speed_restriction())
+            elif legs and self._peek("and", "hold"):
+                self._append(legs, self._and_hold())
             else:
                 self._reject_airway_routing()
                 self._leg_separator(required=bool(legs))
@@ -595,13 +601,27 @@ class LegParser(TokenStream):
         return StraightAhead(self._to_altitude())
 
     def _continue_climb(self) -> Direct | ClimbInHold:
-        """continue-climb := "continue climb" (direct | [hold-until] in-hold)
+        """continue-climb := continue-climb-words (direct | climb-in-hold-rest)
 
         e.g. "Continue climb to 13000 in RLG holding pattern (...)".
         """
-        self._expect("continue", "climb")
+        self._expect_continue_climb()
         if self._peek("direct"):
             return self._direct()
+        return self._climb_in_hold_rest()
+
+    def _continue_climb_in_hold(self) -> ClimbInHold:
+        """continue-climb-in-hold := continue-climb-words climb-in-hold-rest"""
+        self._expect_continue_climb()
+        return self._climb_in_hold_rest()
+
+    def _expect_continue_climb(self) -> None:
+        """continue-climb-words := "continue" ("climb" | "climbing")"""
+        self._expect("continue")
+        self._expect_any("climb", "climbing")
+
+    def _climb_in_hold_rest(self) -> ClimbInHold:
+        """climb-in-hold-rest := [hold-until] in-hold"""
         leading, crossed = self._hold_until()
         if crossed is not None:
             self._index -= 1
@@ -831,7 +851,7 @@ class LegParser(TokenStream):
     def _climb_in_hold(
         self, leading: Altitude | EnrouteAltitude | None = None
     ) -> ClimbInHold:
-        """in-hold := hold-fix [hold-until] [hold-spec] [hold-until]
+        """in-hold := hold-fix [hold-until] [[","] hold-spec [","]] [hold-until]
 
         The hold's fix is whichever of these the text names, and they must
         agree: before "holding pattern", inside the hold-spec ("(GKN VOR/DME
@@ -841,7 +861,12 @@ class LegParser(TokenStream):
         """
         named = self._hold_fix()
         until, crossed = self._hold_until()
-        spec_fix, hold = self._hold_spec() if self._peek("(") else (None, None)
+        spec_fix, hold = None, None
+        if self._peek("(") or self._peek(",", "("):
+            self._accept(",")
+            spec_fix, hold = self._hold_spec()
+            if until is None and self._peek(",") and self._peek_hold_until(1):
+                self._accept(",")
         if until is None:
             until, crossed = self._hold_until()
         if leading is not None:
@@ -852,22 +877,48 @@ class LegParser(TokenStream):
         return ClimbInHold(fix, hold, until)
 
     def _hold_fix(self) -> NavaidRef | FixRef | None:
-        """hold-fix := "-in-hold" | "-in-holding pattern" | "in holding pattern"
-        | "in" ["the"] target "holding pattern"
+        """hold-fix := ("-in-hold" | "in hold") [named-hold]
+        | ("-in-holding" | "in holding") ["pattern"] | named-hold
 
-        ``None`` when the text names no fix here.
+        named-hold := "in" ["the"] target "holding pattern"
+
+        e.g. "climb-in-hold in FHR NDB holding pattern", "climb in holding
+        (SW, ...)". ``None`` when the text names no fix here.
         """
-        if (
-            self._accept("-", "in", "-", "hold")
-            or self._accept("-", "in", "-", "holding", "pattern")
-            or self._accept("in", "holding", "pattern")
-        ):
+        if self._accept("-", "in", "-", "hold") or self._accept("in", "hold"):
+            return self._named_hold() if self._peek("in") else None
+        if self._accept("-", "in", "-", "holding") or self._accept("in", "holding"):
+            self._accept("pattern")
             return None
+        return self._named_hold()
+
+    def _named_hold(self) -> NavaidRef | FixRef:
         self._expect("in")
         self._accept("the")
         fix = self._target()
         self._expect("holding", "pattern")
         return fix
+
+    def _and_hold(self) -> ClimbInHold:
+        """and-hold := "and hold" [hold-spec] [","] continue-climb
+
+        "... to MQO VORTAC and hold, continue climb in MQO holding pattern
+        (...) to ...": one climb in hold at the fix the route has just
+        reached, its pattern given by either phrase, or by both alike.
+        """
+        reached = self._last_fix
+        self._expect("and", "hold")
+        spec_fix, hold = self._hold_spec() if self._peek("(") else (None, None)
+        if reached is None:
+            raise self._error("hold without a preceding fix")
+        self._accept(",")
+        if not self._peek("continue"):
+            raise self._unmatched()
+        climb = self._continue_climb_in_hold()
+        fix = self._one_hold_fix(reached, spec_fix, climb.fix)
+        if None not in (hold, climb.hold) and hold != climb.hold:
+            raise self._error("hold specified twice, differently")
+        return dataclasses.replace(climb, fix=fix, hold=hold or climb.hold)
 
     def _one_hold_fix(self, *named: NavaidRef | FixRef | None) -> NavaidRef | FixRef:
         fixes = [fix for fix in named if fix is not None]
@@ -887,24 +938,34 @@ class LegParser(TokenStream):
 
         Returns the altitude and the fix crossed, if one is named.
         """
+        if not self._peek_hold_until():
+            return None, None
         if self._peek("to") and self._peek_integer(1):
             return self._to_altitude(), None
         if self._peek("to") and self._peek_enroute(1):
             start = self._position()
             self._expect("to")
             return self._enroute(AltitudeKind.TO, start), None
-        if self._peek("until", "at"):
-            self._expect("until")
+        if self._accept("until"):
             return self._altitude_constraint(), None
-        if not (self._peek("to", "cross") or self._peek("to", "depart")):
-            return None, None
         self._expect("to")
-        self._expect_any("cross", "depart")
+        self._expect_any(*_CROSSINGS)
         crossed = self._target()
         return self._altitude_constraint(), crossed
 
+    def _peek_hold_until(self, offset: int = 0) -> bool:
+        return (
+            self._peek("to", offset=offset)
+            and (
+                self._peek_integer(offset + 1)
+                or self._peek_enroute(offset + 1)
+                or self._peek_any_of(_CROSSINGS, offset + 1)
+            )
+        ) or self._peek("until", "at", offset=offset)
+
     def _altitude_constraint(self) -> Altitude | EnrouteAltitude:
-        """altitude-constraint := "at" ["or" ("above" | "below")] (nnnn ["MSL"] | enroute)"""
+        """altitude-constraint := "at" ["or" ("above" | "below")] (nnnn ["MSL"]
+        ["or" enroute] | enroute)"""
         start = self._position()
         self._expect("at")
         kind = AltitudeKind.AT
@@ -916,26 +977,31 @@ class LegParser(TokenStream):
             return self._enroute(kind, start)
         feet = self._integer()
         self._accept("msl")
+        if self._peek("or") and self._peek_enroute(1):
+            self._expect("or")
+            return dataclasses.replace(self._enroute(kind, start), feet=feet)
         return Altitude(feet, kind, self._slice_from(start))
 
     def _peek_enroute(self, offset: int = 0) -> bool:
-        if self._peek_any_of(ENROUTE_LEADS, offset):
-            offset += 1
-        return self._peek_any_of(ENROUTE_MINIMUMS, offset)
+        return self._peek_any_of(ENROUTE_MINIMUMS, offset + self._enroute_leads(offset))
+
+    def _enroute_leads(self, offset: int = 0) -> int:
+        """How many words of ``["the"] ["airway" | "appropriate"]`` come next."""
+        leads = int(self._peek("the", offset=offset))
+        return leads + int(self._peek_any_of(ENROUTE_LEADS, offset + leads))
 
     def _peek_any_of(self, words: frozenset[str], offset: int = 0) -> bool:
         token = self._token(offset)
         return token is not None and token.lower in words
 
     def _enroute(self, kind: AltitudeKind, start: int) -> EnrouteAltitude:
-        """enroute := ["the" | "airway" | "appropriate"] minimum (("/" | "or")
+        """enroute := ["the"] ["airway" | "appropriate"] minimum (("/" | "or")
         minimum)* [("for" ["the"] ("route" | "direction") "of flight")
         | "of intended route"]
 
-        minimum := "MEA" | "MCA"
+        minimum := "MEA" | "MCA" | "MOCA"
         """
-        if self._peek_any_of(ENROUTE_LEADS):
-            self._index += 1
+        self._index += self._enroute_leads()
         names = [self._next().text.upper()]
         while (self._peek("/") or self._peek("or")) and self._peek_any_of(
             ENROUTE_MINIMUMS, 1
@@ -951,23 +1017,32 @@ class LegParser(TokenStream):
         return EnrouteAltitude(tuple(names), kind, self._slice_from(start))
 
     def _hold_spec(self) -> tuple[NavaidRef | FixRef | None, HoldSpec]:
-        """hold-spec := "(" [target] ["hold"] compass "," hold-turns "," nnn ["°"]
-        "inbound" ")"
+        """hold-spec := "(" [target] ["hold" [","]] compass [","] hold-turns [","]
+        nnn ["°"] [","] "inbound" ")"
 
-        Returns the fix named inside the parentheses, if any, and the hold.
+        The commas are sometimes left out or doubled ("right turns 147°
+        Inbound", "258°, inbound"). A side that disagrees with the inbound
+        course's reciprocal contradicts the course. Returns the
+        fix named inside the parentheses, if any, and the hold.
         """
+        start = self._index
         self._expect("(")
         fix = None
         if self._peek_navaid() and not self._peek_any_of(frozenset(COMPASS_WORDS)):
             fix = self._target()
-        self._accept("hold")
+        if self._accept("hold"):
+            self._accept(",")
         direction = self._compass()
-        self._expect(",")
+        self._accept(",")
         turns = self._hold_turns()
-        self._expect(",")
+        self._accept(",")
         inbound = self._integer()
         self._accept("°")
+        self._accept(",")
         self._expect("inbound", ")")
+        if not _side_agrees(direction, inbound):
+            self._index = start
+            raise self._error("hold side contradicts its inbound course")
         return fix, HoldSpec(direction, turns, inbound)
 
     def _compass(self) -> Compass8:
@@ -1094,6 +1169,15 @@ def _turned(leg: Leg) -> Leg | None:
     return leg.then if isinstance(leg, ClimbingTurn) else leg
 
 
+def _side_agrees(side: Compass8, inbound: int) -> bool:
+    """Whether a hold printed on `side` of its fix lies where its inbound
+    course puts it, along the course's reciprocal: within half a compass
+    point, with margin for a course printed between points. A side a whole
+    point off could be a misprint of either, so it contradicts the course."""
+    bearing = list(Compass8).index(side) * _COMPASS_POINT_DEG
+    return abs((bearing - inbound) % 360 - 180) <= _SIDE_TOLERANCE_DEG
+
+
 def _same_facility(target: NavaidRef | FixRef, navaid: NavaidRef | FixRef) -> bool:
     return target.ident == navaid.ident
 
@@ -1106,5 +1190,9 @@ def end_fix(leg: Leg) -> NavaidRef | FixRef | None:
         return leg.target
     if isinstance(leg, ClimbInHold | CrossAt):
         return leg.fix
-    until = getattr(leg, "until", None)
-    return until.target if isinstance(until, AtFix) else None
+    match getattr(leg, "until", None):
+        case AtFix(target=target):
+            return target
+        case Dme(fix=fix):
+            return fix
+    return None

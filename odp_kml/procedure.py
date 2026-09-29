@@ -82,15 +82,18 @@ class Altitude:
 @dataclasses.dataclass(frozen=True)
 class EnrouteAltitude:
     """A leg ends at an en-route minimum rather than a figure, e.g. "at or
-    above MEA/MCA for route of flight".
+    above MEA/MCA for route of flight", or at a figure or a minimum, "at or
+    above 4000 or MEA for route of flight".
 
     `names` are the minimums as printed, in order (``("MEA", "MCA")``);
-    `phrase` is the exact words.
+    `feet` is the figure printed before them, if any; `phrase` is the exact
+    words.
     """
 
     names: tuple[str, ...]
     kind: AltitudeKind
     phrase: str
+    feet: int | None = None
 
 
 @dataclasses.dataclass(frozen=True)

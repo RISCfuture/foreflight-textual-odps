@@ -182,7 +182,7 @@ def test_parses_fixture_procedures(name):
         ),
         pytest.param(
             "Rwy 4, climb direct XY NDB, continue climb in holding pattern "
-            "(hold northwest, left turns, 045° inbound) to 3000 before proceeding "
+            "(hold southwest, left turns, 045° inbound) to 3000 before proceeding "
             "on course.",
             [
                 RunwayGroup(
@@ -191,7 +191,7 @@ def test_parses_fixture_procedures(name):
                         Direct(NavaidRef("XY", NavaidType.NDB)),
                         ClimbInHold(
                             NavaidRef("XY", NavaidType.NDB),
-                            HoldSpec(Compass8.NW, Turn.LEFT, 45),
+                            HoldSpec(Compass8.SW, Turn.LEFT, 45),
                             to(3000),
                         ),
                         ProceedOnCourse(),
@@ -354,7 +354,7 @@ def test_parses_leg_shapes(text, groups, shared_tail):
         (
             (
                 "Rwy 4, climb direct ABC VOR, then climb via ABC R-090 outbound to "
-                "5000, continue climb-in-hold to 6000 (north, left turns, 270° inbound)."
+                "5000, continue climb-in-hold to 6000 (east, left turns, 270° inbound)."
             ),
             "climb in hold without a preceding fix",
         ),
@@ -387,6 +387,36 @@ def test_parses_leg_shapes(text, groups, shared_tail):
         (
             "Rwy 24, climb to 3600, direct to BZA VORTAC.",
             'unsupported "to <alt>," before a route',
+        ),
+        (
+            (
+                "Rwy 4, climb direct FBR VOR/DME.\nRwy 22, climb direct FBR VOR/DME, "
+                "thence...continue climb in holding pattern (hold northeast, right "
+                "turn, 215° inbound) to 9000."
+            ),
+            '"..." without a preceding "thence"',
+        ),
+        (
+            (
+                "Rwy 4, climb direct ABC VOR, continue climb in holding pattern (hold "
+                "north, right turns, 135° inbound) to 6000."
+            ),
+            "hold side contradicts its inbound course",
+        ),
+        (
+            (
+                "Rwy 4, climb direct ABC VOR and hold (hold east, right turns, 258° "
+                "inbound), continue climb in holding pattern (hold east, left turns, "
+                "258° inbound) to 6000."
+            ),
+            "hold specified twice, differently",
+        ),
+        (
+            (
+                "Rwy 29, climb direct MQO VORTAC and hold.\nRwy 11, climb direct MQO "
+                "VORTAC."
+            ),
+            'unmatched phrase ". rwy <n>,"',
         ),
     ],
 )
@@ -620,6 +650,25 @@ def test_parses_what_follows_the_climb(ending, legs):
                 ("MEA",), AltitudeKind.AT_OR_ABOVE, "at or above MEA of intended route"
             ),
         ),
+        (
+            "to the appropriate MEA",
+            EnrouteAltitude(("MEA",), AltitudeKind.TO, "to the appropriate MEA"),
+        ),
+        (
+            "to cross BQU VOR/DME at or above 4000 or MEA for route of flight",
+            EnrouteAltitude(
+                ("MEA",),
+                AltitudeKind.AT_OR_ABOVE,
+                "at or above 4000 or MEA for route of flight",
+                feet=4000,
+            ),
+        ),
+        (
+            "to MEA/MOCA for route of flight",
+            EnrouteAltitude(
+                ("MEA", "MOCA"), AltitudeKind.TO, "to MEA/MOCA for route of flight"
+            ),
+        ),
     ],
 )
 def test_hold_climbs_to_an_enroute_minimum(until_text, until):
@@ -802,6 +851,28 @@ MEA_MCA = EnrouteAltitude(
             ClimbInHold(NavaidRef("BRK", NavaidType.VOR_DME), HOLD_NW, to(13000)),
             id="hyphenated, at the tail's only fix",
         ),
+        pytest.param(
+            "...continue climb in hold (hold NW, LT, 159° inbound) to 13000.",
+            ClimbInHold(BRK, HOLD_NW, to(13000)),
+            id="in hold",
+        ),
+        pytest.param(
+            "...climb in hold in BRK VOR/DME holding pattern (hold NW, LT, 159° "
+            "inbound) to 13000.",
+            ClimbInHold(BRK, HOLD_NW, to(13000)),
+            id="in hold in the fix's holding pattern",
+        ),
+        pytest.param(
+            "...continue climbing in holding (NW, LT, 159° inbound) to 13000.",
+            ClimbInHold(BRK, HOLD_NW, to(13000)),
+            id="climbing in holding",
+        ),
+        pytest.param(
+            "...climb in holding pattern, (hold, NW, LT 159°, inbound), to cross "
+            "BRK VOR/DME at or above MEA/MCA for route of flight.",
+            ClimbInHold(BRK, HOLD_NW, MEA_MCA),
+            id="commas left out or added",
+        ),
     ],
 )
 def test_hold_fix_may_be_named_anywhere_in_the_hold(tail, hold):
@@ -820,6 +891,55 @@ def test_hold_fixes_named_twice_must_agree():
     )
 
     assert signature_of(text) == "hold crossing names a different fix"
+
+
+MQO = NavaidRef("MQO", NavaidType.VORTAC)
+MQO_HOLD = ClimbInHold(MQO, HoldSpec(Compass8.SE, Turn.LEFT, 306), to(4000))
+
+
+@pytest.mark.parametrize(
+    ("text", "hold"),
+    [
+        pytest.param(
+            "Rwy 29, climb direct MQO VORTAC and hold, continue climb in MQO "
+            "holding pattern (hold southeast, left turns, 306° inbound) to 4000.",
+            MQO_HOLD,
+            id="pattern given by the climb",
+        ),
+        pytest.param(
+            "Rwy 29, climb direct MQO VORTAC and hold (southeast, left turns, 306°, "
+            "inbound), continue climb-in-hold to 4000.",
+            MQO_HOLD,
+            id="pattern given by the hold",
+        ),
+    ],
+)
+def test_and_hold_announces_the_climb_in_hold_that_follows(text, hold):
+    (group,) = parse_departure_procedure(
+        text, airport="X", amendment=None
+    ).runway_groups
+
+    assert group.legs[1:] == (hold,)
+
+
+def test_shared_tail_may_follow_the_last_thence_on_its_line():
+    text = (
+        "Rwy 4, climbing left turn direct FBR VOR/DME, thence...\n"
+        "Rwy 22, climbing right turn direct FBR VOR/DME, thence...continue climb in "
+        "FBR VOR/DME holding pattern (hold northeast, right turn, 215° inbound) to "
+        "9000."
+    )
+
+    procedure = parse_departure_procedure(text, airport="FBR", amendment=None)
+
+    assert [group.legs[-1] for group in procedure.runway_groups] == [Thence(), Thence()]
+    assert procedure.shared_tail == (
+        ClimbInHold(
+            NavaidRef("FBR", NavaidType.VOR_DME),
+            HoldSpec(Compass8.NE, Turn.RIGHT, 215),
+            to(9000),
+        ),
+    )
 
 
 RSK = NavaidRef("RSK", NavaidType.VORTAC)
@@ -850,7 +970,12 @@ def test_sentence_after_the_last_of_routes_that_end_apart_is_not_read():
         "climb in holding pattern (hold east, left turn, 252° inbound) to 9000."
     )
 
-    assert signature_of(text).startswith("unmatched phrase")
+    unread = 'unmatched phrase "continue climb in holding"'
+
+    procedure, unparsed = read_in_part(text)
+
+    assert procedure.runway_groups == ()
+    assert unparsed == [(("5",), unread, False), (("7",), unread, False)]
 
 
 def test_crossing_sentence_labels_the_fix_just_reached():
@@ -1112,6 +1237,35 @@ def test_parses_vcoa_for_all_runways():
     assert parse_vcoa(text) == (VcoaGroup((), None, 3600, (ProceedOnCourse(),)),)
 
 
+VISUAL_CLIMB_TO_DSD = (
+    "obtain ATC approval for VCOA when requesting IFR clearance. Climb in visual "
+    "conditions to cross Madras Muni airport at or above 3600, then proceed on DSD "
+    "VORTAC R-356 to DSD VORTAC"
+)
+DSD_HOLD_SENTENCE = (
+    "Continue climb in DSD holding pattern (hold north, right turns, 168° inbound) "
+    "to 9000."
+)
+
+
+def test_vcoa_route_continues_in_the_next_sentence():
+    (group,) = parse_vcoa(f"Rwys 16, 22, {VISUAL_CLIMB_TO_DSD}. {DSD_HOLD_SENTENCE}")
+
+    assert group.then[-1] == ClimbInHold(
+        NavaidRef("DSD"), HoldSpec(Compass8.N, Turn.RIGHT, 168), to(9000)
+    )
+
+
+def test_vcoa_sentence_after_the_last_of_several_groups_is_not_read():
+    text = (
+        f"Rwy 16, {VISUAL_CLIMB_TO_DSD}.\nRwy 22, {VISUAL_CLIMB_TO_DSD}. "
+        f"{DSD_HOLD_SENTENCE}"
+    )
+
+    with pytest.raises(ParseError):
+        parse_vcoa(text)
+
+
 def test_vcoa_crossing_a_navaid_is_not_the_airport():
     text = (
         "All runways, obtain ATC approval for VCOA when requesting IFR clearance. "
@@ -1271,6 +1425,13 @@ ROUTE_19 = "Rwy 19, climb heading 190° to 5000 before proceeding on course."
             (HEADING_010,),
             [()],
             id="before any runway, none",
+        ),
+        pytest.param(
+            "Rwy 19, climbing right turn direct ABC VOR, thence...continue climb in "
+            f"holding pattern (hold east, left turn, 252° inbound) to 9000.\n{ROUTE_1}",
+            (HEADING_010,),
+            [("19",)],
+            id="after thence before another runway, the one before",
         ),
     ],
 )

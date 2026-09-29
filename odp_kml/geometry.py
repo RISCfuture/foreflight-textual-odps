@@ -918,13 +918,16 @@ def _hold_spec(ctx: _Context, leg: ClimbInHold) -> HoldSpec:
 
 def _hold_leg_nm(ctx: _Context, leg: ClimbInHold) -> float:
     """One minute legs up to 14,000 ft, 1.5 minutes above, or a published DME
-    length. A hold to an en-route minimum (MEA/MCA), whose figure the text
-    does not give, takes one-minute legs."""
+    length. A hold to an en-route minimum (MEA, MCA or MOCA), whose figure
+    the text does not give, takes one-minute legs; one printed beside a
+    figure ("4000 or MEA") goes by that figure."""
     tas = ctx.params.tas_kt
     match leg.until:
         case Dme(navaid=navaid, nm=nm) if navaid.ident == leg.fix.ident:
             return nm
-        case Altitude(feet=feet) if feet > HOLD_HIGH_ALTITUDE_FT:
+        case Altitude(feet=feet) | EnrouteAltitude(feet=int(feet)) if (
+            feet > HOLD_HIGH_ALTITUDE_FT
+        ):
             return tas * HOLD_LEG_MINUTES_HIGH / 60
         case None | Altitude() | EnrouteAltitude():
             return tas * HOLD_LEG_MINUTES_LOW / 60

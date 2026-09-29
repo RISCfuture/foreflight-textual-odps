@@ -55,7 +55,7 @@ with certainty:
   `≤7000'` for "at or below," and `at 7000'` for a mandatory altitude;
   holds read `Hold 246° RT ≥9300'` (inbound course, turns, altitude),
   or `Hold 246° RT ≥MEA/MCA` when the text gives an en-route minimum
-  rather than a figure.
+  rather than a figure (`≥4000/MEA` for "at or above 4000 or MEA").
   With `--label-style fms` they take the FMS form: `A` and `B` suffixes,
   and plain digits for "climb to" and "at."
 - Labels for everything a pilot programs: headings (`hdg 120°`),
@@ -110,7 +110,7 @@ used whenever the text does not otherwise constrain the geometry:
 | Turn radius | 25° bank or standard rate, whichever is larger |
 | Turn start | 400 ft above the DER (departure end of runway) |
 | Climb gradient for altitude legs | Published minimum, else 200 ft/NM |
-| Hold leg length | 1 minute (1.5 minutes above 14,000 ft; 1 minute to an unstated MEA/MCA) |
+| Hold leg length | 1 minute (1.5 minutes above 14,000 ft; 1 minute to an unstated MEA, MCA or MOCA) |
 | VCOA circle | 2 NM schematic radius |
 | Heading-range wedge | 3 NM schematic radius from the turn start |
 | Climb naming no heading or route | Straight out along the runway's course while every earlier leg has held it; refused anywhere else |

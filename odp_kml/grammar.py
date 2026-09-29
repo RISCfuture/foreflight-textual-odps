@@ -16,6 +16,7 @@ import re
 from collections.abc import Iterator, Mapping
 
 from .legs import (
+    CONTINUATION_WORDS,
     FIX_LENGTH,
     HEADER_LEG_WORDS,
     NAVAID_TYPE_WORDS,
@@ -711,19 +712,39 @@ class _Parser(LegParser):
         return True
 
     def _starts_shared_tail(self) -> bool:
-        return self._peek("...") or self._peek("all", "aircraft")
+        return (
+            self._peek("...")
+            or self._peek("all", "aircraft")
+            or self._peek_tail_after_thence()
+        )
+
+    def _peek_tail_after_thence(self) -> bool:
+        """Whether the tail's legs follow the last runway group's "thence..."
+        directly, with no ellipsis of their own: "thence...continue climb in
+        ...". Before a later runway header they follow some other group's."""
+        return (
+            self._index > 0
+            and self._tokens[self._index - 1].text == "..."
+            and self._peek_any_of(CONTINUATION_WORDS)
+            and not self._later_runway_header()
+        )
 
     def _shared_tail(self, groups: list[RunwayGroup]) -> tuple[tuple[Leg, ...], bool]:
-        """shared-tail := ("..." ["thence"] [all-aircraft] | all-aircraft) legs
+        """shared-tail := ("..." ["thence"] [all-aircraft] | all-aircraft
+        | ↓) legs
 
         all-aircraft := "All aircraft" ["," | ":"]
 
+        ↓: the legs follow the last group's "thence ..." directly.
         Returns the tail and whether it names "all aircraft", which every
         flown runway group then continues into.
         """
-        if self._peek("...") and not _all_flown_end_with_thence(groups):
+        after_thence = self._peek_tail_after_thence()
+        if (self._peek("...") or after_thence) and not _all_flown_end_with_thence(
+            groups
+        ):
             raise self._error('"..." without a preceding "thence"')
-        dotted = self._accept("...")
+        dotted = self._accept("...") or after_thence
         if dotted:
             self._accept("thence")
         for_all = self._accept("all", "aircraft")
@@ -756,13 +777,31 @@ class _Parser(LegParser):
     # --- VCOA --------------------------------------------------------------
 
     def vcoa(self) -> tuple[VcoaGroup, ...]:
-        """vcoa := vcoa-group+"""
+        """vcoa := (vcoa-group continuation*)+
+
+        A sentence going on with a group's route ("... to DSD VORTAC.
+        Continue climb in DSD holding pattern ...") belongs to that group
+        when it is the section's first or another runway header follows;
+        after the last of several groups it could mean any of them, so it
+        is left unread.
+        """
         if self._at_end():
             raise ParseError("empty VCOA")
         groups = []
         while not self._at_end():
-            groups.append(self._vcoa_group())
+            group = self._vcoa_group()
+            while self._peek_continuation() and (
+                not groups or self._later_runway_header()
+            ):
+                group = self._continued_vcoa(group)
+            groups.append(group)
         return tuple(groups)
+
+    def _continued_vcoa(self, group: VcoaGroup) -> VcoaGroup:
+        legs = group.then + self._continuation()
+        if isinstance(legs[-1], Thence):
+            raise self._error("visual climb into the shared tail")
+        return dataclasses.replace(group, then=legs)
 
     def _vcoa_group(self, runways: tuple[str, ...] | None = None) -> VcoaGroup:
         """vcoa-group := [vcoa-runways] atc-approval visual-climb [notify-atc]

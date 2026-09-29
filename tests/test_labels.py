@@ -32,16 +32,20 @@ def test_format_altitude(kind, style, expected):
 
 
 @pytest.mark.parametrize(
-    ("names", "kind", "style", "expected"),
+    ("names", "feet", "kind", "style", "expected"),
     [
-        (("MEA", "MCA"), AltitudeKind.AT_OR_ABOVE, "plain", "≥MEA/MCA"),
-        (("MEA",), AltitudeKind.TO, "plain", "MEA"),
-        (("MEA", "MCA"), AltitudeKind.AT_OR_ABOVE, "fms", "MEA/MCA A"),
-        (("MCA",), AltitudeKind.TO, "fms", "MCA"),
+        (("MEA", "MCA"), None, AltitudeKind.AT_OR_ABOVE, "plain", "≥MEA/MCA"),
+        (("MEA",), None, AltitudeKind.TO, "plain", "MEA"),
+        (("MEA", "MCA"), None, AltitudeKind.AT_OR_ABOVE, "fms", "MEA/MCA A"),
+        (("MCA",), None, AltitudeKind.TO, "fms", "MCA"),
+        (("MEA",), 4000, AltitudeKind.AT_OR_ABOVE, "plain", "≥4000/MEA"),
+        (("MEA",), 4000, AltitudeKind.AT_OR_ABOVE, "fms", "4000/MEA A"),
     ],
 )
-def test_format_enroute_minimum(names, kind, style, expected):
-    assert format_altitude(EnrouteAltitude(names, kind, "phrase"), style) == expected
+def test_format_enroute_minimum(names, feet, kind, style, expected):
+    altitude = EnrouteAltitude(names, kind, "phrase", feet)
+
+    assert format_altitude(altitude, style) == expected
 
 
 def test_hold_label_gives_inbound_course_turns_and_altitude():

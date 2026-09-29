@@ -48,6 +48,23 @@ def _join_navaid_slash(text: str) -> str:
     return re.sub(r"\b(VOR|NDB)/\s+DME\b", r"\1/DME", text)
 
 
+def _hyphenate_climb_in_hold(text: str) -> str:
+    """``climb-in hold``, ``climb-in- hold``, ``climb-in -hold`` and ``climb
+    in- hold``, a hyphen spaced or dropped at a line break, read
+    ``climb-in-hold`` (and ``climb-in-holding``)."""
+    return re.sub(
+        r"\b(climb)(?:-in\s*-?\s*|\s+in\s*-\s*)(hold)",
+        r"\1-in-\2",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
+def _spell_at_or_above(text: str) -> str:
+    """``at/above`` reads ``at or above``."""
+    return re.sub(r"\bat/above\b", "at or above", text, flags=re.IGNORECASE)
+
+
 def _spell_speed_limits(text: str) -> str:
     """``exceed 180K``, ``exceed 180 knots`` and ``exceed 250 KTS`` read
     ``exceed 180 KIAS``."""
@@ -140,6 +157,8 @@ _SUBSTITUTIONS: tuple[Callable[[str], str], ...] = (
     _join_navaid_slash,
     _space_headings,
     _drop_heading_decimals,
+    _hyphenate_climb_in_hold,
+    _spell_at_or_above,
     _drop_thousands_separators,
     _spell_speed_limits,
     _single_periods,
