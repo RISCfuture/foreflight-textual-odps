@@ -18,9 +18,13 @@ class Style(StrEnum):
 
 @dataclasses.dataclass(frozen=True)
 class Polyline:
+    """A line; `group` is the runway group whose printed route it draws
+    (e.g. ``("34L", "34R")``), empty for lines every route shares."""
+
     name: str
     style: Style
     points: tuple[LatLon, ...]
+    group: tuple[str, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -69,6 +73,7 @@ class Wedge:
     sectors: tuple[tuple[float, float], ...]
     printed: str
     phrases: tuple[str, ...]
+    group: tuple[str, ...] = ()
     course: float = 0.0
     turn: str | None = None
 

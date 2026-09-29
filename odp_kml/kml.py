@@ -9,12 +9,14 @@ never written.
 
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 from collections.abc import Iterable
 from pathlib import Path
 
 from .geo import LatLon
 from .palette import PALETTE_SIZE
+from .shades import shades
 from .shapes import AirportDrawing, Label, Polyline, Style
 
 KML_NAMESPACE = "http://www.opengis.net/kml/2.2"
@@ -53,8 +55,13 @@ def render_kml(drawings: Iterable[AirportDrawing], *, document_name: str) -> str
     _add_text_child(document, "name", document_name)
     for style in _build_shared_styles():
         document.append(style)
-    for drawing in sorted(drawings, key=lambda drawing: drawing.lid):
-        document.append(_build_folder(drawing))
+    shade_styles: dict[str, ET.Element] = {}
+    folders = [
+        _build_folder(drawing, shade_styles)
+        for drawing in sorted(drawings, key=lambda drawing: drawing.lid)
+    ]
+    document.extend(shade_styles.values())
+    document.extend(folders)
 
     ET.indent(kml, space="  ")
     body = ET.tostring(kml, encoding="unicode")
@@ -82,10 +89,12 @@ def line_style_id(style: Style, palette: int) -> str:
     return f"{style.value}-{palette}"
 
 
-def _build_line_style(style: Style, palette: int) -> ET.Element:
-    element = ET.Element("Style", {"id": line_style_id(style, palette)})
+def _build_line_style(
+    style: Style, palette: int, style_id: str | None = None, color: str | None = None
+) -> ET.Element:
+    element = ET.Element("Style", {"id": style_id or line_style_id(style, palette)})
     width = _LINE_WIDTHS[style]
-    color = PALETTE_COLORS[palette]
+    color = color or PALETTE_COLORS[palette]
     line_style = ET.SubElement(element, "LineStyle")
     _add_text_child(line_style, "color", color)
     _add_text_child(line_style, "width", str(width))
@@ -99,24 +108,57 @@ def _build_label_style() -> ET.Element:
     return element
 
 
-def _build_folder(drawing: AirportDrawing) -> ET.Element:
+def _build_folder(
+    drawing: AirportDrawing, shade_styles: dict[str, ET.Element]
+) -> ET.Element:
+    """The airport's placemarks. Each runway group's lines take their own
+    shade of the airport's color (added to `shade_styles` as needed); lines
+    the routes share keep the color itself."""
     folder = ET.Element("Folder")
     _add_text_child(folder, "name", f"{drawing.lid} – {drawing.name}")
+    style_of = _group_styles(drawing, shade_styles)
     for shape in drawing.shapes:
-        folder.append(_build_placemark(shape, drawing.palette))
+        if isinstance(shape, Polyline):
+            folder.append(_build_polyline_placemark(shape, style_of(shape)))
+        else:
+            folder.append(_build_label_placemark(shape))
     return folder
 
 
-def _build_placemark(shape: Polyline | Label, palette: int) -> ET.Element:
-    if isinstance(shape, Polyline):
-        return _build_polyline_placemark(shape, palette)
-    return _build_label_placemark(shape)
+def _group_styles(drawing: AirportDrawing, shade_styles: dict[str, ET.Element]):
+    """A function giving each polyline's style id at this airport."""
+    groups = sorted(
+        {shape.group for shape in drawing.shapes if isinstance(shape, Polyline)} - {()},
+        key=_runway_order,
+    )
+    base = PALETTE_COLORS[drawing.palette]
+    others = [color for color in PALETTE_COLORS if color != base]
+    colors = shades(base, len(groups), others)
+    index = {group: i for i, group in enumerate(groups)} if len(groups) > 1 else {}
+
+    def style_of(line: Polyline) -> str:
+        if line.group not in index:
+            return line_style_id(line.style, drawing.palette)
+        i = index[line.group]
+        style_id = f"{line_style_id(line.style, drawing.palette)}-{len(groups)}-{i}"
+        if style_id not in shade_styles:
+            shade_styles[style_id] = _build_line_style(
+                line.style, drawing.palette, style_id, colors[i]
+            )
+        return style_id
+
+    return style_of
 
 
-def _build_polyline_placemark(polyline: Polyline, palette: int) -> ET.Element:
+def _runway_order(group: tuple[str, ...]) -> list[tuple[int, str]]:
+    """Runway groups in numeric order: 4, 16L/16R, 22, 34."""
+    return [(int(re.match(r"\d*", runway)[0] or 0), runway) for runway in group]
+
+
+def _build_polyline_placemark(polyline: Polyline, style_id: str) -> ET.Element:
     placemark = ET.Element("Placemark")
     _add_text_child(placemark, "name", polyline.name)
-    _add_text_child(placemark, "styleUrl", f"#{line_style_id(polyline.style, palette)}")
+    _add_text_child(placemark, "styleUrl", f"#{style_id}")
     line_string = ET.SubElement(placemark, "LineString")
     _add_text_child(line_string, "coordinates", _format_coordinates(polyline.points))
     return placemark

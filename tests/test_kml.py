@@ -5,7 +5,7 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 
 from odp_kml.geo import LatLon
-from odp_kml.kml import render_kml, write_kml
+from odp_kml.kml import PALETTE_COLORS, render_kml, write_kml
 from odp_kml.shapes import AirportDrawing, Label, Polyline, Style
 
 ALLOWED_ELEMENTS = {
@@ -288,3 +288,35 @@ def test_write_kml_writes_utf8_with_xml_declaration(tmp_path):
     raw = out.read_bytes()
     assert raw.decode("utf-8") == GOLDEN_KML
     assert raw.startswith(b'<?xml version="1.0" encoding="UTF-8"?>')
+
+
+def test_each_runway_group_gets_its_own_shade_and_shared_lines_the_base():
+    def line(name, group=()):
+        return Polyline(name, Style.ROUTE, (LatLon(0, 0), LatLon(1, 1)), group)
+
+    drawing = AirportDrawing(
+        lid="KXYZ",
+        name="Other Airport",
+        shapes=(
+            line("RWY 22: climb", ("22",)),
+            line("RWY 4: climb", ("4",)),
+            line("tail"),
+        ),
+    )
+    root = ET.fromstring(render_kml([drawing], document_name="Doc"))
+
+    ns = "{http://www.opengis.net/kml/2.2}"
+    colors = {
+        style.attrib["id"]: style.find(f"{ns}LineStyle/{ns}color").text
+        for style in root.iter(f"{ns}Style")
+        if style.find(f"{ns}LineStyle") is not None
+    }
+    color_of = {
+        placemark.find(f"{ns}name").text: colors[
+            placemark.find(f"{ns}styleUrl").text.removeprefix("#")
+        ]
+        for placemark in root.iter(f"{ns}Placemark")
+    }
+    base = PALETTE_COLORS[0]
+    assert color_of["tail"] == base
+    assert len({color_of["RWY 4: climb"], color_of["RWY 22: climb"], base}) == 3

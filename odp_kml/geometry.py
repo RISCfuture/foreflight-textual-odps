@@ -262,6 +262,7 @@ class _Context:
         self.radius = turn_radius_nm(params.tas_kt, params.bank_deg)
         self.shapes: list[Polyline | Label] = []
         self.wedges: list[Wedge] = []
+        self.group: tuple[str, ...] = ()
 
     def xy(self, ident: str) -> Vec:
         return self.plane.to_xy(self.resolved.points[ident].position)
@@ -274,13 +275,14 @@ class _Context:
 
     def polyline(self, name: str, style: Style, points: list[Vec]) -> Polyline:
         latlons = tuple(self.plane.to_latlon(*p) for p in points)
-        line = Polyline(name, style, latlons)
+        line = Polyline(name, style, latlons, self.group)
         self._emit(line)
         return line
 
-    def discard(self, shape: Polyline | Label) -> None:
-        if shape in self.shapes:
-            self.shapes.remove(shape)
+    def discard(self, line: Polyline) -> None:
+        """Remove `line`, as drawn for any runway group."""
+        if (index := self._twin(line)) is not None:
+            del self.shapes[index]
 
     def arc(self, centre: Vec, radius: float, start: float, sweep: float) -> list[Vec]:
         return arc(centre, radius, start, sweep, self.params.arc_step_deg)
@@ -293,12 +295,31 @@ class _Context:
         """Keep one of identical shapes: routes that reach the same hold draw
         it identically, VCOA groups for several runways label the same circle
         at the same point, and groups that are alternatives for one runway
-        ("All other courses: …") share its initial climb. A label moves to
-        a fallback point rather than print over different text."""
+        ("All other courses: …") share its initial climb. A line drawn for
+        two runway groups belongs to neither. A label moves to a fallback
+        point rather than print over different text."""
         if isinstance(shape, Label):
-            shape = shape.placed(self.shapes)
-        if shape and shape not in self.shapes:
-            self.shapes.append(shape)
+            if (label := shape.placed(self.shapes)) is not None:
+                self.shapes.append(label)
+            return
+        if (twin := self._twin(shape)) is not None:
+            if self.shapes[twin] != shape:
+                self.shapes[twin] = dataclasses.replace(shape, group=())
+            return
+        self.shapes.append(shape)
+
+    def _twin(self, line: Polyline) -> int | None:
+        """The index of the same line already drawn, for this runway group or
+        another."""
+        return next(
+            (
+                index
+                for index, shape in enumerate(self.shapes)
+                if isinstance(shape, Polyline)
+                and dataclasses.replace(shape, group=line.group) == line
+            ),
+            None,
+        )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -367,6 +388,7 @@ class _Pen:
     open_heading: bool = False
     last_arrow: _Arrowhead | None = None
     runways: tuple[str, ...] = ()
+    group: tuple[str, ...] = ()
 
     def altitude_leg_nm(self, feet: int) -> float:
         """Along-track distance at which the climb reaches `feet`."""
@@ -414,10 +436,12 @@ def _draw_runway_group(ctx: _Context, runway_group: RunwayGroup) -> list[_Pen]:
     """
     if runway_group.climb_gradient_only:
         return []
+    ctx.group = runway_group.runways
     pens = [
         _start_runway(ctx, ctx.resolved.runways[name]) for name in runway_group.runways
     ]
     for pen in pens:
+        pen.group = runway_group.runways
         _draw_legs(pen, runway_group.legs)
     return pens
 
@@ -458,6 +482,7 @@ def _draw_shared_tail(ctx: _Context, pens: list[_Pen], legs: tuple[Leg, ...]) ->
         for runway in group.runways
     )
     first.name = f"RWY {'/'.join(first.runways)}"
+    first.group = ()
     _draw_legs(first, legs)
     _end_routes([first])
 
@@ -529,6 +554,7 @@ def _draw_vcoa(ctx: _Context, vcoa: VcoaGroup) -> None:
     centre = ctx.xy(vcoa.cross.ident) if vcoa.cross else (0.0, 0.0)
     radius = ctx.params.vcoa_radius_nm
     name = f"{_runways_name(vcoa.runways)}: VCOA"
+    ctx.group = ()
     for start in _dash_starts(VCOA_DASHES):
         dash = ctx.arc(centre, radius, start, 180 / VCOA_DASHES)
         ctx.polyline(name, Style.VCOA, dash)
@@ -620,6 +646,7 @@ def _turn_start_nm(pen: _Pen) -> float:
 
 def _draw_legs(pen: _Pen, legs: tuple[Leg, ...], direction: Turn | None = None) -> None:
     """Draw `legs` in order; `direction` is a turn owed to the first of them."""
+    pen.ctx.group = pen.group
     for index, leg in enumerate(legs):
         start, course = pen.at, pen.course
         _draw_leg(pen, leg, direction if index == 0 else None)
@@ -803,8 +830,9 @@ def _heading_range(pen: _Pen, leg: HeadingRange, direction: Turn | None) -> None
         sectors,
         heading_range_label(leg, direction, style),
         heading_range_phrases(leg, direction, style),
-        course=pen.course,
-        turn=direction,
+        pen.group,
+        pen.course,
+        direction,
     )
     ctx.wedges.append(wedge)
 
@@ -905,7 +933,7 @@ class _Fan:
 
         def line(style: Style, points: Sequence[Vec], suffix: str = "") -> Polyline:
             latlons = tuple(plane.to_latlon(*p) for p in points)
-            return Polyline(f"{name}{suffix}", style, latlons)
+            return Polyline(f"{name}{suffix}", style, latlons, self.wedges[0].group)
 
         tips = {}
         limits = []
@@ -1821,6 +1849,7 @@ def _end_routes(pens: list[_Pen]) -> None:
     its final segment rather than short of it."""
     for pen in pens:
         if arrow := pen.last_arrow:
+            pen.ctx.group = pen.group
             pen.ctx.discard(arrow.shape)
             _draw_arrow(pen.ctx, arrow.name, arrow.style, arrow.end, arrow.course)
             pen.last_arrow = None

@@ -107,7 +107,10 @@ with certainty:
   limit ends anywhere but at an altitude). Fixes aren't labelled because
   ForeFlight's own chart names them. Leg lengths aren't labelled.
 - Each airport's lines take one of six colors, chosen so that no two
-  airports within 40 NM share a color.
+  airports within 40 NM share a color. Where an airport draws routes for
+  more than one runway group, each group's lines take their own shade of
+  that color, and the lines the routes share (a shared tail, a VCOA) keep
+  the color itself.
 
 **Not drawn:** takeoff minimums (ceiling/visibility and climb gradient
 tables), obstacle notes, diverse vector areas (DVAs), procedures that
@@ -161,6 +164,7 @@ used whenever the text does not otherwise constrain the geometry:
 | Hold leg length | 1 minute (1.5 minutes above 14,000 ft; 1 minute to an unstated MEA, MCA or MOCA) |
 | VCOA circle | 2 NM schematic radius |
 | Heading-range wedge | 1 NM schematic radius from the turn start, or 0.3 NM beyond where the widest turn onto a limiting heading ends |
+| Runway-group shades | Same perceived lightness as the airport's color; hue within 15° of it and at most a third of the way to a comparably vivid palette color; chroma down to 60% from four groups on |
 | Wedge edges | Turn off the arriving course at the standard turn radius, like every other turn |
 | Shared heading-range wedge | Turn starts within 1.5 NM of each other |
 | Wedge label clearance | Labels sized for about 20 NM across an iPad screen |
