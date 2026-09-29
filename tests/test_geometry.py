@@ -1,5 +1,6 @@
 """Tests for odp_kml.geometry: resolved legs become planview shapes."""
 
+import itertools
 import math
 
 import pytest
@@ -228,6 +229,127 @@ def test_heading_colinear_with_radial_is_degenerate():
         draw(resolved(group(leg), points=(point("VOR", 0.0, 0.0),)))
 
     assert raised.value.signature == "radial colinear"
+
+
+def straight_courses(drawing) -> set[int]:
+    """True courses, to the degree, of the route's straight runs over 0.5 NM."""
+    vertices = route_vertices(drawing)
+    return {
+        round(math.degrees(math.atan2(b[0] - a[0], b[1] - a[1])) % 360)
+        for a, b in itertools.pairwise(vertices)
+        if distance(a, b) > 0.5
+    }
+
+
+@pytest.mark.parametrize(
+    ("vor_y", "courses"),
+    [(0.6, {225, 270}), (2 * R - 0.3, {250, 270})],
+    ids=["45 degrees back to the radial", "converging from beside it"],
+)
+def test_turn_to_intercept_joins_the_radial_from_where_it_turns_to(vor_y, courses):
+    """RWY 09 turns left onto R-090 (true) inbound: from well beside the
+    radial it heads 45° back to it; rolling out just beside it, it converges
+    at 20°. Either way the radial is drawn on its own course."""
+    vor = NavaidRef("VOR")
+    leg = ClimbingTurn(Turn.LEFT, Radial(vor, 90, False, AtFix(vor), intercept=True))
+    east = runway("09", course=90.0)
+
+    drawing = draw(
+        resolved(
+            group(leg, runways=("09",)),
+            runways=(east,),
+            points=(point("VOR", -10.0, vor_y),),
+        )
+    )
+
+    assert straight_courses(drawing) >= courses
+    assert route_vertices(drawing)[-1] == pytest.approx((-10.0, vor_y), abs=1e-6)
+    [radial] = polylines(drawing, Style.RADIAL)
+    assert all(xy(p)[1] == pytest.approx(vor_y, abs=1e-6) for p in radial.points)
+    assert [lbl.text for lbl in labels(drawing)] == ["VOR R-090"]
+
+
+@pytest.mark.parametrize(
+    ("first", "leg", "vor", "signature"),
+    [
+        (
+            ClimbHeading(magnetic(0), feet(7000)),
+            Radial(
+                NavaidRef("VOR"), 90, False, AtFix(NavaidRef("VOR")), intercept=True
+            ),
+            (-10.0, 12.0),
+            "intercept without a turn",
+        ),
+        (
+            None,
+            ClimbingTurn(
+                Turn.LEFT, Radial(NavaidRef("VOR"), 0, True, feet(7000), intercept=True)
+            ),
+            (3.0, -10.0),
+            "intercept heading behind the turn",
+        ),
+        (
+            None,
+            ClimbingTurn(
+                Turn.LEFT,
+                Radial(NavaidRef("VOR"), 10, True, feet(8000), intercept=True),
+            ),
+            (-2.26, -10.0),
+            "intercept heading behind the turn",
+        ),
+        (
+            None,
+            ClimbingTurn(
+                Turn.LEFT,
+                Radial(NavaidRef("VOR"), 10, True, feet(8000), intercept=True),
+            ),
+            (-0.75, -10.0),
+            "intercept heading behind the turn",
+        ),
+    ],
+    ids=[
+        "no turn direction",
+        "heading only an orbit reaches",
+        "converging only after an orbit",
+        "heading the other way round",
+    ],
+)
+def test_turn_to_intercept_is_degenerate(first, leg, vor, signature):
+    legs = (leg,) if first is None else (first, leg)
+
+    with pytest.raises(Degenerate) as raised:
+        draw(resolved(group(*legs), points=(point("VOR", *vor),)))
+
+    assert raised.value.signature == signature
+
+
+def test_heading_with_no_terminator_is_held_until_the_tail_radial():
+    """Both runways hold their headings until R-270 (true), 5 NM north."""
+    vor = NavaidRef("VOR")
+    procedure = resolved(
+        group(ClimbingTurn(Turn.RIGHT, ClimbHeading(magnetic(45))), Thence()),
+        group(
+            ClimbingTurn(Turn.LEFT, ClimbHeading(magnetic(60))),
+            Thence(),
+            runways=("18",),
+        ),
+        runways=(runway(), runway("18", course=180.0, der=(0.0, 3.0))),
+        points=(point("VOR", 20.0, 5.0),),
+        shared_tail=(Radial(vor, 270, False, AtFix(vor)),),
+    )
+
+    drawing = draw(procedure)
+
+    intercepts = [
+        line
+        for line in polylines(drawing)
+        if line.name.endswith("to intercept VOR R-270 inbound")
+    ]
+    assert [line.name.split(":")[0] for line in intercepts] == ["RWY 36", "RWY 18"]
+    assert all(
+        xy(line.points[-1]) == pytest.approx((20.0, 5.0), abs=1e-6)
+        for line in intercepts
+    )
 
 
 @pytest.mark.parametrize(

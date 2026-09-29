@@ -399,6 +399,94 @@ def test_parses_fixture_procedures(name):
             None,
             id="crossing the fix just reached",
         ),
+        pytest.param(
+            "Rwy 29, climbing left turn to intercept the PUB R-274 to PUB VORTAC "
+            "before proceeding on course.",
+            [
+                RunwayGroup(
+                    ("29",),
+                    (
+                        ClimbingTurn(
+                            Turn.LEFT,
+                            Radial(
+                                NavaidRef("PUB"),
+                                274,
+                                outbound=False,
+                                until=AtFix(NavaidRef("PUB", NavaidType.VORTAC)),
+                                intercept=True,
+                            ),
+                        ),
+                        ProceedOnCourse(),
+                    ),
+                )
+            ],
+            None,
+            id="turn to intercept on no heading",
+        ),
+        pytest.param(
+            "Rwy 36, climbing right turn heading 066° and on the LYH R-005 outbound "
+            "to 3500 before proceeding on course.",
+            [
+                RunwayGroup(
+                    ("36",),
+                    (
+                        ClimbingTurn(
+                            Turn.RIGHT,
+                            HeadingAndRadial(
+                                66, NavaidRef("LYH"), 5, outbound=True, until=to(3500)
+                            ),
+                        ),
+                        ProceedOnCourse(),
+                    ),
+                )
+            ],
+            None,
+            id="heading and on radial",
+        ),
+        pytest.param(
+            "Rwys 5L/R, climb direct VXV VORTAC then on VXV VORTAC R-053 to 4100 "
+            "before proceeding on course.",
+            [
+                RunwayGroup(
+                    ("5L", "5R"),
+                    (
+                        Direct(NavaidRef("VXV", NavaidType.VORTAC)),
+                        Radial(
+                            NavaidRef("VXV", NavaidType.VORTAC),
+                            53,
+                            outbound=True,
+                            until=to(4100),
+                        ),
+                        ProceedOnCourse(),
+                    ),
+                )
+            ],
+            None,
+            id="on the radial of the navaid just reached",
+        ),
+        pytest.param(
+            "Rwy 5, climbing left turn heading 010°, thence...\n"
+            "Rwy 8L, climbing left turn, thence...\n"
+            "...all aircraft, join LIN VOR/DME R-227 to LIN VOR/DME before "
+            "proceeding on course.",
+            [
+                RunwayGroup(
+                    ("5",), (ClimbingTurn(Turn.LEFT, ClimbHeading(10)), Thence())
+                ),
+                RunwayGroup(("8L",), (ClimbingTurn(Turn.LEFT, None), Thence())),
+            ],
+            (
+                Radial(
+                    NavaidRef("LIN", NavaidType.VOR_DME),
+                    227,
+                    outbound=False,
+                    until=AtFix(NavaidRef("LIN", NavaidType.VOR_DME)),
+                    intercept=True,
+                ),
+                ProceedOnCourse(),
+            ),
+            id="shared tail joining a radial",
+        ),
     ],
 )
 def test_parses_leg_shapes(text, groups, shared_tail):
@@ -944,7 +1032,7 @@ def test_radial_takes_the_sense_of_the_same_radial_flown_next():
 
 def test_radial_sense_is_not_taken_from_a_different_radial():
     text = (
-        "Rwy 11, climb heading 022° to intercept GLL VOR/DME R-221 to 7000, then "
+        "Rwy 11, climb heading 022° to join GLL VOR/DME R-221 to 7000, then "
         "proceed on GLL VOR/DME R-220 to GLL VOR/DME."
     )
 

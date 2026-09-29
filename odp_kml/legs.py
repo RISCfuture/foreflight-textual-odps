@@ -73,6 +73,9 @@ _LEG_SEPARATORS = frozenset({",", ";"})
 _SEQUENCE_WORDS = frozenset({"then", "thence", "..."})
 # What may follow a runway header printed without its comma.
 HEADER_LEG_WORDS = frozenset({"climb", "climbing"})
+# What leads a leg printed without "climb": "then on SLI VORTAC R-210".
+_ROUTE_PREPOSITIONS = frozenset({"on", "via"})
+_INTERCEPT_WORDS = frozenset({"intercept", "join"})
 _NAVAID_TYPES = (
     (("vor", "/", "dme"), NavaidType.VOR_DME),
     (("vortac",), NavaidType.VORTAC),
@@ -231,7 +234,7 @@ class LegParser(TokenStream):
 
     def _leg(self) -> Leg:
         """leg := climbing-turn | climb | continue-climb | proceed | direct
-        | bare-turn | cross-at | if-required"""
+        | bare-turn | cross-at | if-required | on-route | intercept"""
         if self._peek("climbing"):
             return self._climbing_turn()
         if self._peek("climb"):
@@ -250,6 +253,10 @@ class LegParser(TokenStream):
             return self._cross_at()
         if self._peek_if_required():
             return self._if_required()
+        if self._peek_on_route():
+            return self._on_route()
+        if self._peek_any_of(_INTERCEPT_WORDS):
+            return self._intercept()
         raise self._unmatched()
 
     def _cross_at(self) -> CrossAt:
@@ -580,6 +587,8 @@ class LegParser(TokenStream):
     ) -> Direct | HeadingAndRadial | Radial | ClimbHeading | HeadingRange:
         if self._peek("direct"):
             return self._direct()
+        if self._peek_to_intercept():
+            return self._intercept()
         if not self._accept_to_heading():
             self._accept_any("on", "via")
         if self._peek_heading_range():
@@ -687,6 +696,23 @@ class LegParser(TokenStream):
             self._index -= 1
             raise self._error('unsupported crossing before "in holding pattern"')
         return self._climb_in_hold(leading)
+
+    def _peek_on_route(self) -> bool:
+        return self._peek_any_of(_ROUTE_PREPOSITIONS) and (
+            self._peek("heading", offset=1)
+            or self._peek("hdg", offset=1)
+            or self._peek("the", offset=1)
+            or self._peek_navaid(1)
+        )
+
+    def _on_route(self) -> ClimbHeading | HeadingAndRadial | Radial:
+        """on-route := ("on" | "via") (heading-leg | radial-leg), a leg printed
+        without "climb": "direct SLI VORTAC then on SLI VORTAC R-210 to PADDR
+        INT", "...via heading 280° to intercept MZB R-160"."""
+        self._expect_any(*_ROUTE_PREPOSITIONS)
+        if self._peek_heading():
+            return self._heading_leg()
+        return self._radial_leg()
 
     def _proceed(self) -> Radial | Direct:
         """proceed := "proceed" (("on" | "via") radial-leg | direct)"""
@@ -815,15 +841,30 @@ class LegParser(TokenStream):
         return heading
 
     def _heading_leg(self) -> ClimbHeading | HeadingAndRadial:
-        """heading-leg := heading [("and" | "to intercept") radial-course
-        [altitude-before-fix]] [until]"""
+        """heading-leg := heading [("and" ["on"] | "to" ("intercept" | "join"))
+        radial-course [altitude-before-fix]] [until]"""
         heading = self._heading()
-        if self._peek("and") and self._peek_navaid(offset=1):
+        if self._peek_and_radial():
             self._expect("and")
+            self._accept("on")
             return self._heading_and_radial(heading)
-        if self._accept("to", "intercept"):
+        if self._peek_to_intercept():
+            self._expect("to")
+            self._expect_any(*_INTERCEPT_WORDS)
             return self._heading_and_radial(heading)
         return ClimbHeading(heading, self._until())
+
+    def _peek_to_intercept(self) -> bool:
+        """``to intercept`` or ``to join``."""
+        return self._peek("to") and self._peek_any_of(_INTERCEPT_WORDS, offset=1)
+
+    def _peek_and_radial(self) -> bool:
+        """``and SNS VORTAC R-225`` or ``and on [the] PDZ R-278`` after a
+        heading."""
+        navaid = 2 if self._peek("and", "on") else 1
+        if self._peek("the", offset=navaid):
+            navaid += 1
+        return self._peek("and") and self._peek_navaid(navaid)
 
     def _heading_and_radial(self, heading: int) -> HeadingAndRadial:
         navaid, radial, direction = self._radial_course()
@@ -844,9 +885,16 @@ class LegParser(TokenStream):
         return dataclasses.replace(leg, altitude=altitude)
 
     def _radial_leg(self) -> Radial:
-        """radial-leg := radial-course [altitude-before-fix] [until]"""
+        """radial-leg := radial-course [altitude-before-fix] [until]
+
+        A radial printed without a sense, flown from its own navaid just
+        reached ("direct VXV VORTAC then on VXV VORTAC R-053 to 4100"), is
+        outbound.
+        """
         navaid, radial, direction = self._radial_course()
         altitude = self._altitude_before_fix()
+        if direction is None and self._just_reached(navaid):
+            direction = True
         until = self._until()
         outbound = self._outbound(direction, navaid, until)
         return Radial(navaid, radial, outbound, until, altitude=altitude)
@@ -864,8 +912,20 @@ class LegParser(TokenStream):
             return None
         return self._to_altitude()
 
+    def _just_reached(self, navaid: NavaidRef) -> bool:
+        return self._last_fix is not None and _same_facility(self._last_fix, navaid)
+
+    def _intercept(self) -> Radial:
+        """intercept := ["to"] ("intercept" | "join") radial-leg, a radial joined
+        on no printed heading: "climbing left turn to intercept PUB R-274 to
+        PUB VORTAC", "...all aircraft, intercept FHU VOR/DME R-021 ..."."""
+        self._accept("to")
+        self._expect_any(*_INTERCEPT_WORDS)
+        return dataclasses.replace(self._radial_leg(), intercept=True)
+
     def _radial_course(self) -> tuple[NavaidRef, int, bool | None]:
-        """radial-course := navaid "R-nnn" ["outbound" | "inbound"]"""
+        """radial-course := ["the"] navaid "R-nnn" ["outbound" | "inbound"]"""
+        self._accept("the")
         navaid = self._navaid()
         radial = self._radial()
         if self._accept("outbound"):

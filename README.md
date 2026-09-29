@@ -37,9 +37,21 @@ with certainty:
   (`rwy hdg`), and a climb that names no heading at all ("climb to 1200
   before turning left"), drawn straight out along the runway and labelled
   with its altitude alone.
-- Radial intercepts and tracking to an altitude, fix, DME distance, or
-  the navaid; an altitude climbed to on the way to a fix ("to 3000 via FSM
-  R-064 to FSM VORTAC") is labelled where the leg ends.
+- Radial intercepts and tracking to an altitude, fix, DME distance, or the
+  navaid; an altitude climbed to on the way to a fix ("to 3000 via FSM
+  R-064 to FSM VORTAC") is labelled where the leg ends. A heading printed
+  with no terminator is held until the radial that follows it is
+  intercepted ("heading 170°, thence ... on RZS R-185"). A turn to
+  intercept a radial with no heading printed ("climbing left turn to
+  intercept PUB R-274") turns the published way onto a schematic,
+  unlabelled 45° intercept heading, on the side of the radial the turn
+  leaves the aircraft. A turn that would roll out on the radial's course
+  within 0.5 NM of it rolls out there and converges on the radial at 20°.
+  It is not drawn when no turn direction is printed, when the published
+  turn onto the 45° or 20° heading and the one onto the radial's course
+  differ by more than 45° (as for a route already converging on the
+  radial), nor when that turn exceeds 270°, so a short turn the other way
+  would reach the heading.
 - "Proceed on course" after a runway's legs as a short dashed stub, bent
   toward any published turn restriction. A VCOA that only proceeds on
   course draws just its circle.
@@ -124,6 +136,7 @@ used whenever the text does not otherwise constrain the geometry:
 | VCOA circle | 2 NM schematic radius |
 | Heading-range wedge | 3 NM schematic radius from the turn start |
 | Climb naming no heading or route | Straight out along the runway's course while every earlier leg has held it; refused anywhere else |
+| Intercept heading not printed | 45° to the radial on the side the turn ends; 20° after rolling out within 0.5 NM of it. Not drawn if the turn onto it is over 270° or over 45° off the turn onto the radial's course |
 | Magnetic headings | Airport's variation of record (WMM if unpublished) |
 | Magnetic radials | Referenced navaid's own station declination |
 

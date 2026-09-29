@@ -753,16 +753,19 @@ Output: one Procedure object matching the response schema. Every object carries
   HeadingSector per range joined by "or", start and end as printed, clockwise
   false for CCW; nothing but ProceedOnCourse follows it),
   Direct (proceed direct to a navaid or fix), Radial (fly a navaid's radial,
-  outbound true when the text says outbound, false for inbound or when flown
-  to that navaid, null when the text says neither), HeadingAndRadial (fly a
-  heading until intercepting a radial), ClimbingTurn (a climbing turn, or "turn
-  right", onto its "then" leg; direction null when the text gives none; then
-  null for "climbing right turn, thence..." whose route is the shared tail's
-  first leg), ClimbInHold (one per hold: "to MQO VORTAC and hold, continue
-  climb in MQO holding pattern (...)" is a single ClimbInHold at MQO; hold is
-  the side, turns and inbound course as printed, null when the text gives
-  none), CrossAt ("Cross LIN VOR/DME at or above 5000" after
-  reaching LIN), ProceedOnCourse
+  outbound true when the text says outbound or when flown from that navaid
+  just reached, false for inbound or when flown to that navaid, null when the
+  text says neither; intercept true when the text joins it on no printed
+  heading, "climbing left turn to intercept PUB R-274" or "intercept FHU
+  VOR/DME R-021"), HeadingAndRadial (fly a heading until intercepting a
+  radial: "heading 066° to intercept", "heading 066° and on"), ClimbingTurn
+  (a climbing turn, or "turn right", onto its "then" leg; direction null when
+  the text gives none; then null for "climbing right turn, thence..." whose
+  route is the shared tail's first leg), ClimbInHold (one per hold: "to MQO
+  VORTAC and hold, continue climb in MQO holding pattern (...)" is a single
+  ClimbInHold at MQO; hold is the side, turns and inbound course as printed,
+  null when the text gives none), CrossAt ("Cross LIN VOR/DME at or above
+  5000" after reaching LIN), ProceedOnCourse
   (turn_restriction L/R only for "before turning left/right"; null otherwise),
   and Thence (the "thence..." marker leading into a shared tail).
 - "All other courses: ..." (or "or climb on a heading between ...") after a

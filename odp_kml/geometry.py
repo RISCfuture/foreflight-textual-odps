@@ -78,6 +78,9 @@ MAX_ALTITUDE_LEG_NM = 30.0
 MIN_LEG_NM = 0.5
 ANGLE_EPSILON_DEG = 1e-6
 MIN_INTERCEPT_DEG = 15.0
+INTERCEPT_ANGLE_DEG = 45.0
+MAX_INTERCEPT_TURN_DEG = 270.0
+CONVERGE_ANGLE_DEG = 20.0
 ON_RADIAL_TOLERANCE_NM = 0.5
 ON_TRACK_DEG = 1.0
 ARRIVAL_TOLERANCE_NM = 0.01
@@ -208,7 +211,9 @@ class _Pen:
     `along_nm` is the along-track distance flown since the climb at
     `gradient` passed `base_alt_ft`, negative while it has yet to reach it.
     `straight_out` holds while every leg flown has kept to the runway's own
-    course, from its DER.
+    course, from its DER. `open_heading` marks a route left on a heading
+    printed with no terminator, which it holds until it intercepts the next
+    leg's radial.
     """
 
     ctx: _Context
@@ -222,6 +227,7 @@ class _Pen:
     straight_out: bool = False
     turn_pending: bool = False
     pending_direction: Turn | None = None
+    open_heading: bool = False
 
     def altitude_leg_nm(self, feet: int) -> float:
         """Along-track distance at which the climb reaches `feet`."""
@@ -289,11 +295,13 @@ def _draw_shared_tail(ctx: _Context, pens: list[_Pen], legs: tuple[Leg, ...]) ->
 
     Groups that end in a turn with no route of their own ("climbing right
     turn, thence ...") each fly the tail's first leg in that turn, and
-    converge where it ends; either every group does so or none.
+    converge where it ends; so do groups that end on a heading with no
+    terminator before a tail that begins on a radial ("heading 170°, thence
+    ... on RZS R-185"). Either every group does so or none.
     """
     if not pens:
         raise Degenerate("shared tail without a runway route", repr(legs))
-    pending = [pen.turn_pending for pen in pens]
+    pending = [_flies_first_tail_leg(pen, legs[0]) for pen in pens]
     if any(pending):
         if not all(pending):
             raise Degenerate("shared tail start mismatch", "turns into the tail")
@@ -312,6 +320,10 @@ def _draw_shared_tail(ctx: _Context, pens: list[_Pen], legs: tuple[Leg, ...]) ->
     )
     first.name = f"RWY {'/'.join(runways)}"
     _draw_legs(first, legs)
+
+
+def _flies_first_tail_leg(pen: _Pen, first: Leg) -> bool:
+    return pen.turn_pending or (pen.open_heading and isinstance(first, Radial))
 
 
 def _converged(pens: list[_Pen]) -> _Pen:
@@ -443,6 +455,8 @@ def _draw_legs(pen: _Pen, legs: tuple[Leg, ...], direction: Turn | None = None) 
         start, course = pen.at, pen.course
         _draw_leg(pen, leg, direction if index == 0 else None)
         pen.straight_out &= _keeps_to_runway_course(leg)
+        if not isinstance(leg, Thence):
+            pen.open_heading = _leaves_open_heading(leg)
         if speed := _speed_restriction(leg):
             _label_speed(pen.ctx, speed, start, course)
         if _ends_in_heading_range(leg):
@@ -452,6 +466,11 @@ def _draw_legs(pen: _Pen, legs: tuple[Leg, ...], direction: Turn | None = None) 
 
 def _keeps_to_runway_course(leg: Leg) -> bool:
     return isinstance(leg, RunwayHeading | StraightAhead)
+
+
+def _leaves_open_heading(leg: Leg) -> bool:
+    turned = leg.then if isinstance(leg, ClimbingTurn) else leg
+    return isinstance(turned, ClimbHeading | RunwayHeading) and turned.until is None
 
 
 def _ends_in_heading_range(leg: Leg) -> bool:
@@ -488,6 +507,8 @@ def _draw_leg(pen: _Pen, leg: Leg, direction: Turn | None) -> None:
         case ClimbingTurn(then=None):
             pen.turn_pending, pen.pending_direction = True, leg.direction
         case ClimbingTurn():
+            # A printed turn leaves the heading the route was holding.
+            pen.open_heading = False
             _draw_leg(pen, leg.then, leg.direction)
         case ClimbHeading():
             _climb_heading(pen, leg, direction)
@@ -499,6 +520,10 @@ def _draw_leg(pen: _Pen, leg: Leg, direction: Turn | None) -> None:
             _heading_range(pen, leg, direction)
         case Direct():
             _direct(pen, leg, direction)
+        case Radial() if pen.open_heading and direction is None:
+            _hold_heading_to_radial(pen, leg)
+        case Radial(intercept=True):
+            _intercept_radial(pen, leg, direction)
         case Radial():
             _radial(pen, leg, direction)
         case HeadingAndRadial():
@@ -693,15 +718,119 @@ def _heading_and_radial(
     pen: _Pen, leg: HeadingAndRadial, direction: Turn | None
 ) -> None:
     """Fly a heading to intercept a radial, rounding the corner, then track it."""
+    heading = pen.ctx.heading_true(leg.heading)
+    phrase = f"heading {leg.heading:03d} to intercept "
+    _intercept_on(pen, leg, heading, direction, phrase, heading_label(leg.heading))
+
+
+def _hold_heading_to_radial(pen: _Pen, leg: Radial) -> None:
+    """Hold the heading the route is left on, labelled where it was turned
+    onto, until intercepting the radial, then track it."""
+    _intercept_on(pen, leg, pen.course, None, "to intercept ", None)
+
+
+def _intercept_radial(pen: _Pen, leg: Radial, direction: Turn | None) -> None:
+    """Turn to intercept a radial on no printed heading.
+
+    A turn in the published direction that would roll out on the radial's
+    track within tolerance of the radial rolls out there and converges on
+    it, unless the published turn reaches the converging heading only by
+    orbiting past the track. Otherwise the turn is drawn, schematically, onto the heading
+    `INTERCEPT_ANGLE_DEG` off the track toward the radial, then flown as a
+    heading intercepting it. Either such heading leaves the turn equally far
+    abeam the radial, so the side of it that lies on picks the heading. That
+    heading is not labelled: the text gives none. An intercept with no
+    published turn direction is refused: the text may mean the heading
+    already flown, or a turn either way.
+    """
+    if direction is None:
+        raise Degenerate("intercept without a turn", repr(leg))
     ctx = pen.ctx
-    heading = ctx.heading_true(leg.heading)
+    leg = _with_sense(ctx, leg, pen.at)
+    track = _tracking_course(leg, _radial_true(ctx, leg))
+    side = _side(direction)
+    beside = _abeam_after_turn(pen, leg, track, side, 0.0)
+    if abs(beside) <= ON_RADIAL_TOLERANCE_NM:
+        converging = (track - CONVERGE_ANGLE_DEG * sign(beside)) % 360
+        _require_heading_beside_track(pen, converging, track, direction, leg)
+        _roll_out_beside_radial(pen, leg, track, direction)
+        return
+    abeam = _abeam_after_turn(pen, leg, track, side, INTERCEPT_ANGLE_DEG)
+    heading = (track - INTERCEPT_ANGLE_DEG * sign(abeam)) % 360
+    _require_heading_beside_track(pen, heading, track, direction, leg)
+    _intercept_on(pen, leg, heading, direction, "to intercept ", None)
+
+
+def _roll_out_beside_radial(
+    pen: _Pen, leg: Radial, track: float, direction: Turn
+) -> None:
+    """Turn onto the radial's track just beside it, converge on the radial
+    at `CONVERGE_ANGLE_DEG`, then track it."""
+    ctx = pen.ctx
+    navaid = ctx.xy(leg.navaid.ident)
+    radial_course = _radial_true(ctx, leg)
+    name = _leg_name(pen, direction, "to intercept " + radial_phrase(leg))
+    points, side = pen.turn_onto(track, direction)
+    along, across = along_across(sub(pen.at, navaid), radial_course)
+    converge_nm = abs(across) / math.tan(math.radians(CONVERGE_ANGLE_DEG))
+    joined = along + (converge_nm if leg.outbound else -converge_nm)
+    if along < 0 or joined < 0:
+        raise Degenerate("off radial", f"{across:.2f} NM abeam: {leg!r}")
+    pen.straight_to(offset(navaid, radial_course, joined))
+    pen.course = track
+    _track_radial(pen, leg, name, [*points, pen.at], side)
+
+
+def _require_heading_beside_track(
+    pen: _Pen, heading: float, track: float, direction: Turn, leg: Radial
+) -> None:
+    """Refuse a schematic intercept heading that the published turn reaches
+    more than `INTERCEPT_ANGLE_DEG` before or after the radial's track, such
+    as one just behind a course already converging on the radial, or only
+    by turning more than `MAX_INTERCEPT_TURN_DEG`, when a short turn the
+    other way reaches it: only an orbit the text does not describe reaches
+    either."""
+    to_heading = _signed_turn(pen.course, heading, direction)
+    to_track = _signed_turn(pen.course, track, direction)
+    if (
+        abs(to_heading - to_track) > INTERCEPT_ANGLE_DEG + ANGLE_EPSILON_DEG
+        or abs(to_heading) > MAX_INTERCEPT_TURN_DEG
+    ):
+        raise Degenerate(
+            "intercept heading behind the turn",
+            f"{to_heading:.0f} deg to it, {to_track:.0f} deg to the track: {leg!r}",
+        )
+
+
+def _abeam_after_turn(
+    pen: _Pen, leg: Radial, track: float, side: int, off_track: float
+) -> float:
+    """How far right of the radial (flown along `track`) a turn to `side`
+    leaves the aircraft once it heads `off_track` degrees either way of the
+    track: the turn's centre abeam, less the radius projected across it."""
+    radius = pen.ctx.radius
+    centre = offset(pen.at, pen.course + 90 * side, radius)
+    centre_abeam = along_across(sub(centre, pen.ctx.xy(leg.navaid.ident)), track)[1]
+    return centre_abeam - side * radius * math.cos(math.radians(off_track))
+
+
+def _intercept_on[L: (Radial, HeadingAndRadial)](
+    pen: _Pen,
+    leg: L,
+    heading: float,
+    direction: Turn | None,
+    phrase: str,
+    heading_text: str | None,
+) -> None:
+    """Turn onto the true `heading`, fly it to the radial, round the corner,
+    then track the radial; `heading_text` labels the heading, if printed."""
+    ctx = pen.ctx
     radial_course = _radial_true(ctx, leg)
     _require_intercept_angle(heading, radial_course, leg)
     points, heading_side = pen.turn_onto(heading, direction)
     corner = _intercept(pen.at, heading, ctx.xy(leg.navaid.ident), radial_course, leg)
     leg = _with_sense(ctx, leg, corner)
-    name = _leg_name(pen, direction, f"heading {leg.heading:03d} to intercept ")
-    name += radial_phrase(leg)
+    name = _leg_name(pen, direction, phrase) + radial_phrase(leg)
     track = _tracking_course(leg, radial_course)
     turn = _signed_turn(heading, track, None)
     lead = ctx.radius * math.tan(math.radians(abs(turn)) / 2)
@@ -711,8 +840,9 @@ def _heading_and_radial(
         )
     heading_start = pen.at
     pen.straight_to(offset(corner, heading + 180, lead))
-    heading_middle = midpoint(heading_start, pen.at)
-    _offset_label(pen, heading_label(leg.heading), heading_middle, heading_side)
+    if heading_text is not None:
+        heading_middle = midpoint(heading_start, pen.at)
+        _offset_label(pen, heading_text, heading_middle, heading_side)
     rounding, side = pen.turn_onto(track, _turn(sign(turn)))
     _track_radial(pen, leg, name, [*points, *rounding], side)
 
