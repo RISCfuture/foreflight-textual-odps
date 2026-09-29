@@ -110,7 +110,7 @@ with certainty:
   airports within 40 NM share a color. Where an airport draws routes for
   more than one runway group, each group's lines take their own shade of
   that color, and the lines the routes share (a shared tail, a VCOA) keep
-  the color itself.
+  the color itself. Labels are drawn in the airport's color too.
 
 **Not drawn:** takeoff minimums (ceiling/visibility and climb gradient
 tables), obstacle notes, diverse vector areas (DVAs), procedures that

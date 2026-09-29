@@ -174,9 +174,40 @@ GOLDEN_KML = """<?xml version="1.0" encoding="UTF-8"?>
         <width>5</width>
       </LineStyle>
     </Style>
-    <Style id="label">
+    <Style id="label-0">
       <IconStyle>
-        <scale>0</scale>
+        <color>ff8b3a1e</color>
+        <scale>0.1</scale>
+      </IconStyle>
+    </Style>
+    <Style id="label-1">
+      <IconStyle>
+        <color>ff1e1ec8</color>
+        <scale>0.1</scale>
+      </IconStyle>
+    </Style>
+    <Style id="label-2">
+      <IconStyle>
+        <color>ff287814</color>
+        <scale>0.1</scale>
+      </IconStyle>
+    </Style>
+    <Style id="label-3">
+      <IconStyle>
+        <color>ffa01e78</color>
+        <scale>0.1</scale>
+      </IconStyle>
+    </Style>
+    <Style id="label-4">
+      <IconStyle>
+        <color>ff0078e6</color>
+        <scale>0.1</scale>
+      </IconStyle>
+    </Style>
+    <Style id="label-5">
+      <IconStyle>
+        <color>ff14466e</color>
+        <scale>0.1</scale>
       </IconStyle>
     </Style>
     <Folder>
@@ -190,7 +221,7 @@ GOLDEN_KML = """<?xml version="1.0" encoding="UTF-8"?>
       </Placemark>
       <Placemark>
         <name>RWY1</name>
-        <styleUrl>#label</styleUrl>
+        <styleUrl>#label-0</styleUrl>
         <Point>
           <coordinates>6.00000,5.00000</coordinates>
         </Point>

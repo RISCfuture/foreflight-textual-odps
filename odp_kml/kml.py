@@ -4,7 +4,9 @@ ForeFlight silently ignores KML elements outside a small subset, so this
 writer emits only that subset: Document, Folder, Style/LineStyle/IconStyle,
 Placemark, LineString, and Point. Anything else (description, ExtendedData,
 LabelStyle, altitudeMode, tessellate, extrude, Icon, BalloonStyle, gx:*) is
-never written.
+never written. ForeFlight draws a point's label in its icon's color, so a
+label takes its airport's color from IconStyle, with the icon scaled down
+until ForeFlight stops drawing it.
 """
 
 from __future__ import annotations
@@ -21,6 +23,8 @@ from .shapes import AirportDrawing, Label, Polyline, Style
 
 KML_NAMESPACE = "http://www.opengis.net/kml/2.2"
 LABEL_STYLE_ID = "label"
+# ForeFlight draws a default-size icon at scale 0 but none at all at 0.1.
+LABEL_ICON_SCALE = "0.1"
 
 # Line width per shape style.
 _LINE_WIDTHS: dict[Style, int] = {
@@ -81,7 +85,8 @@ def _build_shared_styles() -> list[ET.Element]:
         for palette in range(PALETTE_SIZE)
         for style in Style
     ]
-    return [*line_styles, _build_label_style()]
+    label_styles = [_build_label_style(palette) for palette in range(PALETTE_SIZE)]
+    return [*line_styles, *label_styles]
 
 
 def line_style_id(style: Style, palette: int) -> str:
@@ -101,10 +106,16 @@ def _build_line_style(
     return element
 
 
-def _build_label_style() -> ET.Element:
-    element = ET.Element("Style", {"id": LABEL_STYLE_ID})
+def label_style_id(palette: int) -> str:
+    """The shared style id for labels in a palette color."""
+    return f"{LABEL_STYLE_ID}-{palette}"
+
+
+def _build_label_style(palette: int) -> ET.Element:
+    element = ET.Element("Style", {"id": label_style_id(palette)})
     icon_style = ET.SubElement(element, "IconStyle")
-    _add_text_child(icon_style, "scale", "0")
+    _add_text_child(icon_style, "color", PALETTE_COLORS[palette])
+    _add_text_child(icon_style, "scale", LABEL_ICON_SCALE)
     return element
 
 
@@ -121,7 +132,7 @@ def _build_folder(
         if isinstance(shape, Polyline):
             folder.append(_build_polyline_placemark(shape, style_of(shape)))
         else:
-            folder.append(_build_label_placemark(shape))
+            folder.append(_build_label_placemark(shape, drawing.palette))
     return folder
 
 
@@ -164,10 +175,10 @@ def _build_polyline_placemark(polyline: Polyline, style_id: str) -> ET.Element:
     return placemark
 
 
-def _build_label_placemark(label: Label) -> ET.Element:
+def _build_label_placemark(label: Label, palette: int) -> ET.Element:
     placemark = ET.Element("Placemark")
     _add_text_child(placemark, "name", label.text)
-    _add_text_child(placemark, "styleUrl", f"#{LABEL_STYLE_ID}")
+    _add_text_child(placemark, "styleUrl", f"#{label_style_id(palette)}")
     point = ET.SubElement(placemark, "Point")
     _add_text_child(point, "coordinates", _format_coordinate(label.at))
     return placemark
