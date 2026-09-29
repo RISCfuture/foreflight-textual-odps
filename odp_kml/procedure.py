@@ -151,6 +151,15 @@ class RunwayHeading:
 
 
 @dataclasses.dataclass(frozen=True)
+class StraightAhead:
+    """Climb straight ahead to an altitude, naming no heading or route: "climb
+    to 1200 before turning left", "climb straight ahead to 2300"."""
+
+    until: Altitude
+    speed: SpeedRestriction | None = None
+
+
+@dataclasses.dataclass(frozen=True)
 class HeadingSector:
     """Headings from `start` sweeping `clockwise` (or counterclockwise) to
     `end`, magnetic, as printed: "between 213° CCW to 353°"."""
@@ -276,6 +285,7 @@ class GraphicDeparture:
 Leg = (
     ClimbHeading
     | RunwayHeading
+    | StraightAhead
     | HeadingRange
     | Direct
     | Radial

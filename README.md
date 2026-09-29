@@ -34,7 +34,9 @@ with certainty:
 - Initial climb, climbing turns, and turns at a fix or altitude.
 - Direct-to-navaid and heading legs flown to an altitude, including
   "climb runway heading", which follows the runway's own course
-  (`rwy hdg`).
+  (`rwy hdg`), and a climb that names no heading at all ("climb to 1200
+  before turning left"), drawn straight out along the runway and labelled
+  with its altitude alone.
 - Radial intercepts and tracking to an altitude, fix, DME distance, or
   the navaid.
 - "Proceed on course" after a runway's legs as a short dashed stub, bent
@@ -111,6 +113,7 @@ used whenever the text does not otherwise constrain the geometry:
 | Hold leg length | 1 minute (1.5 minutes above 14,000 ft; 1 minute to an unstated MEA/MCA) |
 | VCOA circle | 2 NM schematic radius |
 | Heading-range wedge | 3 NM schematic radius from the turn start |
+| Climb naming no heading or route | Straight out along the runway's course while every earlier leg has held it; refused anywhere else |
 | Magnetic headings | Airport's variation of record (WMM if unpublished) |
 | Magnetic radials | Referenced navaid's own station declination |
 

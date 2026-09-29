@@ -17,6 +17,7 @@ from collections.abc import Iterator, Mapping
 
 from .legs import (
     FIX_LENGTH,
+    HEADER_LEG_WORDS,
     NAVAID_TYPE_WORDS,
     RANGE_ALTERNATIVES,
     VISUAL_CLIMB,
@@ -604,11 +605,17 @@ class _Parser(LegParser):
         return group
 
     def _runway_header(self) -> tuple[str, ...]:
-        """runway-header := ("Rwy" | "Rwys") runway ("," runway)* ("," | ":")"""
+        """runway-header := ("Rwy" | "Rwys") runway ("," runway)* ("," | ":" | ↓)
+
+        ↓: the header also ends, unconsumed, at a climb printed without the
+        comma before it ("Rwys 20C, 20R climb heading 201°").
+        """
         if not self._accept_any("rwy", "rwys"):
             raise self._unmatched()
         runways = [*self._runway()]
         while not self._accept(":"):
+            if self._peek_any_of(HEADER_LEG_WORDS):
+                break
             self._expect(",")
             if not self._peek_runway():
                 break

@@ -34,6 +34,7 @@ from odp_kml.procedure import (
     RunwayGroup,
     RunwayHeading,
     SpeedRestriction,
+    StraightAhead,
     Thence,
     Turn,
     VcoaGroup,
@@ -485,13 +486,70 @@ def test_runway_heading_follows_the_runway_course_not_a_printed_number():
     assert "rwy hdg" in [lbl.text for lbl in labels(drawing)]
 
 
-def test_runway_heading_after_a_vcoa_is_unsupported():
-    vcoa = VcoaGroup((), None, 7000, (RunwayHeading(feet(9000)),))
+def test_straight_ahead_climbs_on_along_the_runway_course_labelled_only_by_altitude():
+    rwy = runway("33", course=327.5)
 
+    drawing = draw(
+        resolved(group(StraightAhead(feet(7000)), runways=("33",)), runways=(rwy,))
+    )
+
+    end = route_vertices(drawing)[-1]
+    assert math.degrees(math.atan2(end[0], end[1])) % 360 == pytest.approx(327.5)
+    assert distance(end, (0.0, 0.0)) == pytest.approx(9.83, abs=0.1)
+    assert [lbl.text for lbl in labels(drawing)] == ["7000'"]
+
+
+@pytest.mark.parametrize(
+    ("procedure", "leg"),
+    [
+        pytest.param(
+            resolved(vcoa=(VcoaGroup((), None, 7000, (RunwayHeading(feet(9000)),)),)),
+            "RunwayHeading",
+            id="runway heading after a VCOA",
+        ),
+        pytest.param(
+            resolved(vcoa=(VcoaGroup((), None, 7000, (StraightAhead(feet(9000)),)),)),
+            "StraightAhead",
+            id="straight ahead after a VCOA",
+        ),
+        pytest.param(
+            resolved(
+                group(ClimbHeading(magnetic(90), feet(7000)), StraightAhead(feet(9000)))
+            ),
+            "StraightAhead",
+            id="straight ahead off the runway course",
+        ),
+        pytest.param(
+            resolved(
+                group(Direct(NavaidRef("VOR")), StraightAhead(feet(9000))),
+                points=(point("VOR", 0.0, 6.0),),
+            ),
+            "StraightAhead",
+            id="straight ahead past a fix on the runway centreline",
+        ),
+        pytest.param(
+            resolved(
+                group(ClimbingTurn(Turn.LEFT, None), Thence()),
+                shared_tail=(StraightAhead(feet(9000)),),
+            ),
+            "StraightAhead",
+            id="straight ahead owing a turn",
+        ),
+        pytest.param(
+            resolved(
+                group(RunwayHeading(feet(7000)), Thence()),
+                shared_tail=(StraightAhead(feet(9000)),),
+            ),
+            "StraightAhead",
+            id="straight ahead in a shared tail",
+        ),
+    ],
+)
+def test_runway_course_leg_away_from_the_runway_is_unsupported(procedure, leg):
     with pytest.raises(Degenerate) as raised:
-        draw(resolved(vcoa=(vcoa,)))
+        draw(procedure)
 
-    assert raised.value.signature == "unsupported construction: RunwayHeading"
+    assert raised.value.signature == f"unsupported construction: {leg}"
 
 
 @pytest.mark.parametrize(("fix_nm", "draws"), [(12.2, True), (13.0, False)])

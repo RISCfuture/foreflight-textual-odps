@@ -12,6 +12,8 @@ class TestNormalize:
             ("515’ from DER", "515 from DER"),
             ("the ‘A’ and “B”", "the 'A' and \"B\""),
             ("heading 325º CW", "heading 325° CW"),
+            ("climb heading130° to", "climb heading 130° to"),
+            ("heading 045.00 and SNS", "heading 045 and SNS"),
             ("thence…", "thence..."),
             ("thence . . .", "thence ..."),
             ("thence. . .\n. . .direct", "thence...\n...direct"),

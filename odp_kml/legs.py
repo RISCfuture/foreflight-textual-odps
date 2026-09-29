@@ -36,6 +36,7 @@ from .procedure import (
     Radial,
     RunwayHeading,
     SpeedRestriction,
+    StraightAhead,
     Thence,
     Turn,
     Until,
@@ -63,6 +64,13 @@ _TURN_WORDS = {"left": Turn.LEFT, "right": Turn.RIGHT}
 _TURN_ABBREVIATIONS = {"lt": Turn.LEFT, "rt": Turn.RIGHT}
 # What may follow a turn that has no route of its own.
 _ROUTE_ENDS = frozenset({",", ".", ";", "thence", "..."})
+# What may follow an altitude printed before the route that climbs to it.
+_ROUTE_LEADS = frozenset({"via", "on", "heading", "hdg"})
+_LEG_SEPARATORS = frozenset({",", ";"})
+# What leads from a climb that names no route into what is flown after it.
+_SEQUENCE_WORDS = frozenset({"then", "thence", "..."})
+# What may follow a runway header printed without its comma.
+HEADER_LEG_WORDS = frozenset({"climb", "climbing"})
 _NAVAID_TYPES = (
     (("vor", "/", "dme"), NavaidType.VOR_DME),
     (("vortac",), NavaidType.VORTAC),
@@ -161,10 +169,10 @@ class LegParser(TokenStream):
             for words in RANGE_ALTERNATIVES
         )
 
-    def _peek_vcoa_alternative(self) -> bool:
+    def _peek_vcoa_alternative(self, offset: int = 0) -> bool:
         """``, or for climb in visual conditions``, ``; or for …``, ``, for …``"""
         return any(
-            self._peek(*lead, *VISUAL_CLIMB)
+            self._peek(*lead, *VISUAL_CLIMB, offset=offset)
             for lead in (("or",), (",", "or"), (";", "or"), (",",))
         )
 
@@ -226,15 +234,16 @@ class LegParser(TokenStream):
             "prior", "to", offset=offset
         )
 
-    def _before(self) -> ProceedOnCourse | Direct:
+    def _before(self) -> ProceedOnCourse | Direct | ClimbingTurn:
         """before := ("before" | "prior to") (
               "proceeding" ("on course" | "enroute" | direction | direct)
             | "climbing on course"
-            | "turning" [turn-word] [direction] ["on course"]
+            | "turning" [turn-word] (direct | [direction] ["on course"])
             | "turn")
 
         A compass direction ("before turning southbound") is read but not
-        drawn; a turn direction bends the on-course stub.
+        drawn; a turn direction bends the on-course stub. "Before turning
+        left direct CPN VOR/DME" turns onto that Direct leg.
         """
         if not self._accept("before"):
             self._expect("prior", "to")
@@ -252,6 +261,8 @@ class LegParser(TokenStream):
         if token is not None and token.lower in _TURN_WORDS:
             self._index += 1
             turn = _TURN_WORDS[token.lower]
+        if self._peek("direct"):
+            return ClimbingTurn(turn, self._direct())
         if self._peek_direction():
             self._direction()
         self._accept("on", "course")
@@ -373,11 +384,15 @@ class LegParser(TokenStream):
     # --- Climbs ------------------------------------------------------------
 
     def _climbing_turn(self) -> ClimbingTurn:
-        """climbing-turn := "climbing" [turn] "turn" ([to-altitude ("via"|"on")]
-        turn-leg | ↓)
+        """climbing-turn := "climbing" [turn] "turn" ([to-altitude] turn-leg | ↓)
 
-        ↓: a turn with no route of its own ("climbing right turn, thence...")
-        turns onto the shared tail's first leg.
+        turn-leg := direct | ["on" | "via" | "to"] (heading-range | heading-leg
+          | radial-leg), "to" only before a heading ("turn to heading 200°")
+
+        A leading altitude comes before "via", "on" or a heading ("climbing
+        right turn to 2400 heading 100°"). ↓: a turn with no route of its own
+        ("climbing right turn, thence...") turns onto the shared tail's first
+        leg.
         """
         self._expect("climbing")
         return self._turn(self._turn_direction())
@@ -424,23 +439,30 @@ class LegParser(TokenStream):
         return direction
 
     def _altitude_before_route(self) -> Altitude | None:
-        """``to 10200 via heading …``: the turn's altitude precedes its route."""
-        if not (
-            self._peek("to")
-            and self._peek_integer(1)
-            and (self._peek("via", offset=2) or self._peek("on", offset=2))
-        ):
+        """``to 10200 via heading …``, ``to 2000 heading 071°``, ``to 2500 on
+        CMA R-265``: the altitude a climb or turn climbs to precedes its route.
+
+        One before "direct" ("climbing right turn to 1900 direct AUG VOR/DME")
+        or set off from its route by a comma ("climb to 3600, direct to BZA
+        VORTAC") could end the leg short of the route's end or be only the
+        altitude to reach on the way, so both are refused.
+        """
+        if not (self._peek("to") and self._peek_integer(1)):
+            return None
+        if self._peek("direct", offset=2):
+            raise self._error('unsupported "to <alt>" before "direct"')
+        if self._peek_any_of(_LEG_SEPARATORS, 2):
+            raise self._error('unsupported "to <alt>," before a route')
+        if not self._peek_any_of(_ROUTE_LEADS, 2):
             return None
         return self._to_altitude()
 
     def _with_leading_altitude(
         self,
-        leg: Direct | HeadingAndRadial | Radial | ClimbHeading | HeadingRange,
+        leg: HeadingAndRadial | Radial | ClimbHeading | RunwayHeading | HeadingRange,
         altitude: Altitude,
-    ) -> Direct | HeadingAndRadial | Radial | ClimbHeading | HeadingRange:
+    ) -> HeadingAndRadial | Radial | ClimbHeading | RunwayHeading | HeadingRange:
         """A leading altitude terminates a leg that has no other terminator."""
-        if isinstance(leg, Direct):
-            raise self._error('unsupported "to <alt>" before "direct"')
         if isinstance(leg.until, AtFix):
             raise self._error('unsupported "to <alt>" with fix terminator')
         if leg.until is not None:
@@ -452,18 +474,30 @@ class LegParser(TokenStream):
     ) -> Direct | HeadingAndRadial | Radial | ClimbHeading | HeadingRange:
         if self._peek("direct"):
             return self._direct()
-        self._accept_any("on", "via")
+        if not self._accept_to_heading():
+            self._accept_any("on", "via")
         if self._peek_heading_range():
             return self._heading_range()
         if self._peek_heading():
             return self._heading_leg()
         return self._radial_leg()
 
-    def _climb(self) -> Leg:
-        """climb := "climb" ("on course" | direct | in-hold
-        | ["on"|"via"] (runway-heading | heading-range | heading-leg | radial-leg))
+    def _accept_to_heading(self) -> bool:
+        """``climbing right turn to heading 200°``: the heading turned to."""
+        if not (self._peek("to") and self._peek_heading(1)):
+            return False
+        self._expect("to")
+        return True
 
-        runway-heading := "runway heading" [until]
+    def _climb(self) -> Leg:
+        """climb := "climb" ("on course" | direct | in-hold | straight-ahead
+        | [to-altitude] ["on"|"via"] (runway-heading | heading-range
+          | heading-leg | radial-leg))
+
+        runway-heading := ("runway heading" | "rwy hdg") [until]
+
+        A leading altitude ("climb to 1000 on heading 164°", "climb to 2000
+        heading 071°") ends the leg as a trailing one would.
         """
         self._expect("climb")
         if self._accept("on", "course"):
@@ -472,8 +506,17 @@ class LegParser(TokenStream):
             return self._direct()
         if self._peek("in") or self._peek("-", "in", "-"):
             return self._climb_in_hold()
+        if self._peek_straight_ahead():
+            return self._straight_ahead()
+        altitude = self._altitude_before_route()
+        leg = self._climb_route()
+        return leg if altitude is None else self._with_leading_altitude(leg, altitude)
+
+    def _climb_route(
+        self,
+    ) -> RunwayHeading | HeadingRange | ClimbHeading | HeadingAndRadial | Radial:
         self._accept_any("on", "via")
-        if self._accept("runway", "heading"):
+        if self._accept("runway", "heading") or self._accept("rwy", "hdg"):
             return RunwayHeading(self._until())
         if self._peek_heading_range():
             return self._heading_range()
@@ -481,12 +524,44 @@ class LegParser(TokenStream):
             return self._heading_leg()
         return self._radial_leg()
 
-    def _continue_climb(self) -> ClimbInHold:
-        """continue-climb := "continue climb" [hold-until] in-hold
+    def _peek_straight_ahead(self) -> bool:
+        offset = 2 if self._peek("straight", "ahead") else 0
+        return (
+            self._peek("to", offset=offset)
+            and self._peek_integer(offset + 1)
+            and self._peek_straight_ahead_end(offset + 2)
+        )
+
+    def _peek_straight_ahead_end(self, offset: int) -> bool:
+        """The end of the sentence, a VCOA alternative, or ([","|";"]) what is
+        flown after the climb: "then", "thence", "...", "before", "prior to".
+
+        A comma alone does not end it: "climb to 3600, direct to BZA VORTAC"
+        may climb to 3600 on the way to BZA.
+        """
+        if self._peek(".", offset=offset) or self._peek_vcoa_alternative(offset):
+            return True
+        if self._peek_any_of(_LEG_SEPARATORS, offset):
+            offset += 1
+        return self._peek_any_of(_SEQUENCE_WORDS, offset) or self._peek_before_at(
+            offset
+        )
+
+    def _straight_ahead(self) -> StraightAhead:
+        """straight-ahead := ["straight ahead"] to-altitude, and then only the
+        end of the sentence or what is flown after it: "climb to 1200 before
+        turning left"."""
+        self._accept("straight", "ahead")
+        return StraightAhead(self._to_altitude())
+
+    def _continue_climb(self) -> Direct | ClimbInHold:
+        """continue-climb := "continue climb" (direct | [hold-until] in-hold)
 
         e.g. "Continue climb to 13000 in RLG holding pattern (...)".
         """
         self._expect("continue", "climb")
+        if self._peek("direct"):
+            return self._direct()
         leading, crossed = self._hold_until()
         if crossed is not None:
             self._index -= 1
@@ -510,8 +585,8 @@ class LegParser(TokenStream):
 
     # --- Headings and radials ----------------------------------------------
 
-    def _peek_heading(self) -> bool:
-        return self._peek("heading") or self._peek("hdg")
+    def _peek_heading(self, offset: int = 0) -> bool:
+        return self._peek("heading", offset=offset) or self._peek("hdg", offset=offset)
 
     def _heading(self) -> int:
         """heading := ("heading" | "hdg") nnn ["°"]"""

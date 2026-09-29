@@ -64,6 +64,18 @@ def _single_periods(text: str) -> str:
     return re.sub(r"(?<!\.)\.\.(?!\.)", ".", text)
 
 
+def _space_headings(text: str) -> str:
+    """``heading130°`` reads ``heading 130°``."""
+    return re.sub(r"\b(heading|hdg)(?=\d)", r"\1 ", text, flags=re.IGNORECASE)
+
+
+def _drop_heading_decimals(text: str) -> str:
+    """``heading 045.00`` reads ``heading 045``."""
+    return re.sub(
+        r"\b((?:heading|hdg) \d{1,3})\.0+\b", r"\1", text, flags=re.IGNORECASE
+    )
+
+
 def _drop_thousands_separators(text: str) -> str:
     """``10,000`` becomes ``10000``; a list such as ``1,200,300`` is left alone."""
     return re.sub(r"(?<![\d,])(\d{1,2}),(\d{3})(?![\d,])", r"\1\2", text)
@@ -111,6 +123,8 @@ _SUBSTITUTIONS: tuple[Callable[[str], str], ...] = (
     _expand_ellipsis,
     _spell_radials,
     _join_navaid_slash,
+    _space_headings,
+    _drop_heading_decimals,
     _drop_thousands_separators,
     _spell_speed_limits,
     _single_periods,

@@ -741,6 +741,9 @@ Output: one Procedure object matching the response schema. Every object carries
   the group's runways are empty.
 - Legs, in the order flown: ClimbHeading (climb on a magnetic heading),
   RunwayHeading ("climb runway heading", whatever its number),
+  StraightAhead ("climb to 1200 before turning left": a climb to an altitude
+  that names no heading or route, followed by the sentence's end, "then",
+  "thence" or "before ..."),
   HeadingRange (climb on any heading "between 350° CW to 162°": one
   HeadingSector per range joined by "or", start and end as printed, clockwise
   false for CCW; nothing but ProceedOnCourse follows it),

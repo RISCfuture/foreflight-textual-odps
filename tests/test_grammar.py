@@ -39,6 +39,7 @@ from odp_kml.procedure import (
     RunwayGroup,
     RunwayHeading,
     SpeedRestriction,
+    StraightAhead,
     Thence,
     Turn,
     VcoaGroup,
@@ -182,15 +183,102 @@ def test_parses_fixture_procedures(name):
         ),
         pytest.param(
             "Rwys 18, 36, climb runway heading to 500 before turning left.\n"
-            "Rwy 10, climb on runway heading to 1000 before proceeding on course.",
+            "Rwy 10, climb on runway heading to 1000 before proceeding on course.\n"
+            "Rwy 17, climb rwy hdg to 1700 before proceeding on course.\n"
+            "Rwy 35, climb to 1100 on runway heading before proceeding on course.",
             [
                 RunwayGroup(
                     ("18", "36"), (RunwayHeading(to(500)), ProceedOnCourse(Turn.LEFT))
                 ),
                 RunwayGroup(("10",), (RunwayHeading(to(1000)), ProceedOnCourse())),
+                RunwayGroup(("17",), (RunwayHeading(to(1700)), ProceedOnCourse())),
+                RunwayGroup(("35",), (RunwayHeading(to(1100)), ProceedOnCourse())),
             ],
             None,
             id="runway heading",
+        ),
+        pytest.param(
+            "Rwy 36, climb to 1200 before turning left.\n"
+            "Rwy 4, climb straight ahead to 2300 before proceeding on course.\n"
+            "Rwy 2, climb to 6500 then climbing left turn direct LLC VORTAC.",
+            [
+                RunwayGroup(
+                    ("36",), (StraightAhead(to(1200)), ProceedOnCourse(Turn.LEFT))
+                ),
+                RunwayGroup(("4",), (StraightAhead(to(2300)), ProceedOnCourse())),
+                RunwayGroup(
+                    ("2",),
+                    (
+                        StraightAhead(to(6500)),
+                        ClimbingTurn(
+                            Turn.LEFT, Direct(NavaidRef("LLC", NavaidType.VORTAC))
+                        ),
+                    ),
+                ),
+            ],
+            None,
+            id="straight ahead to an altitude",
+        ),
+        pytest.param(
+            "Rwy 15, climb to 1900 on heading 148° before turning eastbound.\n"
+            "Rwys 6L/R, climb to 2000 heading 071°.\n"
+            "Rwys 4L/R, climbing right turn to 2400 heading 100°.\n"
+            "Rwy 13, climbing right turn to heading 200° to 3400.\n"
+            "Rwy 16, climb to 8800 on a heading between 177° CW to 336° from DER.",
+            [
+                RunwayGroup(("15",), (ClimbHeading(148, to(1900)), ProceedOnCourse())),
+                RunwayGroup(("6L", "6R"), (ClimbHeading(71, to(2000)),)),
+                RunwayGroup(
+                    ("4L", "4R"),
+                    (ClimbingTurn(Turn.RIGHT, ClimbHeading(100, to(2400))),),
+                ),
+                RunwayGroup(
+                    ("13",), (ClimbingTurn(Turn.RIGHT, ClimbHeading(200, to(3400))),)
+                ),
+                RunwayGroup(
+                    ("16",),
+                    (
+                        HeadingRange(
+                            (HeadingSector(177, 336, clockwise=True),), to(8800)
+                        ),
+                    ),
+                ),
+            ],
+            None,
+            id="altitude before the heading",
+        ),
+        pytest.param(
+            "Rwys 20C, 20R climb heading 201° to 1800 before turning right.\n"
+            "Rwy 12 climbing right turn direct SAC VORTAC.",
+            [
+                RunwayGroup(
+                    ("20C", "20R"),
+                    (ClimbHeading(201, to(1800)), ProceedOnCourse(Turn.RIGHT)),
+                ),
+                RunwayGroup(
+                    ("12",),
+                    (
+                        ClimbingTurn(
+                            Turn.RIGHT, Direct(NavaidRef("SAC", NavaidType.VORTAC))
+                        ),
+                    ),
+                ),
+            ],
+            None,
+            id="runway header without its comma",
+        ),
+        pytest.param(
+            "Rwy 13, climbing right turn heading 150 to 1000 thence...\n"
+            "...all aircraft continue climb direct ILA VORTAC before proceeding on "
+            "course.",
+            [
+                RunwayGroup(
+                    ("13",),
+                    (ClimbingTurn(Turn.RIGHT, ClimbHeading(150, to(1000))), Thence()),
+                ),
+            ],
+            (Direct(NavaidRef("ILA", NavaidType.VORTAC)), ProceedOnCourse()),
+            id="continue climb direct",
         ),
     ],
 )
@@ -257,6 +345,21 @@ def test_parses_leg_shapes(text, groups, shared_tail):
         (
             "Rwy 15, climbing left turn direct TPH VORTAC thence...",
             '"thence" without a shared tail',
+        ),
+        (
+            (
+                "Rwy 33, climbing right turn to 1900 direct AUG VOR/DME before "
+                "proceeding on course."
+            ),
+            'unsupported "to <alt>" before "direct"',
+        ),
+        (
+            "Rwy 1, climb to 7000 direct IDA VOR/DME, before proceeding on course.",
+            'unsupported "to <alt>" before "direct"',
+        ),
+        (
+            "Rwy 24, climb to 3600, direct to BZA VORTAC.",
+            'unsupported "to <alt>," before a route',
         ),
     ],
 )
@@ -437,6 +540,10 @@ def test_parses_heading_ranges(text, groups):
         (
             "before proceeding direct OED VORTAC.",
             (Direct(NavaidRef("OED", NavaidType.VORTAC)),),
+        ),
+        (
+            "before turning left direct to CPN VOR/DME.",
+            (ClimbingTurn(Turn.LEFT, Direct(NavaidRef("CPN", NavaidType.VOR_DME))),),
         ),
     ],
 )

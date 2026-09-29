@@ -58,6 +58,7 @@ from .procedure import (
     RunwayGroup,
     RunwayHeading,
     SpeedRestriction,
+    StraightAhead,
     Thence,
     Turn,
     VcoaGroup,
@@ -204,7 +205,8 @@ class _Pen:
     """Where the aircraft is: position, true course, and climb bookkeeping.
 
     `along_nm` is the along-track distance flown since `base_alt_ft`, the
-    altitude at which the climb at `gradient` began.
+    altitude at which the climb at `gradient` began. `straight_out` holds while
+    every leg flown has kept to the runway's own course, from its DER.
     """
 
     ctx: _Context
@@ -215,6 +217,7 @@ class _Pen:
     base_alt_ft: float
     gradient: float
     runway_course: float | None = None
+    straight_out: bool = False
     turn_pending: bool = False
     pending_direction: Turn | None = None
 
@@ -286,6 +289,7 @@ def _draw_shared_tail(ctx: _Context, pens: list[_Pen], legs: tuple[Leg, ...]) ->
         if not legs:
             return
     first = _shared_radial_start(ctx, pens, legs[0]) or _converged(pens)
+    first.straight_out = False
     runways = (
         runway
         for group in ctx.resolved.procedure.runway_groups
@@ -405,6 +409,7 @@ def _start_runway(ctx: _Context, start: RunwayStart) -> _Pen:
         start.der_elevation_ft + DER_CROSSING_HEIGHT_FT,
         gradient,
         runway_course=start.course_true,
+        straight_out=True,
     )
     turn_start = offset(der, start.course_true, _turn_start_nm(gradient))
     ctx.polyline(f"{pen.name}: initial climb", Style.ROUTE, [der, turn_start])
@@ -421,11 +426,16 @@ def _draw_legs(pen: _Pen, legs: tuple[Leg, ...], direction: Turn | None = None) 
     for index, leg in enumerate(legs):
         start, course = pen.at, pen.course
         _draw_leg(pen, leg, direction if index == 0 else None)
+        pen.straight_out &= _keeps_to_runway_course(leg)
         if speed := _speed_restriction(leg):
             _label_speed(pen.ctx, speed, start, course)
         if _ends_in_heading_range(leg):
             _require_only_on_course(legs[index + 1 :])
             return
+
+
+def _keeps_to_runway_course(leg: Leg) -> bool:
+    return isinstance(leg, RunwayHeading | StraightAhead)
 
 
 def _ends_in_heading_range(leg: Leg) -> bool:
@@ -467,6 +477,8 @@ def _draw_leg(pen: _Pen, leg: Leg, direction: Turn | None) -> None:
             _climb_heading(pen, leg, direction)
         case RunwayHeading():
             _runway_heading(pen, leg, direction)
+        case StraightAhead():
+            _straight_ahead(pen, leg, direction)
         case HeadingRange():
             _heading_range(pen, leg, direction)
         case Direct():
@@ -506,15 +518,27 @@ def _runway_heading(pen: _Pen, leg: RunwayHeading, direction: Turn | None) -> No
     _climb_course(pen, leg, direction, pen.runway_course, name, RUNWAY_HEADING_LABEL)
 
 
+def _straight_ahead(pen: _Pen, leg: StraightAhead, direction: Turn | None) -> None:
+    """Climb on along the runway's course, the course a climb naming none
+    ("climb to 1200 before turning left") holds straight out from the runway;
+    after any other leg, in a shared tail, or owing a turn, straight ahead has
+    no certain course."""
+    if direction is not None or not pen.straight_out:
+        _unsupported(leg)
+    name = _leg_name(pen, None, "straight ahead")
+    _climb_course(pen, leg, None, pen.runway_course, name, None)
+
+
 def _climb_course(
     pen: _Pen,
-    leg: ClimbHeading | RunwayHeading,
+    leg: ClimbHeading | RunwayHeading | StraightAhead,
     direction: Turn | None,
     course: float,
     name: str,
-    heading_text: str,
+    heading_text: str | None,
 ) -> None:
-    """Turn onto the true `course`, then (with an altitude) climb straight on it.
+    """Turn onto the true `course`, then (with an altitude) climb straight on it,
+    labelled with `heading_text` when the text names a heading.
 
     An altitude the climb already reached before the turn ends the leg
     where the turn ends.
@@ -539,7 +563,8 @@ def _climb_course(
     if len(route) > 1:
         ctx.polyline(name, Style.ROUTE, route)
     _arrowhead(ctx, name, Style.ROUTE, pen.at, pen.course)
-    _offset_label(pen, heading_text, midpoint(turn_end, pen.at), side)
+    if heading_text is not None:
+        _offset_label(pen, heading_text, midpoint(turn_end, pen.at), side)
     ctx.label(format_altitude(leg.until, ctx.params.label_style), pen.at)
 
 
