@@ -202,7 +202,7 @@ def test_parses_fixture_procedures(name):
                         ClimbHeading(
                             80, CrossRadial(NavaidRef("IPL", NavaidType.VORTAC), 9)
                         ),
-                        ProceedOnCourse(),
+                        ProceedOnCourse(toward=(Compass8.N,)),
                     ),
                 )
             ],
@@ -275,7 +275,13 @@ def test_parses_fixture_procedures(name):
             "Rwy 13, climbing right turn to heading 200° to 3400.\n"
             "Rwy 16, climb to 8800 on a heading between 177° CW to 336° from DER.",
             [
-                RunwayGroup(("15",), (ClimbHeading(148, to(1900)), ProceedOnCourse())),
+                RunwayGroup(
+                    ("15",),
+                    (
+                        ClimbHeading(148, to(1900)),
+                        ProceedOnCourse(toward=(Compass8.E,)),
+                    ),
+                ),
                 RunwayGroup(("6L", "6R"), (ClimbHeading(71, to(2000)),)),
                 RunwayGroup(
                     ("4L", "4R"),
@@ -932,20 +938,33 @@ def test_parses_heading_ranges(text, groups):
     ("ending", "legs"),
     [
         ("before turning on course.", (ProceedOnCourse(),)),
-        ("before turning southbound.", (ProceedOnCourse(),)),
-        ("before turning northeast bound.", (ProceedOnCourse(),)),
+        ("before turning southbound.", (ProceedOnCourse(toward=(Compass8.S,)),)),
+        ("before turning northeast bound.", (ProceedOnCourse(toward=(Compass8.NE,)),)),
         ("before turning right on course.", (ProceedOnCourse(Turn.RIGHT),)),
-        ("before turning west on course.", (ProceedOnCourse(),)),
+        ("before turning west on course.", (ProceedOnCourse(toward=(Compass8.W,)),)),
+        (
+            "before turning left northbound.",
+            (ProceedOnCourse(Turn.LEFT, (Compass8.N,)),),
+        ),
         ("before climbing on course.", (ProceedOnCourse(),)),
         ("before proceeding enroute.", (ProceedOnCourse(),)),
-        ("before proceeding east.", (ProceedOnCourse(),)),
-        ("before proceeding southeast bound.", (ProceedOnCourse(),)),
-        ("before proceeding east or southeast bound.", (ProceedOnCourse(),)),
-        ("before turning west or northwest.", (ProceedOnCourse(),)),
+        ("before proceeding east.", (ProceedOnCourse(toward=(Compass8.E,)),)),
+        (
+            "before proceeding southeast bound.",
+            (ProceedOnCourse(toward=(Compass8.SE,)),),
+        ),
+        (
+            "before proceeding east or southeast bound.",
+            (ProceedOnCourse(toward=(Compass8.E, Compass8.SE)),),
+        ),
+        (
+            "before turning west or northwest.",
+            (ProceedOnCourse(toward=(Compass8.W, Compass8.NW)),),
+        ),
         ("before turning left", (ProceedOnCourse(Turn.LEFT),)),
         (", then proceed on course.", (ProceedOnCourse(),)),
         ("; then on assigned route.", (ProceedOnCourse(),)),
-        ("prior to turning northbound.", (ProceedOnCourse(),)),
+        ("prior to turning northbound.", (ProceedOnCourse(toward=(Compass8.N,)),)),
         ("prior to turn.", (ProceedOnCourse(),)),
         ("before turning right", (ProceedOnCourse(Turn.RIGHT),)),
         ("before right turn.", (ProceedOnCourse(Turn.RIGHT),)),
@@ -1483,10 +1502,16 @@ def _vcoa(runways, feet, then=None, cross=None, bound=None):
                     ("10",),
                     (
                         ClimbingTurn(Turn.RIGHT, ClimbHeading(120, to(2000))),
-                        ProceedOnCourse(),
+                        ProceedOnCourse(toward=(Compass8.N,)),
                     ),
                 ),
-                RunwayGroup(("28",), (ClimbHeading(280, to(2000)), ProceedOnCourse())),
+                RunwayGroup(
+                    ("28",),
+                    (
+                        ClimbHeading(280, to(2000)),
+                        ProceedOnCourse(toward=(Compass8.N,)),
+                    ),
+                ),
             ],
             [_vcoa(("10",), 2000)],
             id="comma-or alternative and notify ATC",

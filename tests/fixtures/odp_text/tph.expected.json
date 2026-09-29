@@ -78,6 +78,7 @@
     },
     {
       "node": "ProceedOnCourse",
+      "toward": [],
       "turn_restriction": null
     }
   ],
@@ -124,6 +125,7 @@
         },
         {
           "node": "ProceedOnCourse",
+          "toward": [],
           "turn_restriction": null
         }
       ]

@@ -338,18 +338,16 @@ class LegParser(TokenStream):
             | "turning" [turn-word] (direct | [direction] ["on course"])
             | [turn-word] "turn")
 
-        A compass direction ("before turning southbound") is read but not
-        drawn; a turn direction bends the on-course stub. "Before turning
-        left direct CPN VOR/DME" turns onto that Direct leg.
+        "Before turning left direct CPN VOR/DME" turns onto that Direct leg.
         """
         if not self._accept("before"):
             self._expect("prior", "to")
         if self._accept("proceeding"):
             if self._peek("direct"):
                 return self._direct()
-            if not (self._accept("on", "course") or self._accept("enroute")):
-                self._direction()
-            return ProceedOnCourse()
+            if self._accept("on", "course") or self._accept("enroute"):
+                return ProceedOnCourse()
+            return ProceedOnCourse(toward=self._directions())
         if self._accept("climbing", "on", "course") or self._accept("turn"):
             return ProceedOnCourse()
         for word, turn in _TURN_WORDS.items():
@@ -363,10 +361,9 @@ class LegParser(TokenStream):
             turn = _TURN_WORDS[token.lower]
         if self._peek("direct"):
             return ClimbingTurn(turn, self._direct())
-        if self._peek_direction():
-            self._direction()
+        toward = self._directions() if self._peek_direction() else ()
         self._accept("on", "course")
-        return ProceedOnCourse(turn)
+        return ProceedOnCourse(turn, toward)
 
     # --- Compass directions ------------------------------------------------
 
@@ -376,17 +373,16 @@ class LegParser(TokenStream):
             token.lower in COMPASS_WORDS or token.lower in BOUND_WORDS
         )
 
-    def _direction(self) -> Compass8:
-        """direction := point ("or" point)*, e.g. "east or southeast bound";
-        returns the first point.
+    def _directions(self) -> tuple[Compass8, ...]:
+        """direction := point ("or" point)*, e.g. "east or southeast bound".
 
         point := compass ["bound"] | "northbound" | "southeastbound" | …
         """
-        first = self._direction_point()
+        points = [self._direction_point()]
         while self._peek("or") and self._peek_direction(1):
             self._expect("or")
-            self._direction_point()
-        return first
+            points.append(self._direction_point())
+        return tuple(points)
 
     def _direction_point(self) -> Compass8:
         if not self._peek_direction():

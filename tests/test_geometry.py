@@ -21,6 +21,7 @@ from odp_kml.procedure import (
     ClimbHeading,
     ClimbingTurn,
     ClimbInHold,
+    Compass8,
     CrossAt,
     Direct,
     Dme,
@@ -436,6 +437,30 @@ def test_proceed_on_course_is_a_dashed_stub_bent_toward_the_restriction():
     assert len(dashes) == 4
     bent_end = (math.sqrt(0.5), 2.0 + math.sqrt(0.5))
     assert xy(dashes[-1].points[-1]) == pytest.approx(bent_end, abs=1e-6)
+    either_way = draw(
+        resolved(group(ProceedOnCourse(toward=(Compass8.E, Compass8.SE))))
+    )
+    assert [line.name for line in polylines(either_way)] == ["RWY 36: initial climb"]
+
+
+@pytest.mark.parametrize(
+    ("turn", "stub_end"),
+    [(None, (R + 1.0, 2.0 + R)), (Turn.LEFT, (1.0 - R, 2.0 - R))],
+    ids=["shorter way", "published side"],
+)
+def test_proceed_on_course_turns_onto_a_compass_direction(turn, stub_end):
+    drawing = draw(resolved(group(ProceedOnCourse(turn, (Compass8.E,)))))
+
+    assert route_vertices(drawing)[-1] == pytest.approx(stub_end, abs=1e-6)
+
+
+def test_vcoa_then_a_compass_direction_leaves_the_circle_that_way():
+    vcoa = VcoaGroup((), None, 7000, (ProceedOnCourse(toward=(Compass8.S,)),))
+
+    vertices = route_vertices(draw(resolved(vcoa=(vcoa,))))
+
+    assert vertices[0] == pytest.approx((0.0, -2.0), abs=1e-6)
+    assert vertices[-1] == pytest.approx((0.0, -3.0), abs=1e-6)
 
 
 def test_vcoa_circle_surrounds_the_airport():

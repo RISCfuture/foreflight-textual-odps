@@ -53,8 +53,13 @@ with certainty:
   radial), nor when that turn exceeds 270°, so a short turn the other way
   would reach the heading.
 - "Proceed on course" after a runway's legs as a short dashed stub, bent
-  toward any published turn restriction. A VCOA that only proceeds on
-  course draws just its circle.
+  toward any published turn restriction. A published direction ("before
+  proceeding northbound", read against true north) turns the stub onto
+  it in dashes, the shorter way unless the text names the side; two
+  directions ("before turning west or northwest") name no one course, so
+  the route ends without a stub. A VCOA that only proceeds on course
+  draws just its circle, and the stub leaving it when the text names one
+  direction.
 - Climb-in-hold racetracks.
 - Heading ranges ("climb on a heading between 350° CW to 162° from DER")
   as a thin wedge from the turn-start point, labelled as printed
@@ -136,6 +141,7 @@ used whenever the text does not otherwise constrain the geometry:
 | Hold leg length | 1 minute (1.5 minutes above 14,000 ft; 1 minute to an unstated MEA, MCA or MOCA) |
 | VCOA circle | 2 NM schematic radius |
 | Heading-range wedge | 3 NM schematic radius from the turn start |
+| Course printed as a compass direction ("before proceeding northbound") | The direction's true bearing, turned onto the shorter way unless the side is printed; no stub for two directions ("west or northwest") |
 | Climb naming no heading or route | Straight out along the runway's course while every earlier leg has held it; refused anywhere else |
 | Intercept heading not printed | 45° to the radial on the side the turn ends; 20° after rolling out within 0.5 NM of it. Not drawn if the turn onto it is over 270° or over 45° off the turn onto the radial's course |
 | Magnetic headings | Airport's variation of record (WMM if unpublished) |

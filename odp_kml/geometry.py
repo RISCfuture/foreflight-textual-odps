@@ -44,6 +44,7 @@ from .procedure import (
     ClimbHeading,
     ClimbingTurn,
     ClimbInHold,
+    Compass8,
     CrossAt,
     Direct,
     Dme,
@@ -92,11 +93,15 @@ SHARED_TAIL_TOLERANCE_NM = 0.5
 ON_COURSE_STUB_NM = 1.0
 ON_COURSE_DASHES = 4
 ON_COURSE_DASH_NM = 0.15
+ON_COURSE_DASH_SPACING_NM = (ON_COURSE_STUB_NM - ON_COURSE_DASH_NM) / (
+    ON_COURSE_DASHES - 1
+)
 ON_COURSE_BEND_DEG = 45.0
 VCOA_DASHES = 36
 ARROW_ARM_NM = 0.25
 ARROW_SETBACK_NM = 0.5
 ARROW_SPLAY_DEG = 30.0
+COMPASS_BEARINGS = {point: 45.0 * index for index, point in enumerate(Compass8)}
 RUNWAY_HEADING_LABEL = "rwy hdg"
 UNSTATED_SENSE = 'radial without "inbound" or "outbound"'
 UNSTATED_SENSE_TURN_DEG = 60.0
@@ -450,8 +455,11 @@ def _vcoa_runways_name(runways: tuple[str, ...]) -> str:
 
 
 def _departs_toward_something(legs: tuple[Leg, ...]) -> bool:
-    """Whether the legs after a VCOA fly anywhere beyond "proceed on course"."""
-    return any(not isinstance(leg, ProceedOnCourse) for leg in legs)
+    """Whether the legs after a VCOA fly anywhere beyond "proceed on course"
+    in no one stated direction."""
+    return any(
+        not isinstance(leg, ProceedOnCourse) or len(leg.toward) == 1 for leg in legs
+    )
 
 
 def _dash_starts(count: int) -> list[float]:
@@ -459,12 +467,15 @@ def _dash_starts(count: int) -> list[float]:
 
 
 def _departure_bearing(ctx: _Context, centre: Vec, leg: Leg) -> float:
-    """Bearing from the VCOA circle's centre toward the first leg's target."""
+    """Bearing from the VCOA circle's centre toward the first leg's target,
+    or the compass direction it proceeds in."""
     match leg:
         case ClimbingTurn(then=then):
             return _departure_bearing(ctx, centre, then)
         case ClimbHeading(heading=heading):
             return ctx.heading_true(heading)
+        case ProceedOnCourse(toward=(point,)):
+            return COMPASS_BEARINGS[point]
         case Direct(target=target) | ClimbInHold(fix=target):
             ident = target.ident
         case Radial(navaid=navaid) | HeadingAndRadial(navaid=navaid):
@@ -1156,21 +1167,57 @@ def _tracking_course(leg: Radial | HeadingAndRadial, radial_course: float) -> fl
 
 
 def _proceed_on_course(pen: _Pen, leg: ProceedOnCourse) -> None:
-    """A short dashed stub on course, bent toward the restricted side if any."""
+    """A short dashed stub on course, bent toward the restricted side if any.
+
+    A compass direction ("before proceeding northbound") is read against
+    true north: the stub turns onto it in dashes, the shorter way unless
+    the text also names the turn's side, then runs straight. Two directions
+    ("before proceeding east or southeast bound") name no one course, so
+    the route ends without a stub.
+    """
+    if len(leg.toward) > 1:
+        return
     ctx = pen.ctx
-    bend = 0.0
-    if leg.turn_restriction is not None:
-        bend = ON_COURSE_BEND_DEG * _side(leg.turn_restriction)
-    course = pen.course + bend
     name = _leg_name(pen, None, "proceed on course")
-    spacing = (ON_COURSE_STUB_NM - ON_COURSE_DASH_NM) / (ON_COURSE_DASHES - 1)
+    if leg.toward:
+        (point,) = leg.toward
+        _dashed_turn(pen, name, COMPASS_BEARINGS[point], leg.turn_restriction)
+        course = pen.course
+    else:
+        course = _bent(pen.course, leg.turn_restriction)
     for i in range(ON_COURSE_DASHES):
-        start = offset(pen.at, course, i * spacing)
+        start = offset(pen.at, course, i * ON_COURSE_DASH_SPACING_NM)
         ctx.polyline(
             name, Style.ROUTE, [start, offset(start, course, ON_COURSE_DASH_NM)]
         )
     pen.straight_to(offset(pen.at, course, ON_COURSE_STUB_NM))
     _arrowhead(ctx, name, Style.ROUTE, pen.at, pen.course)
+
+
+def _bent(course: float, turn: Turn | None) -> float:
+    return course if turn is None else course + ON_COURSE_BEND_DEG * _side(turn)
+
+
+def _dashed_turn(pen: _Pen, name: str, course: float, direction: Turn | None) -> None:
+    """Turn onto `course` as `_Pen.turn_onto` does, drawn in dashes spaced as
+    the on-course stub's."""
+    ctx = pen.ctx
+    sweep = _signed_turn(pen.course, course, direction)
+    side = sign(sweep)
+    centre = offset(pen.at, pen.course + 90 * side, ctx.radius)
+    start = pen.course - 90 * side
+    dash = math.degrees(ON_COURSE_DASH_NM / ctx.radius)
+    spacing = math.degrees(ON_COURSE_DASH_SPACING_NM / ctx.radius)
+    for i in range(math.ceil(abs(sweep) / spacing)):
+        swept = i * spacing
+        arc = ctx.arc(
+            centre,
+            ctx.radius,
+            start + side * swept,
+            side * min(dash, abs(sweep) - swept),
+        )
+        ctx.polyline(name, Style.ROUTE, arc)
+    pen.turn_onto(course, direction)
 
 
 def _cross_at(pen: _Pen, leg: CrossAt) -> None:

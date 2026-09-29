@@ -279,10 +279,12 @@ class ProceedOnCourse:
 
     `turn_restriction` is the direction of that eventual turn, deferred
     until the preceding leg's altitude or fix is reached; `None` if the
-    procedure names no such turn.
+    procedure names no such turn. `toward` holds the compass directions
+    printed for the course ("before proceeding north or northeast").
     """
 
     turn_restriction: Turn | None = None
+    toward: tuple[Compass8, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)

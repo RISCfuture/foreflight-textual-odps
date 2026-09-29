@@ -422,7 +422,13 @@ EXAMPLES: tuple[Example, ...] = (
         _procedure(
             "ALB",
             [
-                RunwayGroup(("10",), (ClimbHeading(110, _to(2000)), ProceedOnCourse())),
+                RunwayGroup(
+                    ("10",),
+                    (
+                        ClimbHeading(110, _to(2000)),
+                        ProceedOnCourse(toward=(Compass8.N,)),
+                    ),
+                ),
                 RunwayGroup(("28",), (ClimbHeading(281, _to(2000)), ProceedOnCourse())),
             ],
         ),
@@ -767,7 +773,8 @@ Output: one Procedure object matching the response schema. Every object carries
   null when the text gives none), CrossAt ("Cross LIN VOR/DME at or above
   5000" after reaching LIN), ProceedOnCourse
   (turn_restriction L/R only for "before turning left/right" or "before
-  left/right turn"; null otherwise),
+  left/right turn"; null otherwise; toward the compass directions printed
+  for the course, "before proceeding north or northeast" is [N, NE], else []),
   and Thence (the "thence..." marker leading into a shared tail).
 - "All other courses: ..." (or "or climb on a heading between ...") after a
   HeadingRange is a further runway group for the same runways. So is "or min.
