@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 
 from .geo import LatLon
+from .minimums import ClimbGradient
 from .procedure import HoldSpec, Procedure
 
 
@@ -20,7 +21,7 @@ class RunwayStart:
     der: LatLon
     der_elevation_ft: float
     course_true: float
-    min_climb_gradient_ft_nm: float | None
+    min_climb: ClimbGradient | None
 
 
 @dataclasses.dataclass(frozen=True)

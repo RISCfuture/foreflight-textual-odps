@@ -13,6 +13,7 @@ from odp_kml.geometry import (
     format_altitude,
     turn_radius_nm,
 )
+from odp_kml.minimums import ClimbGradient
 from odp_kml.procedure import (
     Altitude,
     AltitudeKind,
@@ -130,7 +131,9 @@ def test_turn_radius_uses_standard_rate_at_150_kt():
     assert turn_radius_nm(150, 25) == pytest.approx(150 / 188.5)
 
 
-@pytest.mark.parametrize(("gradient", "stub_nm"), [(None, 2.0), (320.0, 1.25)])
+@pytest.mark.parametrize(
+    ("gradient", "stub_nm"), [(None, 2.0), (ClimbGradient(320.0), 1.25)]
+)
 def test_initial_stub_reaches_400_ft_above_der(gradient, stub_nm):
     runway_heading = ClimbHeading(magnetic(0))
 
@@ -145,13 +148,16 @@ def test_runway_whose_departure_is_na_is_not_drawn():
     assert draw(resolved(group())).shapes == ()
 
 
-def test_climb_heading_ends_where_gradient_reaches_altitude():
+@pytest.mark.parametrize(
+    ("gradient", "end_nm"), [(None, 9.83), (ClimbGradient(400.0, 6000), 7.41)]
+)
+def test_climb_heading_ends_where_gradient_reaches_altitude(gradient, end_nm):
     leg = ClimbHeading(magnetic(0), feet(7000))
 
-    drawing = draw(resolved(group(leg)))
+    drawing = draw(resolved(group(leg), runways=(runway(gradient=gradient),)))
 
     end = route_vertices(drawing)[-1]
-    assert distance(end, (0.0, 0.0)) == pytest.approx(9.83, abs=0.1)
+    assert distance(end, (0.0, 0.0)) == pytest.approx(end_nm, abs=0.1)
     altitude_label = next(
         lbl for lbl in labels(drawing) if distance(xy(lbl.at), end) < 1e-6
     )

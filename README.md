@@ -132,7 +132,7 @@ used whenever the text does not otherwise constrain the geometry:
 | Display true airspeed | 150 kt |
 | Turn radius | 25° bank or standard rate, whichever is larger |
 | Turn start | 400 ft above the DER (departure end of runway) |
-| Climb gradient for altitude legs | Published minimum, else 200 ft/NM |
+| Climb gradient for altitude legs | Published minimum up to the altitude it is published to, 200 ft/NM above it or when none is published |
 | Hold leg length | 1 minute (1.5 minutes above 14,000 ft; 1 minute to an unstated MEA, MCA or MOCA) |
 | VCOA circle | 2 NM schematic radius |
 | Heading-range wedge | 3 NM schematic radius from the turn start |

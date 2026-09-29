@@ -17,6 +17,7 @@ from pygeomag import GeoMag, calculate_decimal_year
 from . import nasr
 from .findings import Kind
 from .geo import LatLon, destination, distance_nm, initial_bearing
+from .minimums import ClimbGradient
 from .procedure import (
     ClimbInHold,
     Compass8,
@@ -47,7 +48,7 @@ def resolve(
     procedure: Procedure,
     airport: nasr.Airport,
     data: nasr.NasrData,
-    min_climb: dict[str, float] | None = None,
+    min_climb: dict[str, ClimbGradient] | None = None,
 ) -> ResolvedProcedure:
     """Bind every runway, navaid, fix, and hold `procedure` refers to.
 
@@ -113,7 +114,7 @@ def _walk(node):
 
 
 def _resolve_runway(
-    airport: nasr.Airport, rwy: str, min_climb: dict[str, float] | None
+    airport: nasr.Airport, rwy: str, min_climb: dict[str, ClimbGradient] | None
 ) -> RunwayStart:
     """The `RunwayStart` for departing runway `rwy` at `airport`."""
     end = airport.runway_end(rwy)
@@ -141,7 +142,7 @@ def _resolve_runway(
         der=der,
         der_elevation_ft=der_elevation_ft,
         course_true=course_true,
-        min_climb_gradient_ft_nm=(min_climb or {}).get(rwy),
+        min_climb=(min_climb or {}).get(rwy),
     )
 
 

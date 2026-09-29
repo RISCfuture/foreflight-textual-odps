@@ -209,12 +209,41 @@ class _Context:
             self.shapes.append(shape)
 
 
+@dataclasses.dataclass(frozen=True)
+class _Climb:
+    """Climb gradients in ft/NM: `gradient` up to `ceiling_ft`, `above` it
+    over; `gradient` throughout when there is no ceiling."""
+
+    gradient: float
+    ceiling_ft: float | None = None
+    above: float | None = None
+
+    def nm_between(self, low: float, high: float) -> float:
+        """Along-track distance the climb takes from `low` to `high` feet,
+        negative when `high` is the lower."""
+        if self.ceiling_ft is None or self.above is None:
+            return (high - low) / self.gradient
+        ceiling = self.ceiling_ft
+        below_nm = (min(high, ceiling) - min(low, ceiling)) / self.gradient
+        return below_nm + (max(high, ceiling) - max(low, ceiling)) / self.above
+
+
+def _runway_climb(start: RunwayStart, default_gradient: float) -> _Climb:
+    """The runway's published minimum gradient to the altitude it is published
+    to and `default_gradient` above that, or `default_gradient` throughout
+    when none is published."""
+    published = start.min_climb
+    if published is None:
+        return _Climb(default_gradient)
+    return _Climb(published.ft_per_nm, published.to_ft, default_gradient)
+
+
 @dataclasses.dataclass
 class _Pen:
     """Where the aircraft is: position, true course, and climb bookkeeping.
 
-    `along_nm` is the along-track distance flown since the climb at
-    `gradient` passed `base_alt_ft`, negative while it has yet to reach it.
+    `along_nm` is the along-track distance flown on `climb` since it passed
+    `base_alt_ft`, negative while it has yet to reach it.
     `straight_out` holds while every leg flown has kept to the runway's own
     course, from its DER. `open_heading` marks a route left on a heading
     printed with no terminator, which it holds until it intercepts the next
@@ -227,7 +256,7 @@ class _Pen:
     course: float
     along_nm: float
     base_alt_ft: float
-    gradient: float
+    climb: _Climb
     runway_course: float | None = None
     straight_out: bool = False
     turn_pending: bool = False
@@ -236,7 +265,7 @@ class _Pen:
 
     def altitude_leg_nm(self, feet: int) -> float:
         """Along-track distance at which the climb reaches `feet`."""
-        length = max(MIN_ALTITUDE_LEG_NM, (feet - self.base_alt_ft) / self.gradient)
+        length = max(MIN_ALTITUDE_LEG_NM, self.climb.nm_between(self.base_alt_ft, feet))
         if length > MAX_ALTITUDE_LEG_NM:
             raise Degenerate("altitude leg capped", f"{feet} ft needs {length:.1f} NM")
         return length
@@ -244,7 +273,9 @@ class _Pen:
     def level_at(self, feet: int) -> None:
         """Climb no higher than `feet` until a later leg climbs on: level off
         there if the climb has reached it, else keep climbing toward it."""
-        still_to_climb_nm = (feet - self.base_alt_ft) / self.gradient - self.along_nm
+        still_to_climb_nm = (
+            self.climb.nm_between(self.base_alt_ft, feet) - self.along_nm
+        )
         self.base_alt_ft, self.along_nm = feet, min(0.0, -still_to_climb_nm)
 
     def turn_onto(self, course: float, direction: Turn | None) -> tuple[list[Vec], int]:
@@ -408,7 +439,7 @@ def _draw_vcoa(ctx: _Context, vcoa: VcoaGroup) -> None:
             outward,
             0.0,
             vcoa.at_or_above,
-            ctx.params.default_gradient_ft_nm,
+            _Climb(ctx.params.default_gradient_ft_nm),
         )
         _draw_legs(pen, vcoa.then)
 
@@ -448,7 +479,7 @@ def _departure_bearing(ctx: _Context, centre: Vec, leg: Leg) -> float:
 
 def _start_runway(ctx: _Context, start: RunwayStart) -> _Pen:
     """Draw the straight climb from the DER to the turn-start point."""
-    gradient = start.min_climb_gradient_ft_nm or ctx.params.default_gradient_ft_nm
+    climb = _runway_climb(start, ctx.params.default_gradient_ft_nm)
     der = ctx.plane.to_xy(start.der)
     pen = _Pen(
         ctx,
@@ -457,18 +488,19 @@ def _start_runway(ctx: _Context, start: RunwayStart) -> _Pen:
         start.course_true,
         0.0,
         start.der_elevation_ft + DER_CROSSING_HEIGHT_FT,
-        gradient,
+        climb,
         runway_course=start.course_true,
         straight_out=True,
     )
-    turn_start = offset(der, start.course_true, _turn_start_nm(gradient))
+    turn_start = offset(der, start.course_true, _turn_start_nm(pen))
     ctx.polyline(f"{pen.name}: initial climb", Style.ROUTE, [der, turn_start])
     pen.straight_to(turn_start)
     return pen
 
 
-def _turn_start_nm(gradient: float) -> float:
-    return max(MIN_TURN_START_NM, TURN_START_HEIGHT_FT / gradient)
+def _turn_start_nm(pen: _Pen) -> float:
+    turn_start_ft = pen.base_alt_ft + TURN_START_HEIGHT_FT
+    return max(MIN_TURN_START_NM, pen.climb.nm_between(pen.base_alt_ft, turn_start_ft))
 
 
 def _draw_legs(pen: _Pen, legs: tuple[Leg, ...], direction: Turn | None = None) -> None:

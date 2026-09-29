@@ -8,22 +8,36 @@ a speed limit, so one there withholds every route it may bind.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 
 _TAKEOFF_MINIMUMS_ENTRY = re.compile(
     r"\bRwys? (?P<runways>\d{1,2}[LRC]?(?:/[LRC])?"
-    r"(?:\s*,\s*\d{1,2}[LRC]?(?:/[LRC])?)*)\s*,(?P<body>.*?)(?=\bRwys? \d|\Z)"
+    r"(?:\s*,\s*\d{1,2}[LRC]?(?:/[LRC])?)*)\s*,(?P<body>.*?)(?=\bRwys? \d|$)",
+    re.MULTILINE,
 )
-_STANDARD_MIN_CLIMB = re.compile(r"\bstd\. with a min\. climb of (\d+) ft per NM")
+_STANDARD_MIN_CLIMB = re.compile(
+    r"\bstd\. with a min\. climb of (\d+) ft per NM(?: (?:to|until passing) (\d+)\b)?"
+)
 _RUNWAY_ID = re.compile(r"(\d{1,2})([LRC]?)((?:/[LRC])*)")
 _SPEED = re.compile(r"\b\d{2,3} ?(?:K|KIAS|KTS?|knots)\b", re.IGNORECASE)
 
 
-def parse_takeoff_minimums(text: str) -> dict[str, float]:
-    """Each runway's published minimum climb gradient (ft/NM) with standard
-    minimums, e.g. ``{"15": 320.0}``; runways without one are skipped."""
+@dataclasses.dataclass(frozen=True)
+class ClimbGradient:
+    """A published minimum climb gradient and the altitude it holds to
+    ("... 490 ft per NM to 6300"), ``None`` when printed without one."""
+
+    ft_per_nm: float
+    to_ft: int | None = None
+
+
+def parse_takeoff_minimums(text: str) -> dict[str, ClimbGradient]:
+    """Each runway's published minimum climb gradient with standard minimums,
+    e.g. ``{"15": ClimbGradient(320.0, 9100)}``; runways without one are
+    skipped."""
     return {
-        runway: float(climb[1])
+        runway: ClimbGradient(float(climb[1]), int(climb[2]) if climb[2] else None)
         for entry in _TAKEOFF_MINIMUMS_ENTRY.finditer(text)
         if (climb := _STANDARD_MIN_CLIMB.search(entry["body"]))
         for runway in _runway_ids(entry["runways"])
