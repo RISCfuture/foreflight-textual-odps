@@ -199,6 +199,7 @@ def _write_layer(
             pack_name=layer.name,
             pack_abbrev=layer.abbrev,
             organization=config.ORGANIZATION,
+            built=dt.datetime.now(dt.UTC),
         )
 
 

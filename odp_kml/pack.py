@@ -9,11 +9,14 @@ Layout inside the zip:
 
 See https://foreflight.com/support/content-packs/ for the spec.
 
-The pack is valid for one 28-day cycle.
+The pack is valid for one 28-day cycle. Its version is the build time, so
+ForeFlight replaces an installed pack with any rebuild, even of the same
+cycle.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 import zipfile
@@ -32,17 +35,15 @@ def build_foreflight_pack(
     pack_name: str,
     pack_abbrev: str,
     organization: str,
+    built: dt.datetime,
 ) -> None:
     effective = cycle.effective
     expires = cycle.next.effective
 
-    # Readable integer version: YYYYMMDD.
-    version = int(effective.strftime("%Y%m%d"))
-
     manifest = {
         "name": pack_name,
         "abbreviation": pack_abbrev,
-        "version": version,
+        "version": int(built.timestamp()),
         "effectiveDate": effective.strftime("%Y%m%dT00:00:00Z"),
         "expirationDate": expires.strftime("%Y%m%dT00:00:00Z"),
         "organizationName": organization,

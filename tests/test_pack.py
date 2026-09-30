@@ -20,6 +20,7 @@ def test_pack_contains_manifest_and_layer_under_the_pack_root(tmp_path):
         pack_name="Textual ODPs",
         pack_abbrev="ODP",
         organization="Tim Morgan",
+        built=dt.datetime(2026, 9, 29, 6, 42, tzinfo=dt.UTC),
     )
 
     with zipfile.ZipFile(out) as z:
@@ -31,7 +32,7 @@ def test_pack_contains_manifest_and_layer_under_the_pack_root(tmp_path):
     assert manifest == {
         "name": "Textual ODPs",
         "abbreviation": "ODP",
-        "version": 20260903,
+        "version": 1790664120,
         "effectiveDate": "20260903T00:00:00Z",
         "expirationDate": "20261001T00:00:00Z",
         "organizationName": "Tim Morgan",
