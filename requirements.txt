@@ -1,2 +1,2 @@
-requests>=2.31
-pygeomag>=1.0
+requests>=2.34.2
+pygeomag>=1.1.0

@@ -1,2 +1,2 @@
 -r requirements.txt
-anthropic>=0.60
+anthropic>=2.3.0
