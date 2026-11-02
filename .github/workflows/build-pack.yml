@@ -5,17 +5,17 @@ on:
     branches: [main]
   workflow_dispatch: {}
   schedule:
-    # Daily at 15:00 UTC. NASR cycles turn over every 28 days on a
-    # Thursday; a daily poll catches new cycles within a day of effective
-    # date, and each publish step exits early once its cycle already has
-    # the release it needs.
-    - cron: "0 15 * * *"
+    # Thursdays and Fridays at 15:00 UTC. NASR cycles turn over every 28
+    # days on a Thursday; the Thursday run publishes the new cycle the day
+    # it takes effect and the Friday run is a backup. Each publish step
+    # exits early once its cycle already has the release it needs.
+    - cron: "0 15 * * 4,5"
 
 permissions:
   contents: write   # create / update / prune releases
   issues: write      # file findings from the build report
 
-# A push and the daily schedule both publish releases; run one at a time,
+# A push and the scheduled run both publish releases; run one at a time,
 # never cancelling a publish midway.
 concurrency:
   group: build-pack
