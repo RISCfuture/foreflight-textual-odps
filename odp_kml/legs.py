@@ -258,16 +258,22 @@ class LegParser(TokenStream):
             raise self._error(f'unsupported routing "then {bound.lower} on"')
 
     def _leg(self) -> Leg:
-        """leg := climbing-heading | climbing-turn | climb | continue-climb
-        | proceed | direct | bare-turn | cross-at | if-required | on-route
-        | intercept
+        """leg := climbing-heading | fly-heading | climbing-turn | climb
+        | continue-climb | proceed | direct | bare-turn | cross-at | if-required
+        | on-route | intercept
 
         climbing-heading := "climbing" ["on"] (heading-range | heading-leg), a
         climb on a heading with no turn: "climbing on heading 175° to 4200".
+
+        fly-heading := "fly" heading-leg: "fly heading 248° and MTJ VOR/DME
+        R-297 to BRICK/MTJ 23.44 DME".
         """
         if self._peek_climbing_heading():
             self._expect("climbing")
             return self._climb_route()
+        if self._peek("fly") and self._peek_heading(1):
+            self._expect("fly")
+            return self._heading_leg()
         if self._peek("climbing"):
             return self._climbing_turn()
         if self._peek("climb"):

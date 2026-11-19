@@ -541,3 +541,35 @@ def test_turn_to_a_fix_turns_direct_to_it():
         ClimbingTurn(Turn.LEFT, Direct(NavaidRef("BGQ", NavaidType.VORTAC))),
         Thence(),
     )
+
+
+def test_fly_heading_is_a_heading_leg():
+    sections = Sections(
+        amendment=None,
+        takeoff_minimums=None,
+        departure_procedure=normalize(
+            "Rwy 21, DME required, climb on heading 212° to intercept MTJ VOR/DME "
+            "R-297 to BRICK/MTJ 23.4 DME..."
+            "\n...climb-in-hold (hold NW, RT, 117° inbound) to cross BRICK at or "
+            "above 11300."
+        ),
+        vcoa=normalize(
+            "Obtain ATC approval for climb in visual conditions when requesting "
+            "IFR clearance. DME required, climb in visual conditions to cross "
+            "Blake Fld airport at or above 8300, fly heading 248° and MTJ VOR/DME "
+            "R-297 to BRICK/MTJ 23.44 DME, climb-in-hold (hold NW, RT, 117° "
+            "inbound) to cross BRICK at or above 11300."
+        ),
+        obstacle_notes=None,
+        dva=None,
+    )
+
+    (vcoa,) = parse_procedure(sections, airport="XXX").vcoa
+
+    assert vcoa.then[0] == HeadingAndRadial(
+        248,
+        NavaidRef("MTJ", NavaidType.VOR_DME),
+        297,
+        outbound=None,
+        until=Dme(NavaidRef("MTJ"), 23.44, FixRef("BRICK")),
+    )
