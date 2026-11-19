@@ -39,8 +39,9 @@ with certainty:
   with its altitude alone.
 - Radial intercepts and tracking to an altitude, fix, DME distance, or the
   navaid; an altitude climbed to on the way to a fix ("to 3000 via FSM
-  R-064 to FSM VORTAC") is labelled where the leg ends. A heading printed
-  with no terminator is held until the radial that follows it is
+  R-064 to FSM VORTAC", "R-242 to SAC VORTAC to 2000", or direct: "to
+  7000 direct RAP VORTAC") is labelled where the leg ends. A heading
+  printed with no terminator is held until the radial that follows it is
   intercepted ("heading 170°, thence ... on RZS R-185"). A turn to
   intercept a radial with no heading printed ("climbing left turn to
   intercept PUB R-274") turns the published way onto a schematic,
@@ -86,9 +87,17 @@ with certainty:
   for the other headings instead ("or min. climb of 415 ft per NM to 1600
   for headings 101° through 314°") names no route, so only the
   fan is drawn.
-- VCOA (visual climb over airport) circles, including airports whose only
-  procedure is a VCOA and visual climbs written into the departure
-  procedure itself ("..., or for climb in visual conditions: cross ...").
+- VCOA (visual climb over airport) circles, around the airport or the fix
+  or navaid the climb crosses ("cross CVO VOR/DME at or above 3500"),
+  including airports whose only procedure is a VCOA and visual climbs
+  written into the departure procedure itself ("..., or for climb in
+  visual conditions: cross ...").
+  A visual climb on a line of its own ("...for climb in visual
+  conditions: cross ...") is for the runways whose routes end "or..."
+  above it, or, when none does, for every runway routed above it.
+  A visual climb that goes on "thence..." flies the shared tail after
+  it, entering where the runways' routes do; the VCOA section may write
+  that tail out itself ("thence...⏎...on RZS R-185 to GOLET INT").
   A published crossing direction joins the label where it still fits in
   ForeFlight's 22 characters (`VCOA (≥8200' SE bound)`), and a speed limit
   on the visual climb is labelled below the circle. The label stands at
@@ -119,10 +128,19 @@ reference a graphic ODP instead of text ("use LUNDI DEPARTURE"), and
 airway routing after the ODP ends. A runway that flies a graphic ODP is
 drawn from none of its text; an airport whose every runway does is left
 out of the coverage percentage and counted on its own in the report,
-since ForeFlight charts graphic ODPs itself. A speed limit printed in a
-runway's takeoff minimums ("do not exceed 210K until intercepting the ENI
-R-073") is not read either, so it withholds that runway's route and
-visual climb.
+since ForeFlight charts graphic ODPs itself. Text that gives no runway a
+route ("Diverse departure authorized all runways.", "Rwys 8, 26,
+NA-Environmental.", "Diverse departure NA. Use published departure
+procedures for obstacle avoidance.", or only takeoff minimums: "Rwy 14,
+std with a min. climb gradient of 280 ft/NM to 3800.") has nothing to
+draw either: the
+airport is left out of the coverage percentage, counted on its own in the
+report, and gets no "ODP NOT SHOWN" label. A speed limit printed in a
+runway's takeoff minimums is read only when it ends on the radial the
+route's first leg flies ("do not exceed 210K until established on MSO
+R-163" before "climbing right turn via heading 335 and MSO R-163 ...");
+any other withholds that runway's route, and a visual climb it may bind
+is withheld either way.
 
 ## How it decides what to draw
 
@@ -134,7 +152,11 @@ defined radius, and so on). An unread sentence under a runway's header
 applies to that runway's routes and VCOAs, including a VCOA for all
 runways. One before the first runway header, after the last, or ending
 in a colon ("When tethered balloon ... is flying:") may apply to every
-departure, so nothing at that airport is drawn. Anything less certain is
+departure, so nothing at that airport is drawn. The exception is a speed limit
+sentence after the last of several routes ("... before proceeding on
+course. Do not exceed 150 KIAS until reaching 1700 MSL."): it limits the
+last route whether it is meant for that route or for all, so that route
+is drawn with it and the others, which it may limit too, are not. Anything less certain is
 never drawn; it becomes a `Finding` instead, listed in
 `report.md` on the release for that cycle and filed as a GitHub issue,
 grouped by failure signature so one recurring problem across airports and
@@ -246,7 +268,8 @@ activity — push a commit (or run it manually) if releases stop appearing.
 
 `tools/compare_builds.py` checks a grammar or geometry change against every
 airport in a cycle, not just the fixtures. It snapshots each airport's
-outcome (drawn whole, drawn in part, charted DPs only, or not drawn), its
+outcome (drawn whole, drawn in part, charted DPs only, no route, or not
+drawn), its
 findings and a digest of its shapes, then names every airport gained, lost
 or redrawn between two snapshots:
 

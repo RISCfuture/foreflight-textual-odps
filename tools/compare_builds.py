@@ -2,7 +2,8 @@
 
 A grammar or geometry change can draw airports the fixtures never exercise,
 or quietly change ones already drawn. This snapshots every airport's outcome
-in a cycle (drawn whole, drawn in part, charted DPs only, or not drawn), its
+in a cycle (drawn whole, drawn in part, charted DPs only, no route, or not
+drawn), its
 findings, and a digest of every shape it draws; ``diff`` then names each
 airport gained, lost or redrawn between two snapshots.
 
@@ -38,6 +39,7 @@ from odp_kml.shapes import AirportDrawing, Polyline
 WHOLE = "whole"
 PART = "part"
 CHARTED = "charted"
+NO_ROUTE = "no route"
 NOT_DRAWN = "not drawn"
 _DIGEST_PLACES = 6
 _TOP_SIGNATURES = 20
@@ -83,7 +85,13 @@ def record(outcome: pipeline.BlockOutcome, state: str = "") -> Outcome:
     if outcome.drawing is not None:
         kind = PART if outcome.findings else WHOLE
     else:
-        kind = CHARTED if outcome.graphic_only else NOT_DRAWN
+        kind = (
+            CHARTED
+            if outcome.graphic_only
+            else NO_ROUTE
+            if outcome.no_route
+            else NOT_DRAWN
+        )
     return Outcome(
         state=state,
         outcome=kind,
@@ -152,14 +160,17 @@ def _drawn(snap: Snapshot, lid: str) -> bool:
 
 
 def summary(snap: Snapshot) -> str:
-    """e.g. "1,154 of 1,479 drawn (78%; 1,010 whole, 144 in part); 199 charted"."""
+    """e.g. "1,154 of 1,479 drawn (78%; 1,010 whole, 144 in part); 199 charted;
+    8 no route". Charted and no-route airports are left out of the
+    percentage."""
     counts = collections.Counter(outcome.outcome for outcome in snap.values())
-    textual = len(snap) - counts[CHARTED]
+    textual = len(snap) - counts[CHARTED] - counts[NO_ROUTE]
     drawn = counts[WHOLE] + counts[PART]
     percentage = round(100 * drawn / textual) if textual else 0
     return (
         f"{drawn:,} of {textual:,} drawn ({percentage}%; {counts[WHOLE]:,} whole, "
-        f"{counts[PART]:,} in part); {counts[CHARTED]:,} charted"
+        f"{counts[PART]:,} in part); {counts[CHARTED]:,} charted; "
+        f"{counts[NO_ROUTE]:,} no route"
     )
 
 

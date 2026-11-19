@@ -197,10 +197,15 @@ class MinimumClimb:
 
 @dataclasses.dataclass(frozen=True)
 class Direct:
-    """Proceed direct to a navaid or fix."""
+    """Proceed direct to a navaid or fix.
+
+    `altitude` is one climbed to on the way, as for `Radial`: "climbing
+    right turn to 7000 direct RAP VORTAC".
+    """
 
     target: NavaidRef | FixRef
     speed: SpeedRestriction | None = None
+    altitude: Altitude | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -353,7 +358,8 @@ class RunwayGroup:
 
 @dataclasses.dataclass(frozen=True)
 class VcoaGroup:
-    """A visual climb over airport: climb over the airport or a fix, then proceed.
+    """A visual climb over airport: climb over the airport, a fix or a navaid,
+    then proceed.
 
     An empty ``runways`` means every runway. ``bound`` is the direction to
     cross in ("cross … southeast bound at or above 8200"), if the text gives one.
@@ -362,7 +368,7 @@ class VcoaGroup:
     """
 
     runways: tuple[str, ...]
-    cross: FixRef | None
+    cross: NavaidRef | FixRef | None
     at_or_above: int
     then: tuple[Leg, ...]
     bound: Compass8 | None = None

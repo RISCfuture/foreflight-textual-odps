@@ -7,7 +7,7 @@ from odp_kml.geo import LatLon
 from odp_kml.pipeline import BlockOutcome
 from odp_kml.shapes import AirportDrawing, Label, Polyline, Style
 from tools import compare_builds
-from tools.compare_builds import CHARTED, NOT_DRAWN, PART, WHOLE, Outcome
+from tools.compare_builds import CHARTED, NO_ROUTE, NOT_DRAWN, PART, WHOLE, Outcome
 
 
 def drawing(*points: tuple[float, float]) -> AirportDrawing:
@@ -33,6 +33,7 @@ def test_record_classifies_each_kind_of_outcome():
         'parse_failed: unmatched phrase "x"',
     )
     assert compare_builds.record(BlockOutcome({})).outcome == NOT_DRAWN
+    assert compare_builds.record(BlockOutcome({}, no_route=True)).outcome == NO_ROUTE
 
 
 def test_digest_ignores_float_noise_but_not_a_move():
@@ -62,17 +63,18 @@ def test_diff_names_gained_lost_redrawn_and_changed_findings():
     assert change.findings_changed == ["AAA", "BBB"]
 
 
-def test_summary_leaves_charted_airports_out_of_the_percentage():
+def test_summary_leaves_charted_and_no_route_airports_out_of_the_percentage():
     snap = {
         "A": outcome(WHOLE),
         "B": outcome(PART),
         "C": outcome(NOT_DRAWN),
         "D": outcome(NOT_DRAWN),
         "E": outcome(CHARTED),
+        "F": outcome(NO_ROUTE),
     }
 
     assert compare_builds.summary(snap) == (
-        "2 of 4 drawn (50%; 1 whole, 1 in part); 1 charted"
+        "2 of 4 drawn (50%; 1 whole, 1 in part); 1 charted; 1 no route"
     )
 
 

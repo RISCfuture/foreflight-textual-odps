@@ -117,6 +117,12 @@ def vcoas_beside_an_undrawable_route(block):
     )
 
 
+def with_procedure(block, text):
+    """`block` with `text` as its whole DEPARTURE PROCEDURE and no VCOA."""
+    head = block.text[: block.text.index("DEPARTURE PROCEDURE:")]
+    return dataclasses.replace(block, text=f"{head}DEPARTURE PROCEDURE:\n{text}")
+
+
 def tph_block():
     blocks, _ = extract_blocks(FIXTURES / "pdf" / "SW4TO-excerpt.pdf", "SW4")
     return next(block for block in blocks if block.lid == "TPH")
@@ -216,6 +222,27 @@ class TestFindings:
             assert findings_for(result, lid, Kind.PARSE_FAILED) == []
         assert result.report.graphic_only == 2
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Diverse departure authorized all runways.",
+            "Rwys 8, 26, NA-Environmental.",
+            (
+                "Diverse departure NA. Use published departure procedures for "
+                "obstacle avoidance."
+            ),
+        ],
+    )
+    def test_text_giving_no_route_is_neither_drawn_nor_marked_nor_a_finding(self, text):
+        options = BuildOptions(cycle=CYCLE, cache_dir=Path("unused"))
+
+        outcome = process_block(
+            with_procedure(tph_block(), text), fixture_nasr(), options
+        )
+
+        assert outcome.no_route
+        assert (outcome.drawing, outcome.findings, outcome.marker) == (None, (), None)
+
     def test_airport_missing_from_nasr(self, result):
         kinds = {(f.kind, f.signature) for f in findings_for(result, "JTC")}
         assert (Kind.UNRESOLVED_REF, "airport not in NASR") in kinds
@@ -243,6 +270,26 @@ class TestFindings:
         lines = {s.name for s in outcome.drawing.shapes if isinstance(s, Polyline)}
         assert any(name.startswith("RWY 33") for name in lines)
         assert not any(name.startswith("RWY 15") for name in lines)
+
+    def test_takeoff_minimums_speed_limit_ending_on_the_first_radial_is_drawn(self):
+        options = BuildOptions(cycle=CYCLE, cache_dir=Path("unused"))
+        block = tph_block()
+        text = block.text.replace(
+            "climbing left turn direct TONOPAH (TPH) VORTAC thence...",
+            "climbing left turn heading 120° and TPH R-150 to TPH VORTAC thence...",
+        ).replace(
+            "320' per NM to 9100",
+            "320' per NM to 9100, do not exceed 210K until established on TPH R-150",
+        )
+
+        outcome = process_block(
+            dataclasses.replace(block, text=text), fixture_nasr(), options
+        )
+
+        assert [finding.detail.split(":")[0] for finding in outcome.findings] == [
+            "VCOA"
+        ]
+        assert "≤210 KIAS" in label_texts(outcome.drawing)
 
 
 class TestReport:

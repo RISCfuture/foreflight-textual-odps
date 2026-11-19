@@ -76,6 +76,12 @@ HEADER_LEG_WORDS = frozenset({"climb", "climbing"})
 # What leads a leg printed without "climb": "then on SLI VORTAC R-210".
 _ROUTE_PREPOSITIONS = frozenset({"on", "via"})
 _INTERCEPT_WORDS = frozenset({"intercept", "join"})
+# What a radial is flown by once intercepted: "intercept and track on ...".
+_FLY_ON_WORDS = frozenset({"climb", "track", "proceed"})
+# What follows a heading range's first heading: "316° CW 052°".
+_SENSES = frozenset({"cw", "ccw", "clockwise", "counter"})
+# A word of a navaid's name printed in mixed case: "Linden".
+_NAME_WORD = re.compile(r"[A-Z][a-z]+")
 _NAVAID_TYPES = (
     (("vor", "/", "dme"), NavaidType.VOR_DME),
     (("vortac",), NavaidType.VORTAC),
@@ -84,6 +90,8 @@ _NAVAID_TYPES = (
     (("dme",), NavaidType.DME),
 )
 NAVAID_TYPE_WORDS = frozenset(words[0] for words, _ in _NAVAID_TYPES)
+# Every word of a navaid type: "VOR", "/", "DME", ...
+_NAVAID_WORDS = frozenset(word for words, _ in _NAVAID_TYPES for word in words)
 VISUAL_CLIMB = ("for", "climb", "in", "visual", "conditions")
 # Leg words, printed in lowercase, that continue a sentence without a separator.
 _UNSEPARATED_LEG_WORDS = frozenset({"climb", "climbing"})
@@ -112,17 +120,24 @@ class LegParser(TokenStream):
         super().__init__(text)
         self._known_navaids = known_navaids or {}
         self._last_fix: NavaidRef | FixRef | None = None
+        # Holds announced before "thence" ("and hold, thence..."), each a fix
+        # and any pattern printed with it, for the shared tail to fly.
+        self._announced_holds: list[tuple[NavaidRef | FixRef, HoldSpec | None]] = []
 
     # --- Leg sequences -----------------------------------------------------
 
     def _legs(self, legs: list[Leg]) -> tuple[Leg, ...]:
         """legs := leg ((separator leg) | before | speed | and-hold
-                   | fix-crossing)* ("." | thence | ↓)
+                   | fix-crossing | upon-reaching | same-radial)*
+                   ("." | thence | ↓)
 
         ↓: the legs also end, unconsumed, where an inline VCOA alternative
         ("..., or for climb in visual conditions") begins, and where the text
         ends right after a "before ..." clause that lacks its period. Tracks
-        the fix each leg ends at, for a hold that names none.
+        the fix each leg ends at, for a hold that names none. A speed limit
+        after "before proceeding on course" limits the last leg flown; with no
+        leg flown before it, the legs end before the limit, which a visual
+        climb puts on the climb itself.
         """
         self._last_fix = end_fix(legs[-1]) if legs else None
         while True:
@@ -141,11 +156,23 @@ class LegParser(TokenStream):
             elif self._thence():
                 return (*legs, Thence())
             elif legs and self._peek_speed_restriction():
-                legs[-1] = self._with_speed(legs[-1], self._speed_restriction())
+                if not any(map(_flown, legs)):
+                    return tuple(legs)
+                speed = self._speed_restriction()
+                if isinstance(legs[-1], ProceedOnCourse):
+                    legs[:] = self._with_last_flown_speed(tuple(legs), speed)
+                else:
+                    legs[-1] = self._with_speed(legs[-1], speed)
             elif legs and self._peek("and", "hold"):
-                self._append(legs, self._and_hold())
+                if (held := self._and_hold()) is not None:
+                    self._append(legs, held)
             elif legs and self._peek_fix_crossing():
                 self._append(legs, self._fix_crossing())
+            elif legs and self._peek_upon_reaching():
+                self._append(legs, self._upon_reaching(legs[-1]))
+            elif legs and self._peek_same_radial(legs[-1]):
+                legs[-1] = self._same_radial(legs[-1])
+                self._last_fix = end_fix(legs[-1])
             else:
                 self._reject_airway_routing()
                 self._leg_separator(required=bool(legs))
@@ -182,28 +209,67 @@ class LegParser(TokenStream):
         legs.append(leg)
         self._last_fix = end_fix(leg)
 
+    def _peek_thence(self) -> bool:
+        lead = 1 if self._peek(",") or self._peek(";") else 0
+        return (
+            self._peek("thence", offset=lead) and not self._peek_inline_thence(lead)
+        ) or self._peek("...", offset=lead)
+
+    def _peek_inline_thence(self, offset: int = 0) -> bool:
+        """``thence via SEA R-230 ...``: "thence" with no ellipsis, the next
+        leg on the same line."""
+        thence, following = self._token(offset), self._token(offset + 1)
+        return (
+            thence is not None
+            and thence.lower == "thence"
+            and following is not None
+            and following.text != "..."
+            and "\n" not in self._text[thence.end : following.start]
+        )
+
+    def _require_announced_holds(self, tail: tuple[Leg, ...]) -> None:
+        """Refuse a shared tail that does not open with the climb in hold the
+        routes announced before their "thence" ("and hold, thence..."): at
+        the same fix, in the same pattern where both print one."""
+        if not self._announced_holds:
+            return
+        first = tail[0] if tail else None
+        if not isinstance(first, ClimbInHold) or any(
+            not _same_facility(fix, first.fix)
+            or (None not in (hold, first.hold) and hold != first.hold)
+            for fix, hold in self._announced_holds
+        ):
+            raise self._error("announced hold not flown in the shared tail")
+
     def _thence(self) -> bool:
         """thence := ["," | ";"] "thence" "..." | ["," | ";"] "..."
 
         An ellipsis alone ("to 7000...") also leads into the shared tail.
+        "Thence" with no ellipsis is a separator (`_leg_separator`).
         """
-        lead = 1 if self._peek(",") or self._peek(";") else 0
-        if not (self._peek("thence", offset=lead) or self._peek("...", offset=lead)):
+        if not self._peek_thence():
             return False
+        lead = 1 if self._peek(",") or self._peek(";") else 0
         self._index += lead
         self._accept("thence")
         self._expect("...")
         return True
 
     def _leg_separator(self, *, required: bool) -> None:
-        """separator := ("," | ";") ["then"] | "then" | "and" | ↓
+        """separator := ("," | ";") ["then" | inline-thence] | "then" | "and" | ↓
+
+        inline-thence := "thence" before a leg on the same line, as "then":
+        "cross Sanderson Fld ... at or above 1600, thence via SEA R-230 ...".
 
         ↓: none before a lowercase "climb" or "climbing", which goes on with
         the same sentence ("climb heading 256° to 800 climbing right turn
         ..."); a capitalized one may open a sentence for other runways.
         """
         if self._accept_any(",", ";"):
-            self._accept("then")
+            if self._peek_inline_thence():
+                self._expect("thence")
+            else:
+                self._accept("then")
         elif (
             not self._accept_any("then", "and")
             and required
@@ -246,8 +312,22 @@ class LegParser(TokenStream):
             raise self._error(f'unsupported routing "then {bound.lower} on"')
 
     def _leg(self) -> Leg:
-        """leg := climbing-turn | climb | continue-climb | proceed | direct
-        | bare-turn | cross-at | if-required | on-route | intercept"""
+        """leg := climbing-heading | fly-heading | climbing-turn | climb
+        | continue-climb | proceed | direct | bare-turn | cross-at | if-required
+        | on-route | intercept
+
+        climbing-heading := "climbing" ["on"] (heading-range | heading-leg), a
+        climb on a heading with no turn: "climbing on heading 175° to 4200".
+
+        fly-heading := "fly" heading-leg: "fly heading 248° and MTJ VOR/DME
+        R-297 to BRICK/MTJ 23.44 DME".
+        """
+        if self._peek_climbing_heading():
+            self._expect("climbing")
+            return self._climb_route()
+        if self._peek("fly") and self._peek_heading(1):
+            self._expect("fly")
+            return self._heading_leg()
         if self._peek("climbing"):
             return self._climbing_turn()
         if self._peek("climb"):
@@ -272,6 +352,10 @@ class LegParser(TokenStream):
             return self._intercept()
         raise self._unmatched()
 
+    def _peek_climbing_heading(self) -> bool:
+        offset = 2 if self._peek("climbing", "on") else 1
+        return self._peek("climbing") and self._peek_heading(offset)
+
     def _cross_at(self) -> CrossAt:
         """cross-at := "cross" target altitude-constraint"""
         self._expect("cross")
@@ -290,6 +374,60 @@ class LegParser(TokenStream):
         self._accept(",")
         self._expect("to")
         return self._cross_at()
+
+    def _peek_same_radial(self, last: Leg) -> bool:
+        """``, then via R-063`` naming the radial the last leg flies, with no
+        terminator of its own."""
+        turned = _turned(last)
+        if not isinstance(turned, Radial | HeadingAndRadial) or turned.until:
+            return False
+        offset = int(self._peek(","))
+        offset += int(self._peek("then", offset=offset))
+        radial = self._token(offset + 1)
+        return (
+            self._peek_any_of(_ROUTE_PREPOSITIONS, offset)
+            and radial is not None
+            and radial.text == f"R-{turned.radial:03d}"
+        )
+
+    def _same_radial(self, last: Leg) -> Leg:
+        """same-radial := [","] ["then"] ("via" | "on") "R-nnn" radial-end, the
+        radial the last leg intercepted, named without its navaid, and where
+        it ends: "heading 280° to intercept TFD R-063, then via R-063 to TFD
+        VORTAC". It is the last leg's terminator."""
+        self._accept(",")
+        self._accept("then")
+        self._expect_any(*_ROUTE_PREPOSITIONS)
+        self._radial()
+        turned = _turned(last)
+        altitude, until = self._radial_end(turned.navaid)
+        if until is None:
+            raise self._unmatched()
+        if altitude is not None:
+            turned = self._with_altitude(turned, altitude)
+        outbound = self._outbound(turned.outbound, turned.navaid, until)
+        turned = dataclasses.replace(turned, until=until, outbound=outbound)
+        if isinstance(last, ClimbingTurn):
+            return dataclasses.replace(last, then=turned)
+        return turned
+
+    def _peek_upon_reaching(self) -> bool:
+        return self._peek(",", "upon", "reaching") or self._peek("upon", "reaching")
+
+    def _upon_reaching(self, last: Leg) -> ProceedOnCourse:
+        """upon-reaching := [","] "upon reaching" nnnn "proceed on course",
+        after a leg climbing to that altitude: "... to intercept CME R-323,
+        upon reaching 6000 proceed on course." Any other altitude would end
+        the route somewhere the legs do not."""
+        self._accept(",")
+        self._expect("upon", "reaching")
+        start = self._index
+        until = getattr(_turned(last), "until", None)
+        if not (isinstance(until, Altitude) and until.feet == self._integer()):
+            self._index = start
+            raise self._error("upon reaching an altitude the leg does not end at")
+        self._expect("proceed", "on", "course")
+        return ProceedOnCourse()
 
     def _peek_continuation(self) -> bool:
         """A new sentence that goes on flying the route: "... direct RSK VORTAC.
@@ -341,20 +479,25 @@ class LegParser(TokenStream):
             "prior", "to", offset=offset
         )
 
-    def _before(self) -> ProceedOnCourse | Direct | ClimbingTurn:
+    def _before(self) -> ProceedOnCourse | Direct | ClimbingTurn | Radial:
         """before := ("before" | "prior to") (
-              "proceeding" ("on course" | "enroute" | direction | direct)
+              "proceeding" ("on course" | "enroute" | direction | direct
+                | bound-on-radial)
             | "climbing on course"
             | "turning" [turn-word] (direct | [direction] ["on course"])
             | [turn-word] "turn")
 
-        "Before turning left direct CPN VOR/DME" turns onto that Direct leg.
+        "Before turning left direct CPN VOR/DME" turns onto that Direct leg;
+        "before proceeding southbound on PYE R-349 to PYE VOR/DME" flies the
+        radial.
         """
         if not self._accept("before"):
             self._expect("prior", "to")
         if self._accept("proceeding"):
             if self._peek("direct"):
                 return self._direct()
+            if self._peek_bound_on_radial():
+                return self._bound_on_radial()
             if self._accept("on", "course") or self._accept("enroute"):
                 return ProceedOnCourse()
             return ProceedOnCourse(toward=self._directions())
@@ -439,18 +582,30 @@ class LegParser(TokenStream):
 
     def _speed_restriction(self) -> SpeedRestriction:
         """speed := [","] "do not exceed" n "KIAS until" speed-until"""
+        return self._speed_restriction_and_fix()[0]
+
+    def _speed_restriction_and_fix(
+        self,
+    ) -> tuple[SpeedRestriction, NavaidRef | FixRef | None]:
+        """The speed limit, and the fix it ends at when it ends at one."""
         self._accept(",")
         self._expect("do", "not", "exceed")
         kias = self._integer()
         self._expect("kias", "until")
         start = self._position()
-        self._speed_until()
-        return SpeedRestriction(kias, self._slice_from(start))
+        fix = self._speed_until()
+        return SpeedRestriction(kias, self._slice_from(start)), fix
 
-    def _speed_until(self) -> None:
-        """speed-until := "established on" ("course" | heading | radial-course
-        [bound]) | "established" flight-direction | "reaching" nnnn ["MSL"]
-        | nn.n "DME" | ["crossing" | "passing"] target"""
+    def _speed_until(self) -> NavaidRef | FixRef | None:
+        """speed-until := "established on" ("course" | heading | nnn ["°"]
+        "heading" | radial-course [bound]) | "established direct" target
+        | "established" flight-direction
+        | ("reaching" | "leaving") nnnn ["MSL"] | nn.n "DME"
+        | ["crossing" | "passing"] target
+
+        A climb leaves an altitude as it reaches it: "until leaving 4000".
+        Returns the fix a limit ends at ("until passing LAS VORTAC"), if any.
+        """
         if self._accept("established", "on"):
             self._accept("the")
             if self._accept("course"):
@@ -458,13 +613,20 @@ class LegParser(TokenStream):
             if self._peek_heading():
                 self._heading()
                 return
+            if self._peek_integer():
+                self._compass_heading()
+                self._expect("heading")
+                return
             self._radial_course()
             self._bound()
             return
+        if self._accept("established", "direct"):
+            self._target()
+            return None
         if self._accept("established"):
             self._flight_direction()
             return
-        if self._accept("reaching"):
+        if self._accept_any("reaching", "leaving"):
             self._integer()
             self._accept("msl")
             return
@@ -474,7 +636,7 @@ class LegParser(TokenStream):
             self._expect("dme")
             return
         self._accept_any("crossing", "passing")
-        self._target()
+        return self._target()
 
     def _flight_direction(self) -> None:
         """flight-direction := bound | compass ("-" | "/") compass "bound",
@@ -491,15 +653,51 @@ class LegParser(TokenStream):
         self._expect("bound")
 
     def _peek_speed_sentence(self) -> bool:
-        """ "... on course. Do not exceed 150 KIAS until reaching 1700 MSL." """
-        return self._follows_period() and self._peek("do", "not", "exceed")
+        """ "... on course. Do not exceed 150 KIAS until reaching 1700 MSL." or
+        "... (Do not exceed 250 KTS until ABQ VORTAC)." """
+        return self._follows_period() and (
+            self._peek("do", "not", "exceed") or self._peek("(", "do", "not", "exceed")
+        )
+
+    def _speed_sentence(self) -> tuple[SpeedRestriction, NavaidRef | FixRef | None]:
+        """speed-sentence := speed "." | "(" speed ")" "."; the limit and the
+        fix it ends at, if any."""
+        opened = self._accept("(")
+        speed, fix = self._speed_restriction_and_fix()
+        if opened:
+            self._expect(")")
+        self._expect(".")
+        return speed, fix
 
     def _with_speed_sentence(self, legs: tuple[Leg, ...]) -> tuple[Leg, ...]:
         """`legs` with a speed-limit sentence applied to the last leg flown."""
-        speed = self._speed_restriction()
-        self._expect(".")
+        return self._with_last_flown_speed(legs, *self._speed_sentence())
+
+    def _with_last_flown_speed(
+        self,
+        legs: tuple[Leg, ...],
+        speed: SpeedRestriction,
+        until_fix: NavaidRef | FixRef | None = None,
+    ) -> tuple[Leg, ...]:
+        """`legs` with `speed` on the last leg flown, as a limit printed after
+        "before proceeding on course" ("... to LAS VORTAC before proceeding on
+        course, do not exceed 200K until passing LAS VORTAC") limits the leg
+        before it.
+
+        A limit that ends at a fix cannot bind a climb in hold at that fix,
+        flown only once the fix is reached; it binds the leg before the hold
+        ("climbing right turn direct ABQ VORTAC. If required, continue climb in
+        ABQ VORTAC holding pattern ... (Do not exceed 250 KTS until ABQ
+        VORTAC).").
+        """
         for index in reversed(range(len(legs))):
-            if not isinstance(legs[index], ProceedOnCourse | Thence | CrossAt):
+            if (
+                until_fix is not None
+                and isinstance(legs[index], ClimbInHold)
+                and _same_facility(legs[index].fix, until_fix)
+            ):
+                continue
+            if _flown(legs[index]):
                 leg = legs[index]
                 if _speed_restriction_of(leg) is not None:
                     raise self._error("two speed restrictions on one leg")
@@ -520,6 +718,9 @@ class LegParser(TokenStream):
 
         turn-leg := direct | ["on" | "via" | "to"] (heading-range | heading-leg
           | radial-leg), "to" only before a heading ("turn to heading 200°")
+          or a radial ("turn to BKE VOR/DME R-066 to BKE VOR/DME")
+          | "to" target, a turn direct to it ("climbing left turn to BGQ
+          VORTAC")
 
         A leading altitude comes before "via", "on" or a heading ("climbing
         right turn to 2400 heading 100°"). ↓: a turn with no route of its own
@@ -572,31 +773,57 @@ class LegParser(TokenStream):
 
     def _altitude_before_route(self) -> Altitude | None:
         """``to 10200 via heading …``, ``to 2000 heading 071°``, ``to 2500 on
-        CMA R-265``: the altitude a climb or turn climbs to precedes its route.
+        CMA R-265``, ``to 3000 to intercept MOD VOR/DME R-264``: the altitude a
+        climb or turn climbs to precedes its route.
+
+        "And on" before a radial ("climbing left turn to 5000 and on the HGR
+        VOR R-270 to HGR VOR") joins the two as "on" does: a turn printing
+        no heading can only turn onto the radial.
 
         One before "direct" ("climbing right turn to 1900 direct AUG VOR/DME")
-        or set off from its route by a comma ("climb to 3600, direct to BZA
-        VORTAC") could end the leg short of the route's end or be only the
-        altitude to reach on the way, so both are refused.
+        is climbed to on the way to the fix, which is where the leg ends, as
+        for a radial flown to a fix. One set off from its route by a comma
+        ("climb to 3600, direct to BZA VORTAC") could end the leg short of the
+        route's end or be only the altitude to reach on the way, so it is
+        refused.
         """
         if not (self._peek("to") and self._peek_integer(1)):
             return None
-        if self._peek("direct", offset=2):
-            raise self._error('unsupported "to <alt>" before "direct"')
+        if self._peek_and_on_radial(2):
+            altitude = self._to_altitude()
+            self._expect("and")
+            return altitude
         if self._peek_any_of(_LEG_SEPARATORS, 2):
             raise self._error('unsupported "to <alt>," before a route')
-        if not self._peek_any_of(_ROUTE_LEADS, 2):
+        if not (
+            self._peek_any_of(_ROUTE_LEADS, 2)
+            or self._peek("direct", offset=2)
+            or (self._peek("to", offset=2) and self._peek_any_of(_INTERCEPT_WORDS, 3))
+        ):
             return None
         return self._to_altitude()
 
+    def _peek_and_on_radial(self, offset: int) -> bool:
+        """``and on [the] <navaid>``."""
+        navaid = offset + (3 if self._peek("the", offset=offset + 2) else 2)
+        return self._peek("and", "on", offset=offset) and self._peek_navaid(navaid)
+
     def _with_leading_altitude(
         self,
-        leg: HeadingAndRadial | Radial | ClimbHeading | RunwayHeading | HeadingRange,
+        leg: Direct
+        | HeadingAndRadial
+        | Radial
+        | ClimbHeading
+        | RunwayHeading
+        | HeadingRange,
         altitude: Altitude,
-    ) -> HeadingAndRadial | Radial | ClimbHeading | RunwayHeading | HeadingRange:
+    ) -> (
+        Direct | HeadingAndRadial | Radial | ClimbHeading | RunwayHeading | HeadingRange
+    ):
         """A leading altitude terminates a leg that has no other terminator;
-        a radial leg flown to a fix or DME distance climbs to it on the way."""
-        if _ends_at_a_point(leg):
+        a direct or radial leg flown to a fix or DME distance climbs to it on
+        the way."""
+        if isinstance(leg, Direct) or _ends_at_a_point(leg):
             return self._with_altitude(leg, altitude)
         if isinstance(leg.until, AtFix):
             raise self._error('unsupported "to <alt>" with fix terminator')
@@ -611,7 +838,10 @@ class LegParser(TokenStream):
             return self._direct()
         if self._peek_to_intercept():
             return self._intercept()
-        if not self._accept_to_heading():
+        if not (self._accept_to_heading() or self._accept_to_radial()):
+            if self._peek("to") and self._peek_navaid(1):
+                self._expect("to")
+                return Direct(self._target())
             self._accept_any("on", "via")
         if self._peek_heading_range():
             return self._heading_range()
@@ -626,10 +856,23 @@ class LegParser(TokenStream):
         self._expect("to")
         return True
 
+    def _accept_to_radial(self) -> bool:
+        """``climbing left turn to BKE VOR/DME R-066``: the radial turned onto."""
+        if not (self._peek("to") and self._peek_navaid(1)):
+            return False
+        offset = 2
+        while self._peek_navaid(offset) or self._peek_any_of(_NAVAID_WORDS, offset):
+            offset += 1
+        token = self._token(offset)
+        if token is None or not re.fullmatch(r"R-\d+", token.text):
+            return False
+        self._expect("to")
+        return True
+
     def _climb(self) -> Leg:
         """climb := "climb" ("on course" | direct | in-hold | straight-ahead
-        | [to-altitude] ["on"|"via"] (runway-heading | heading-range
-          | heading-leg | radial-leg))
+        | [to-altitude] (direct | ["on"|"via"] (runway-heading | heading-range
+          | heading-leg | radial-leg)))
 
         runway-heading := ("runway heading" | "rwy hdg") [until]
 
@@ -646,7 +889,7 @@ class LegParser(TokenStream):
         if self._peek_straight_ahead():
             return self._straight_ahead()
         altitude = self._altitude_before_route()
-        leg = self._climb_route()
+        leg = self._direct() if self._peek("direct") else self._climb_route()
         return leg if altitude is None else self._with_leading_altitude(leg, altitude)
 
     def _climb_route(
@@ -737,19 +980,29 @@ class LegParser(TokenStream):
         return self._radial_leg()
 
     def _proceed(self) -> Radial | Direct:
-        """proceed := "proceed" (("on" | "via") radial-leg | direct)"""
+        """proceed := "proceed" (("on" | "via") radial-leg | direct
+        | "to" target)
+
+        "Proceed to BQU VOR/DME" goes direct to it, as "proceed direct BQU
+        VOR/DME" does.
+        """
         self._expect("proceed")
         if self._peek("direct"):
             return self._direct()
+        if self._peek("to") and self._peek_navaid(1):
+            self._expect("to")
+            return Direct(self._target())
         if not self._accept_any("on", "via"):
             raise self._unmatched()
         return self._radial_leg()
 
     def _direct(self) -> Direct:
-        """direct := "direct" ["to"] target"""
+        """direct := "direct" ["to"] target [altitude-after-fix], e.g. "direct
+        IGN VOR/DME to 1400": the altitude is climbed to on the way."""
         self._expect("direct")
         self._accept("to")
-        return Direct(self._target())
+        target = self._target()
+        return Direct(target, altitude=self._altitude_after_fix())
 
     # --- Headings and radials ----------------------------------------------
 
@@ -767,16 +1020,24 @@ class LegParser(TokenStream):
 
     def _peek_heading_range(self) -> bool:
         offset = 1 if self._peek("a") else 0
-        return (
-            self._peek("heading", offset=offset) or self._peek("hdg", offset=offset)
-        ) and self._peek("between", offset=offset + 1)
+        if not self._peek_heading(offset):
+            return False
+        if self._peek("between", offset=offset + 1):
+            return True
+        number = offset + 1
+        sense = number + (2 if self._peek("°", offset=number + 1) else 1)
+        return self._peek_integer(number) and self._peek_any_of(_SENSES, sense)
 
     def _heading_range(self) -> HeadingRange:
-        """heading-range := ["a"] ("heading" | "hdg") "between" sector
-        ("or" ["between"] sector)* ["from" "DER"] [until]"""
+        """heading-range := ["a"] ("heading" | "hdg") ["between"] sector
+        ("or" ["between"] sector)* ["from" "DER"] [until]
+
+        "Between" may be left out ("climb on a heading 316° CW 052° from DER"):
+        the sector's CW or CCW still makes it a range.
+        """
         self._accept("a")
         self._expect_any("heading", "hdg")
-        self._expect("between")
+        self._accept("between")
         sectors = [self._sector()]
         while self._peek("or") and (
             self._peek_integer(1) or self._peek("between", offset=1)
@@ -864,9 +1125,17 @@ class LegParser(TokenStream):
         return heading
 
     def _heading_leg(self) -> ClimbHeading | HeadingAndRadial:
-        """heading-leg := heading [("and" ["on"] | "to" ("intercept" | "join"))
-        radial-course [altitude-before-fix]] [until]"""
+        """heading-leg := heading ["from" "DER"] [("and" ["on"] | "to"
+        ("intercept" | "join")) radial-course [altitude-before-fix]]
+        [until | "," "climbing" to-altitude]
+
+        "From DER" says where the heading is flown from, as after a heading
+        range ("climb on heading 185° from DER to 11000"). "Climbing right
+        turn heading 110°, climbing to 5000 before proceeding on course" ends
+        the heading at the altitude, as "heading 110° to 5000" does.
+        """
         heading = self._heading()
+        self._accept("from", "der")
         if self._peek_and_radial():
             self._expect("and")
             self._accept("on")
@@ -874,8 +1143,16 @@ class LegParser(TokenStream):
         if self._peek_to_intercept():
             self._expect("to")
             self._expect_any(*_INTERCEPT_WORDS)
-            return self._heading_and_radial(heading)
-        return ClimbHeading(heading, self._until())
+            return self._heading_and_radial(heading, self._and_fly_on())
+        until = self._until()
+        if (
+            until is None
+            and self._peek(",", "climbing", "to")
+            and self._peek_integer(3)
+        ):
+            self._expect(",", "climbing")
+            until = self._to_altitude()
+        return ClimbHeading(heading, until)
 
     def _peek_to_intercept(self) -> bool:
         """``to intercept`` or ``to join``."""
@@ -889,38 +1166,131 @@ class LegParser(TokenStream):
             navaid += 1
         return self._peek("and") and self._peek_navaid(navaid)
 
-    def _heading_and_radial(self, heading: int) -> HeadingAndRadial:
+    def _heading_and_radial(
+        self, heading: int, sense: bool | None = None
+    ) -> HeadingAndRadial:
         navaid, radial, direction = self._radial_course()
-        altitude = self._altitude_before_fix()
-        until = self._until()
+        direction = self._one_sense(sense, direction)
+        altitude, until = self._radial_end(navaid)
         outbound = self._outbound(direction, navaid, until)
         return HeadingAndRadial(
             heading, navaid, radial, outbound, until, altitude=altitude
         )
 
-    def _with_altitude(
-        self, leg: Radial | HeadingAndRadial, altitude: Altitude
-    ) -> Radial | HeadingAndRadial:
+    def _with_altitude[L: Direct | Radial | HeadingAndRadial](
+        self, leg: L, altitude: Altitude
+    ) -> L:
         """`leg`, ending at a fix or DME distance, climbing to `altitude` on
         the way there."""
         if leg.altitude is not None:
             raise self._error("leg with two altitudes")
         return dataclasses.replace(leg, altitude=altitude)
 
-    def _radial_leg(self) -> Radial:
-        """radial-leg := radial-course [altitude-before-fix] [until]
+    def _radial_leg(self, sense: bool | None = None) -> Radial:
+        """radial-leg := radial-course radial-end
 
         A radial printed without a sense, flown from its own navaid just
         reached ("direct VXV VORTAC then on VXV VORTAC R-053 to 4100"), is
-        outbound.
+        outbound. `sense` is one printed before the radial ("track outbound
+        on HOM VOR/DME R-210").
         """
         navaid, radial, direction = self._radial_course()
-        altitude = self._altitude_before_fix()
+        direction = self._one_sense(sense, direction)
         if direction is None and self._just_reached(navaid):
             direction = True
-        until = self._until()
+        altitude, until = self._radial_end(navaid)
         outbound = self._outbound(direction, navaid, until)
         return Radial(navaid, radial, outbound, until, altitude=altitude)
+
+    def _one_sense(self, before: bool | None, after: bool | None) -> bool | None:
+        """A radial's sense, printed before it or after it but not both ways."""
+        if None not in (before, after) and before != after:
+            raise self._error("radial sense printed both ways")
+        return after if before is None else before
+
+    def _radial_end(self, navaid: NavaidRef) -> tuple[Altitude | None, Until | None]:
+        """radial-end := [altitude-before-fix] (fix-to-cross | [[","] ["then"]
+        (fix-distance | until) [altitude-after-fix]]), the comma or "then"
+        only before the radial's own navaid
+
+        Returns the altitude climbed to on the way and the terminator. Past
+        a fix or DME distance, a trailing altitude ("R-090 to VXV VORTAC to
+        5000") is climbed to on the way there, as a leading one is. The
+        radial's own navaid, set off by a comma or "then" ("on DDY R-202, to
+        DDY VOR/DME", "R-090 then to VXV VORTAC"), is where the radial ends:
+        nothing but the radial leads to it.
+        """
+        altitude = self._altitude_before_fix()
+        if (crossed := self._fix_to_cross()) is not None:
+            return altitude, AtFix(crossed)
+        lead = int(self._peek(",")) + int(
+            self._peek("then", offset=int(self._peek(",")))
+        )
+        if lead and self._peek("to", offset=lead) and self._peek_same(navaid, lead + 1):
+            self._index += lead
+        until = (
+            self._fix_distance(navaid) if self._peek_fix_distance() else self._until()
+        )
+        if altitude is None and isinstance(until, AtFix | Dme):
+            altitude = self._altitude_after_fix()
+        return altitude, until
+
+    def _peek_fix_distance(self) -> bool:
+        fix = self._token(1)
+        return (
+            self._peek("to")
+            and fix is not None
+            and is_ident_word(fix.text)
+            and len(fix.text) == FIX_LENGTH
+            and self._peek("/", offset=2)
+            and self._peek_number(3)
+            and self._peek("dme", offset=4)
+        )
+
+    def _peek_number(self, offset: int) -> bool:
+        token = self._token(offset)
+        return token is not None and bool(NUMBER.fullmatch(token.text))
+
+    def _fix_distance(self, navaid: NavaidRef) -> Dme:
+        """fix-distance := "to" FIX "/" nn.n "DME", a fix named by its distance
+        alone, from the radial's own navaid: "RIL VOR/DME R-083 to ZOBAK/7.41
+        DME"."""
+        self._expect("to")
+        fix = FixRef(self._next().text)
+        self._expect("/")
+        nm = self._number()
+        self._expect("dme")
+        return Dme(NavaidRef(navaid.ident), nm, fix)
+
+    def _fix_to_cross(self) -> NavaidRef | FixRef | None:
+        """fix-to-cross := the fix of a following "to cross" fix-crossing
+        ("on COE R-360 to cross COE VOR/DME at or above 9000"), where the
+        radial ends; the crossing itself is read after the leg. ``None`` when
+        no fix crossing follows, as before "to cross ABC R-123"."""
+        if not (self._peek("to", "cross") and self._peek_navaid(2)):
+            return None
+        start = self._index
+        self._index += 2
+        try:
+            crossed = self._target()
+            at = self._peek("at")
+        except ParseError:
+            return None
+        finally:
+            self._index = start
+        return crossed if at else None
+
+    def _peek_same(self, navaid: NavaidRef, offset: int) -> bool:
+        """Whether `navaid`'s ident comes next, after `offset` tokens."""
+        token = self._token(offset)
+        return token is not None and token.text == navaid.ident
+
+    def _altitude_after_fix(self) -> Altitude | None:
+        """altitude-after-fix := to-altitude, after an until naming a fix or
+        DME distance."""
+        if self._peek("to") and self._peek_integer(1):
+            return self._to_altitude()
+        return None
 
     def _altitude_before_fix(self) -> Altitude | None:
         """altitude-before-fix := to-altitude, before an until naming a fix or
@@ -939,12 +1309,30 @@ class LegParser(TokenStream):
         return self._last_fix is not None and _same_facility(self._last_fix, navaid)
 
     def _intercept(self) -> Radial:
-        """intercept := ["to"] ("intercept" | "join") radial-leg, a radial joined
-        on no printed heading: "climbing left turn to intercept PUB R-274 to
-        PUB VORTAC", "...all aircraft, intercept FHU VOR/DME R-021 ..."."""
+        """intercept := ["to"] ("intercept" | "join") and-fly-on radial-leg, a
+        radial joined on no printed heading: "climbing left turn to intercept
+        PUB R-274 to PUB VORTAC", "...all aircraft, intercept FHU VOR/DME R-021
+        ..."."""
         self._accept("to")
         self._expect_any(*_INTERCEPT_WORDS)
-        return dataclasses.replace(self._radial_leg(), intercept=True)
+        return dataclasses.replace(self._radial_leg(self._and_fly_on()), intercept=True)
+
+    def _and_fly_on(self) -> bool | None:
+        """and-fly-on := ["and" ("climb" | "track" | "proceed") ["outbound" |
+        "inbound"] "on"], between "intercept" and the radial it flies:
+        "to intercept and track outbound on HOM VOR/DME R-210". Returns the
+        sense it prints, if any."""
+        if not (self._peek("and") and self._peek_any_of(_FLY_ON_WORDS, 1)):
+            return None
+        self._expect("and")
+        self._next()
+        sense = None
+        if self._accept("outbound"):
+            sense = True
+        elif self._accept("inbound"):
+            sense = False
+        self._expect("on")
+        return sense
 
     def _radial_course(self) -> tuple[NavaidRef, int, bool | None]:
         """radial-course := ["the"] navaid "R-nnn" ["outbound" | "inbound"]"""
@@ -965,14 +1353,35 @@ class LegParser(TokenStream):
         within 67.5° of one way along the radial, so that neither the compass
         point's coarseness nor magnetic variation can flip it."""
         start = self._index
-        bound = _compass_bearing(self._bound())
-        off_outbound = abs((bound - radial + 180) % 360 - 180)
-        if off_outbound <= _BOUND_TOLERANCE_DEG:
-            return True
-        if off_outbound >= 180 - _BOUND_TOLERANCE_DEG:
+        outbound = _bound_sense(self._bound(), radial)
+        if outbound is None:
+            self._index = start
+            raise self._error("direction of flight across the radial")
+        return outbound
+
+    def _peek_bound_on_radial(self) -> bool:
+        """``southbound on PYE R-349``."""
+        token = self._token()
+        if token is None or not self._peek_bound():
             return False
-        self._index = start
-        raise self._error("direction of flight across the radial")
+        on = 1 if token.lower in BOUND_WORDS else 2
+        return self._peek("on", offset=on) and self._peek_navaid(on + 1)
+
+    def _bound_on_radial(self) -> Radial:
+        """bound-on-radial := bound "on" radial-leg, the direction of flight
+        giving the radial its sense as one printed after it does: "before
+        proceeding southbound on PYE R-349 to PYE VOR/DME"."""
+        start = self._index
+        bound = self._bound()
+        self._expect("on")
+        leg = self._radial_leg()
+        outbound = _bound_sense(bound, leg.radial)
+        if outbound is None:
+            self._index = start
+            raise self._error("direction of flight across the radial")
+        if leg.outbound is not None and leg.outbound != outbound:
+            raise self._error("radial sense printed both ways")
+        return dataclasses.replace(leg, outbound=outbound)
 
     def _radial(self) -> int:
         token = self._token()
@@ -997,7 +1406,7 @@ class LegParser(TokenStream):
 
     def _until(self) -> Until | None:
         """until := "to" (altitude | cross-radial | dme | target) | until-altitude"""
-        if self._peek("until") and self._peek_integer(1):
+        if self._peek_until_altitude():
             return self._until_altitude()
         if not self._peek("to"):
             return None
@@ -1022,11 +1431,20 @@ class LegParser(TokenStream):
         feet = self._integer()
         return Altitude(feet, AltitudeKind.TO, self._slice_from(start))
 
+    def _peek_until_altitude(self) -> bool:
+        offset = int(self._peek(","))
+        if self._peek("until", "reaching", offset=offset):
+            return self._peek_integer(offset + 2)
+        return offset == 0 and self._peek("until") and self._peek_integer(1)
+
     def _until_altitude(self) -> Altitude:
-        """until-altitude := "until" nnnn, a climb-to altitude: "climb on
-        heading 208° until 5500"."""
+        """until-altitude := "until" nnnn | [","] "until reaching" nnnn, a
+        climb-to altitude: "climb on heading 208° until 5500", "climb heading
+        136° and ECS VOR R-143, until reaching 5500, thence…"."""
+        self._accept(",")
         start = self._position()
         self._expect("until")
+        self._accept("reaching")
         feet = self._integer()
         return Altitude(feet, AltitudeKind.TO, self._slice_from(start))
 
@@ -1136,18 +1554,26 @@ class LegParser(TokenStream):
         self._expect("holding", "pattern")
         return fix
 
-    def _and_hold(self) -> ClimbInHold:
-        """and-hold := "and hold" [hold-spec] [","] continue-climb
+    def _and_hold(self) -> ClimbInHold | None:
+        """and-hold := "and hold" [hold-spec] ([","] continue-climb | ↓)
 
         "... to MQO VORTAC and hold, continue climb in MQO holding pattern
         (...) to ...": one climb in hold at the fix the route has just
         reached, its pattern given by either phrase, or by both alike.
+
+        ↓: before "thence" ("direct INW VORTAC and hold, thence...") the hold
+        is announced for the shared tail to fly, and ``None`` returned; the
+        tail must open with a climb in hold at that fix
+        (`_require_announced_holds`).
         """
         reached = self._last_fix
         self._expect("and", "hold")
         spec_fix, hold = self._hold_spec() if self._peek("(") else (None, None)
         if reached is None:
             raise self._error("hold without a preceding fix")
+        if self._peek_thence():
+            self._announced_holds.append((self._one_hold_fix(reached, spec_fix), hold))
+            return None
         self._accept(",")
         if not self._peek("continue"):
             raise self._unmatched()
@@ -1315,19 +1741,25 @@ class LegParser(TokenStream):
         return target
 
     def _target(self) -> NavaidRef | FixRef:
-        """target := NAME+ "(" IDENT ")" [type] | IDENT [type] | FIX ["INT"]
-        | NAME+ type
+        """target := (NAME+ | Name+) "(" IDENT ")" [type] | IDENT [type]
+        | FIX ["INT" | "intersection"] | NAME+ type
 
-        "INT" (intersection) after a five-letter name marks it as a fix.
+        "INT" or "intersection" after a five-letter name marks it as a fix.
         """
         start = self._position()
-        words = self._uppercase_words()
+        words = self._uppercase_words() or self._name_before_ident()
         if not words:
             raise self._unmatched()
         if self._accept("("):
             ident = self._ident()
             self._expect(")")
             return NavaidRef(ident, self._navaid_type(), " ".join(words))
+        if (
+            len(words) == 1
+            and len(words[0]) == FIX_LENGTH
+            and self._accept("intersection")
+        ):
+            return FixRef(words[0])
         if words[-1] == INTERSECTION and len(words) == 2:
             words.pop()
             if len(words[0]) != FIX_LENGTH:
@@ -1346,6 +1778,25 @@ class LegParser(TokenStream):
             " ".join(words),
             start,
         )
+
+    def _name_before_ident(self) -> list[str]:
+        """A navaid name printed in mixed case, only before its ident in
+        parentheses: "Linden (LIN) VOR/DME"."""
+        offset = 0
+        while (token := self._token(offset)) is not None and _NAME_WORD.fullmatch(
+            token.text
+        ):
+            offset += 1
+        if not (offset and self._peek("(", offset=offset)):
+            return []
+        ident = self._token(offset + 1)
+        if not (
+            ident is not None
+            and is_ident_word(ident.text)
+            and self._peek(")", offset=offset + 2)
+        ):
+            return []
+        return [self._next().text for _ in range(offset)]
 
     def _uppercase_words(self) -> list[str]:
         words = []
@@ -1414,6 +1865,17 @@ def _names_sixteenth_point(cardinal: Compass8, intercardinal: Compass8) -> bool:
     return len(cardinal) == 1 and len(intercardinal) == 2 and cardinal in intercardinal
 
 
+def _bound_sense(bound: Compass8, radial: int) -> bool | None:
+    """Whether flying `bound` along `radial` is outbound, or ``None`` when the
+    direction lies across the radial, more than 67.5° off both ways."""
+    off_outbound = abs((_compass_bearing(bound) - radial + 180) % 360 - 180)
+    if off_outbound <= _BOUND_TOLERANCE_DEG:
+        return True
+    if off_outbound >= 180 - _BOUND_TOLERANCE_DEG:
+        return False
+    return None
+
+
 def _compass_bearing(point: Compass8) -> int:
     """``N`` → 0, ``NE`` → 45, … ``NW`` → 315."""
     return list(Compass8).index(point) * 45
@@ -1422,6 +1884,12 @@ def _compass_bearing(point: Compass8) -> int:
 def _speed_restriction_of(leg: Leg) -> SpeedRestriction | None:
     turned = leg.then if isinstance(leg, ClimbingTurn) else leg
     return getattr(turned, "speed", None)
+
+
+def _flown(leg: Leg) -> bool:
+    """Whether `leg` is flown, rather than leaving the procedure or crossing
+    the fix already reached."""
+    return not isinstance(leg, ProceedOnCourse | Thence | CrossAt)
 
 
 def _turned(leg: Leg) -> Leg | None:
