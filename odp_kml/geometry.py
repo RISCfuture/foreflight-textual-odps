@@ -1310,7 +1310,11 @@ def _require_climb(pen: _Pen, altitude: Altitude) -> None:
 
 
 def _direct(pen: _Pen, leg: Direct, direction: Turn | None) -> None:
-    """Arc from the current course onto the tangent line through the fix."""
+    """Arc from the current course onto the tangent line through the fix.
+
+    An altitude climbed to on the way is labelled beside the fix, and the
+    climb goes no higher until a later leg climbs on, as on a radial.
+    """
     ctx = pen.ctx
     ident = leg.target.ident
     name = _leg_name(pen, direction, f"direct {ident}")
@@ -1323,6 +1327,12 @@ def _direct(pen: _Pen, leg: Direct, direction: Turn | None) -> None:
     pen.straight_to(target)
     ctx.polyline(name, Style.ROUTE, [*points, target])
     _arrowhead(pen, name, Style.ROUTE, target, pen.course)
+    if leg.altitude is not None:
+        _require_climb(pen, leg.altitude)
+        pen.level_at(leg.altitude.feet)
+        _offset_label(
+            pen, format_altitude(leg.altitude, ctx.params.label_style), target, 0
+        )
 
 
 def _turn_side(pen: _Pen, target: Vec, direction: Turn | None) -> int:

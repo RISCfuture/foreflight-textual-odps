@@ -206,6 +206,24 @@ def test_direct_to_fix_inside_turn_circle_is_degenerate():
     assert raised.value.signature == "fix inside turn circle"
 
 
+def test_altitude_climbed_direct_to_a_fix_is_labelled_beside_it():
+    leg = ClimbingTurn(Turn.RIGHT, Direct(NavaidRef("TPH"), altitude=feet(7000)))
+
+    drawing = draw(resolved(group(leg), points=(point("TPH", 8.0, 0.0),)))
+
+    placed = {lbl.text: xy(lbl.at) for lbl in labels(drawing)}
+    assert distance(placed["7000'"], (8.0, 0.0)) == pytest.approx(0.35)
+
+
+def test_altitude_climbed_direct_to_a_fix_not_above_the_climb_start_is_degenerate():
+    leg = ClimbingTurn(Turn.RIGHT, Direct(NavaidRef("TPH"), altitude=feet(4000)))
+
+    with pytest.raises(Degenerate) as raised:
+        draw(resolved(group(leg), points=(point("TPH", 8.0, 0.0),)))
+
+    assert raised.value.signature == "altitude not above current"
+
+
 def test_heading_intercepts_radial_inbound_and_tracks_to_the_vor():
     leg = HeadingAndRadial(magnetic(90), NavaidRef("VOR"), 180, outbound=False)
     east = runway("09", course=90.0)

@@ -663,17 +663,6 @@ def test_parses_leg_shapes(text, groups, shared_tail):
             '"thence" without a shared tail',
         ),
         (
-            (
-                "Rwy 33, climbing right turn to 1900 direct AUG VOR/DME before "
-                "proceeding on course."
-            ),
-            'unsupported "to <alt>" before "direct"',
-        ),
-        (
-            "Rwy 1, climb to 7000 direct IDA VOR/DME, before proceeding on course.",
-            'unsupported "to <alt>" before "direct"',
-        ),
-        (
             "Rwy 24, climb to 3600, direct to BZA VORTAC.",
             'unsupported "to <alt>," before a route',
         ),

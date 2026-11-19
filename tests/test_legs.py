@@ -593,3 +593,52 @@ def test_until_reaching_an_altitude_ends_the_leg_there():
         ),
         Thence(),
     )
+
+
+@pytest.mark.parametrize(
+    ("text", "legs"),
+    [
+        pytest.param(
+            "Rwy 11, climb heading 096° to 5200, then climbing right turn to 7000 "
+            "direct RAP VORTAC.",
+            (
+                ClimbHeading(96, to(5200)),
+                ClimbingTurn(
+                    Turn.RIGHT,
+                    Direct(NavaidRef("RAP", NavaidType.VORTAC), altitude=to(7000)),
+                ),
+            ),
+            id="49B turn",
+        ),
+        pytest.param(
+            "Rwy 1, climb to 7000 direct IDA VOR/DME, before proceeding on course.",
+            (
+                Direct(NavaidRef("IDA", NavaidType.VOR_DME), altitude=to(7000)),
+                ProceedOnCourse(),
+            ),
+            id="U02 climb",
+        ),
+        pytest.param(
+            "Rwy 15, climbing left turn direct IGN VOR/DME to 1400 before "
+            "proceeding on course.",
+            (
+                ClimbingTurn(
+                    Turn.LEFT,
+                    Direct(NavaidRef("IGN", NavaidType.VOR_DME), altitude=to(1400)),
+                ),
+                ProceedOnCourse(),
+            ),
+            id="POU after the fix",
+        ),
+    ],
+)
+def test_altitude_climbed_to_direct_to_a_fix(text, legs):
+    (group,) = legs_of(text)
+
+    assert group.legs == legs
+
+
+def test_altitude_before_and_after_a_direct_fix_is_refused():
+    text = "Rwy 1, climb to 7000 direct IDA VOR/DME to 8000."
+
+    assert signature_of(text) == "leg with two altitudes"

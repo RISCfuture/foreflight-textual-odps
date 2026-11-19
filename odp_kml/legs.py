@@ -674,9 +674,11 @@ class LegParser(TokenStream):
         no heading can only turn onto the radial.
 
         One before "direct" ("climbing right turn to 1900 direct AUG VOR/DME")
-        or set off from its route by a comma ("climb to 3600, direct to BZA
-        VORTAC") could end the leg short of the route's end or be only the
-        altitude to reach on the way, so both are refused.
+        is climbed to on the way to the fix, which is where the leg ends, as
+        for a radial flown to a fix. One set off from its route by a comma
+        ("climb to 3600, direct to BZA VORTAC") could end the leg short of the
+        route's end or be only the altitude to reach on the way, so it is
+        refused.
         """
         if not (self._peek("to") and self._peek_integer(1)):
             return None
@@ -684,12 +686,11 @@ class LegParser(TokenStream):
             altitude = self._to_altitude()
             self._expect("and")
             return altitude
-        if self._peek("direct", offset=2):
-            raise self._error('unsupported "to <alt>" before "direct"')
         if self._peek_any_of(_LEG_SEPARATORS, 2):
             raise self._error('unsupported "to <alt>," before a route')
         if not (
             self._peek_any_of(_ROUTE_LEADS, 2)
+            or self._peek("direct", offset=2)
             or (self._peek("to", offset=2) and self._peek_any_of(_INTERCEPT_WORDS, 3))
         ):
             return None
@@ -702,12 +703,20 @@ class LegParser(TokenStream):
 
     def _with_leading_altitude(
         self,
-        leg: HeadingAndRadial | Radial | ClimbHeading | RunwayHeading | HeadingRange,
+        leg: Direct
+        | HeadingAndRadial
+        | Radial
+        | ClimbHeading
+        | RunwayHeading
+        | HeadingRange,
         altitude: Altitude,
-    ) -> HeadingAndRadial | Radial | ClimbHeading | RunwayHeading | HeadingRange:
+    ) -> (
+        Direct | HeadingAndRadial | Radial | ClimbHeading | RunwayHeading | HeadingRange
+    ):
         """A leading altitude terminates a leg that has no other terminator;
-        a radial leg flown to a fix or DME distance climbs to it on the way."""
-        if _ends_at_a_point(leg):
+        a direct or radial leg flown to a fix or DME distance climbs to it on
+        the way."""
+        if isinstance(leg, Direct) or _ends_at_a_point(leg):
             return self._with_altitude(leg, altitude)
         if isinstance(leg.until, AtFix):
             raise self._error('unsupported "to <alt>" with fix terminator')
@@ -755,8 +764,8 @@ class LegParser(TokenStream):
 
     def _climb(self) -> Leg:
         """climb := "climb" ("on course" | direct | in-hold | straight-ahead
-        | [to-altitude] ["on"|"via"] (runway-heading | heading-range
-          | heading-leg | radial-leg))
+        | [to-altitude] (direct | ["on"|"via"] (runway-heading | heading-range
+          | heading-leg | radial-leg)))
 
         runway-heading := ("runway heading" | "rwy hdg") [until]
 
@@ -773,7 +782,7 @@ class LegParser(TokenStream):
         if self._peek_straight_ahead():
             return self._straight_ahead()
         altitude = self._altitude_before_route()
-        leg = self._climb_route()
+        leg = self._direct() if self._peek("direct") else self._climb_route()
         return leg if altitude is None else self._with_leading_altitude(leg, altitude)
 
     def _climb_route(
@@ -881,10 +890,12 @@ class LegParser(TokenStream):
         return self._radial_leg()
 
     def _direct(self) -> Direct:
-        """direct := "direct" ["to"] target"""
+        """direct := "direct" ["to"] target [altitude-after-fix], e.g. "direct
+        IGN VOR/DME to 1400": the altitude is climbed to on the way."""
         self._expect("direct")
         self._accept("to")
-        return Direct(self._target())
+        target = self._target()
+        return Direct(target, altitude=self._altitude_after_fix())
 
     # --- Headings and radials ----------------------------------------------
 
@@ -1059,9 +1070,9 @@ class LegParser(TokenStream):
             heading, navaid, radial, outbound, until, altitude=altitude
         )
 
-    def _with_altitude(
-        self, leg: Radial | HeadingAndRadial, altitude: Altitude
-    ) -> Radial | HeadingAndRadial:
+    def _with_altitude[L: Direct | Radial | HeadingAndRadial](
+        self, leg: L, altitude: Altitude
+    ) -> L:
         """`leg`, ending at a fix or DME distance, climbing to `altitude` on
         the way there."""
         if leg.altitude is not None:

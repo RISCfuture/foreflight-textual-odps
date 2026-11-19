@@ -197,10 +197,15 @@ class MinimumClimb:
 
 @dataclasses.dataclass(frozen=True)
 class Direct:
-    """Proceed direct to a navaid or fix."""
+    """Proceed direct to a navaid or fix.
+
+    `altitude` is one climbed to on the way, as for `Radial`: "climbing
+    right turn to 7000 direct RAP VORTAC".
+    """
 
     target: NavaidRef | FixRef
     speed: SpeedRestriction | None = None
+    altitude: Altitude | None = None
 
 
 @dataclasses.dataclass(frozen=True)
