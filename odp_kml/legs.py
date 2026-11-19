@@ -211,7 +211,21 @@ class LegParser(TokenStream):
 
     def _peek_thence(self) -> bool:
         lead = 1 if self._peek(",") or self._peek(";") else 0
-        return self._peek("thence", offset=lead) or self._peek("...", offset=lead)
+        return (
+            self._peek("thence", offset=lead) and not self._peek_inline_thence(lead)
+        ) or self._peek("...", offset=lead)
+
+    def _peek_inline_thence(self, offset: int = 0) -> bool:
+        """``thence via SEA R-230 ...``: "thence" with no ellipsis, the next
+        leg on the same line."""
+        thence, following = self._token(offset), self._token(offset + 1)
+        return (
+            thence is not None
+            and thence.lower == "thence"
+            and following is not None
+            and following.text != "..."
+            and "\n" not in self._text[thence.end : following.start]
+        )
 
     def _require_announced_holds(self, tail: tuple[Leg, ...]) -> None:
         """Refuse a shared tail that does not open with the climb in hold the
@@ -231,24 +245,31 @@ class LegParser(TokenStream):
         """thence := ["," | ";"] "thence" "..." | ["," | ";"] "..."
 
         An ellipsis alone ("to 7000...") also leads into the shared tail.
+        "Thence" with no ellipsis is a separator (`_leg_separator`).
         """
-        lead = 1 if self._peek(",") or self._peek(";") else 0
-        if not (self._peek("thence", offset=lead) or self._peek("...", offset=lead)):
+        if not self._peek_thence():
             return False
+        lead = 1 if self._peek(",") or self._peek(";") else 0
         self._index += lead
         self._accept("thence")
         self._expect("...")
         return True
 
     def _leg_separator(self, *, required: bool) -> None:
-        """separator := ("," | ";") ["then"] | "then" | "and" | ↓
+        """separator := ("," | ";") ["then" | inline-thence] | "then" | "and" | ↓
+
+        inline-thence := "thence" before a leg on the same line, as "then":
+        "cross Sanderson Fld ... at or above 1600, thence via SEA R-230 ...".
 
         ↓: none before a lowercase "climb" or "climbing", which goes on with
         the same sentence ("climb heading 256° to 800 climbing right turn
         ..."); a capitalized one may open a sentence for other runways.
         """
         if self._accept_any(",", ";"):
-            self._accept("then")
+            if self._peek_inline_thence():
+                self._expect("thence")
+            else:
+                self._accept("then")
         elif (
             not self._accept_any("then", "and")
             and required

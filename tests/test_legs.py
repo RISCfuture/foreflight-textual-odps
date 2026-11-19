@@ -827,3 +827,36 @@ def test_hold_announced_before_thence_needs_the_tail_to_fly_it():
     )
 
     assert signature_of(text) == "announced hold not flown in the shared tail"
+
+
+SHN = (
+    "Rwy 5, climbing right turn to intercept SEA R-230 to CARRO intersection. Or "
+    "for climb in visual conditions: cross Sanderson Fld northeast bound at or "
+    "above 1600, thence via SEA R-230 to cross CARRO intersection at or above 4000."
+)
+
+
+def test_thence_before_a_leg_on_its_line_is_then():
+    sections = Sections(
+        amendment=None,
+        takeoff_minimums=None,
+        departure_procedure=normalize(SHN),
+        vcoa=None,
+        obstacle_notes=None,
+        dva=None,
+    )
+
+    (vcoa,) = parse_procedure(sections, airport="XXX").vcoa
+
+    carro = FixRef("CARRO")
+    assert vcoa.then == (
+        Radial(NavaidRef("SEA"), 230, outbound=None, until=AtFix(carro)),
+        CrossAt(carro, Altitude(4000, AltitudeKind.AT_OR_ABOVE, "at or above 4000")),
+    )
+
+
+def test_thence_ending_its_line_still_needs_an_ellipsis():
+    text = "Rwy 5, climbing right turn heading 200°, thence\nclimb direct SEA VORTAC."
+
+    with pytest.raises(ParseError):
+        legs_of(text)
