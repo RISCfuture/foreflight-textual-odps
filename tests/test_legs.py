@@ -710,3 +710,42 @@ def test_speed_limit_until_established_direct_a_navaid():
     assert group.legs[0].then.speed == SpeedRestriction(
         240, "established direct RIW VOR"
     )
+
+
+def test_before_proceeding_bound_on_a_radial_flies_it():
+    sections = Sections(
+        amendment=None,
+        takeoff_minimums=None,
+        departure_procedure=normalize(
+            "Rwy 14, climb to 2500 on a heading between 110° CW to 315° from DER "
+            "before proceeding on course."
+        ),
+        vcoa=normalize(
+            "Obtain ATC approval for VCOA when requesting IFR clearance.\n"
+            "Rwys 2, 14, 20, 32, climb in visual conditions to cross Charles M "
+            "Schulz/Sonoma County airport at or above 1400 before proceeding "
+            "southbound on PYE R-349 to PYE VOR/DME."
+        ),
+        obstacle_notes=None,
+        dva=None,
+    )
+
+    (vcoa,) = parse_procedure(sections, airport="XXX").vcoa
+
+    assert vcoa.then == (
+        Radial(
+            NavaidRef("PYE"),
+            349,
+            outbound=False,
+            until=AtFix(NavaidRef("PYE", NavaidType.VOR_DME)),
+        ),
+    )
+
+
+def test_before_proceeding_across_a_radial_is_refused():
+    text = (
+        "Rwy 14, climb heading 140° to 2500 before proceeding eastbound on PYE "
+        "R-349 to PYE VOR/DME."
+    )
+
+    assert signature_of(text) == "direction of flight across the radial"

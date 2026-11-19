@@ -434,20 +434,25 @@ class LegParser(TokenStream):
             "prior", "to", offset=offset
         )
 
-    def _before(self) -> ProceedOnCourse | Direct | ClimbingTurn:
+    def _before(self) -> ProceedOnCourse | Direct | ClimbingTurn | Radial:
         """before := ("before" | "prior to") (
-              "proceeding" ("on course" | "enroute" | direction | direct)
+              "proceeding" ("on course" | "enroute" | direction | direct
+                | bound-on-radial)
             | "climbing on course"
             | "turning" [turn-word] (direct | [direction] ["on course"])
             | [turn-word] "turn")
 
-        "Before turning left direct CPN VOR/DME" turns onto that Direct leg.
+        "Before turning left direct CPN VOR/DME" turns onto that Direct leg;
+        "before proceeding southbound on PYE R-349 to PYE VOR/DME" flies the
+        radial.
         """
         if not self._accept("before"):
             self._expect("prior", "to")
         if self._accept("proceeding"):
             if self._peek("direct"):
                 return self._direct()
+            if self._peek_bound_on_radial():
+                return self._bound_on_radial()
             if self._accept("on", "course") or self._accept("enroute"):
                 return ProceedOnCourse()
             return ProceedOnCourse(toward=self._directions())
@@ -1268,14 +1273,35 @@ class LegParser(TokenStream):
         within 67.5° of one way along the radial, so that neither the compass
         point's coarseness nor magnetic variation can flip it."""
         start = self._index
-        bound = _compass_bearing(self._bound())
-        off_outbound = abs((bound - radial + 180) % 360 - 180)
-        if off_outbound <= _BOUND_TOLERANCE_DEG:
-            return True
-        if off_outbound >= 180 - _BOUND_TOLERANCE_DEG:
+        outbound = _bound_sense(self._bound(), radial)
+        if outbound is None:
+            self._index = start
+            raise self._error("direction of flight across the radial")
+        return outbound
+
+    def _peek_bound_on_radial(self) -> bool:
+        """``southbound on PYE R-349``."""
+        token = self._token()
+        if token is None or not self._peek_bound():
             return False
-        self._index = start
-        raise self._error("direction of flight across the radial")
+        on = 1 if token.lower in BOUND_WORDS else 2
+        return self._peek("on", offset=on) and self._peek_navaid(on + 1)
+
+    def _bound_on_radial(self) -> Radial:
+        """bound-on-radial := bound "on" radial-leg, the direction of flight
+        giving the radial its sense as one printed after it does: "before
+        proceeding southbound on PYE R-349 to PYE VOR/DME"."""
+        start = self._index
+        bound = self._bound()
+        self._expect("on")
+        leg = self._radial_leg()
+        outbound = _bound_sense(bound, leg.radial)
+        if outbound is None:
+            self._index = start
+            raise self._error("direction of flight across the radial")
+        if leg.outbound is not None and leg.outbound != outbound:
+            raise self._error("radial sense printed both ways")
+        return dataclasses.replace(leg, outbound=outbound)
 
     def _radial(self) -> int:
         token = self._token()
@@ -1730,6 +1756,17 @@ def _names_sixteenth_point(cardinal: Compass8, intercardinal: Compass8) -> bool:
     """Whether "<cardinal>-<intercardinal>" names a point of the sixteen, as
     "south-southwest" does."""
     return len(cardinal) == 1 and len(intercardinal) == 2 and cardinal in intercardinal
+
+
+def _bound_sense(bound: Compass8, radial: int) -> bool | None:
+    """Whether flying `bound` along `radial` is outbound, or ``None`` when the
+    direction lies across the radial, more than 67.5° off both ways."""
+    off_outbound = abs((_compass_bearing(bound) - radial + 180) % 360 - 180)
+    if off_outbound <= _BOUND_TOLERANCE_DEG:
+        return True
+    if off_outbound >= 180 - _BOUND_TOLERANCE_DEG:
+        return False
+    return None
 
 
 def _compass_bearing(point: Compass8) -> int:
