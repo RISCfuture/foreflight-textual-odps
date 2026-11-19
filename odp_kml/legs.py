@@ -468,9 +468,10 @@ class LegParser(TokenStream):
         return SpeedRestriction(kias, self._slice_from(start))
 
     def _speed_until(self) -> None:
-        """speed-until := "established on" ("course" | heading | radial-course
-        [bound]) | "established" flight-direction | ("reaching" | "leaving")
-        nnnn ["MSL"] | nn.n "DME" | ["crossing" | "passing"] target
+        """speed-until := "established on" ("course" | heading | nnn ["°"]
+        "heading" | radial-course [bound]) | "established" flight-direction
+        | ("reaching" | "leaving") nnnn ["MSL"] | nn.n "DME"
+        | ["crossing" | "passing"] target
 
         A climb leaves an altitude as it reaches it: "until leaving 4000"."""
         if self._accept("established", "on"):
@@ -479,6 +480,10 @@ class LegParser(TokenStream):
                 return
             if self._peek_heading():
                 self._heading()
+                return
+            if self._peek_integer():
+                self._compass_heading()
+                self._expect("heading")
                 return
             self._radial_course()
             self._bound()

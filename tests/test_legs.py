@@ -3,6 +3,7 @@
 import pytest
 
 from odp_kml.grammar import ParseError, parse_departure_procedure
+from odp_kml.normalize import normalize
 from odp_kml.procedure import (
     Altitude,
     AltitudeKind,
@@ -25,13 +26,16 @@ def to(feet: int) -> Altitude:
 
 
 def legs_of(text: str):
-    procedure = parse_departure_procedure(text, airport="XXX", amendment=None)
+    """The runway groups of `text` as printed, normalized as the build does."""
+    procedure = parse_departure_procedure(
+        normalize(text), airport="XXX", amendment=None
+    )
     return procedure.runway_groups
 
 
 def signature_of(text: str) -> str:
     with pytest.raises(ParseError) as error:
-        parse_departure_procedure(text, airport="XXX", amendment=None)
+        parse_departure_procedure(normalize(text), airport="XXX", amendment=None)
     return error.value.signature
 
 
@@ -204,5 +208,29 @@ def test_speed_limit_until_leaving_an_altitude():
         RunwayGroup(
             ("6",),
             (ClimbHeading(75, to(4700), SpeedRestriction(210, "leaving 4000")),),
+        ),
+    )
+
+
+def test_speed_limit_until_established_on_a_heading_printed_number_first():
+    text = (
+        "Rwy 9, climbing left turn heading 059° to 2200 before proceeding on "
+        "course. Do not exceed 180K until established on 059° heading."
+    )
+
+    assert legs_of(text) == (
+        RunwayGroup(
+            ("9",),
+            (
+                ClimbingTurn(
+                    Turn.LEFT,
+                    ClimbHeading(
+                        59,
+                        to(2200),
+                        SpeedRestriction(180, "established on 059° heading"),
+                    ),
+                ),
+                ProceedOnCourse(),
+            ),
         ),
     )
