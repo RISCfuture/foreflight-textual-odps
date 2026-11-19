@@ -2119,9 +2119,26 @@ ROUTE_19 = "Rwy 19, climb heading 190° to 5000 before proceeding on course."
         pytest.param(
             f"{ROUTE_1}\nRwy 19, climb on heading between 150° CW to 210° from DER. "
             "Do not exceed 150 KIAS until reaching 1700 MSL.",
+            (
+                RunwayGroup(
+                    ("19",),
+                    (
+                        HeadingRange(
+                            (HeadingSector(150, 210, clockwise=True),),
+                            speed=SpeedRestriction(150, "reaching 1700 MSL"),
+                        ),
+                    ),
+                ),
+            ),
+            [("1",)],
+            id="a speed limit after the last runway's heading range, every other",
+        ),
+        pytest.param(
+            f"{ROUTE_1}\nRwy 19, climb on heading between 150° CW to 210° from DER. "
+            "Do not exceed 150 KIAS until turn completion.",
             (),
             [("1",), ("19",)],
-            id="a speed limit after the last runway's heading range, every route",
+            id="an unread speed limit after the last runway, every route",
         ),
         pytest.param(
             "Rwy 34, climb on heading between 070° CW to 155° from DER or climb on "
@@ -2183,6 +2200,20 @@ def test_unreadable_sentence_naming_no_runway_withholds_routes_it_may_modify(
 
     assert procedure.runway_groups == kept
     assert [runways for runways, _, _ in unparsed] == withheld
+
+
+def test_speed_limit_sentence_after_the_last_route_limits_it_and_withholds_others():
+    procedure, unparsed = read_in_part(
+        "Rwy 3, climb heading 034° to 1200 before proceeding on course.\n"
+        "Rwy 21, climbing right turn on a heading between 270° CW to 030° from DER "
+        "to 1700 before proceeding on course. Do not exceed 150 KIAS until reaching "
+        "1700 MSL."
+    )
+
+    (rwy_21,) = procedure.runway_groups
+    assert rwy_21.runways == ("21",)
+    assert rwy_21.legs[0].then.speed == SpeedRestriction(150, "reaching 1700 MSL")
+    assert unparsed == [(("3",), "speed limit that may mean other routes", False)]
 
 
 ALL_RUNWAYS_VCOA = (

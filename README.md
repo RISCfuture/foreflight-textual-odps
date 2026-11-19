@@ -142,7 +142,11 @@ defined radius, and so on). An unread sentence under a runway's header
 applies to that runway's routes and VCOAs, including a VCOA for all
 runways. One before the first runway header, after the last, or ending
 in a colon ("When tethered balloon ... is flying:") may apply to every
-departure, so nothing at that airport is drawn. Anything less certain is
+departure, so nothing at that airport is drawn. The exception is a speed limit
+sentence after the last of several routes ("... before proceeding on
+course. Do not exceed 150 KIAS until reaching 1700 MSL."): it limits the
+last route whether it is meant for that route or for all, so that route
+is drawn with it and the others, which it may limit too, are not. Anything less certain is
 never drawn; it becomes a `Finding` instead, listed in
 `report.md` on the release for that cycle and filed as a GitHub issue,
 grouped by failure signature so one recurring problem across airports and

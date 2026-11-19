@@ -395,6 +395,8 @@ class _Parser(LegParser):
                     else:
                         legs = self._continuation(last.legs)
                     groups[-1] = dataclasses.replace(last, legs=legs)
+                if self._may_limit_only_last_route(groups):
+                    self._limit_last_route(groups)
                 if self._peek_thence_sentence():
                     groups[-1] = self._thence_sentence(groups[kept:], inline)
             except ParseError as error:
@@ -834,6 +836,39 @@ class _Parser(LegParser):
             or (len(ends) == 1 and None not in ends)
             or self._sentence() in self._continuations
         )
+
+    def _may_limit_only_last_route(self, groups: list[RunwayGroup]) -> bool:
+        """Whether a speed limit sentence that `_may_continue` leaves unread,
+        after the last of several routes that end apart, is read in part: it
+        limits the last route whether it is that route's alone or every
+        route's."""
+        last = groups[-1] if groups else None
+        return (
+            self._in_part
+            and self._peek_speed_sentence()
+            and last is not None
+            and _takes_speed_limit(last)
+            and not _ends_with_thence(last.legs)
+            and not _ends_in_turn_alternatives(groups)
+            and not self._follows_visual_climb()
+            and not self._speed_limit_may_mean_others(groups)
+        )
+
+    def _limit_last_route(self, groups: list[RunwayGroup]) -> None:
+        """Put the speed limit sentence on the last route ("Rwy 21, ... before
+        proceeding on course. Do not exceed 150 KIAS until reaching 1700
+        MSL."), and leave out every other route and visual climb written into
+        the section, which it may limit too. A sentence that does not read is
+        left for the caller, unread like any other naming no runway."""
+        last, start = groups[-1], self._index
+        error = self._error("speed limit that may mean other routes")
+        try:
+            legs = self._with_speed_sentence(last.legs)
+        except ParseError:
+            self._index = start
+            return
+        groups[-1] = dataclasses.replace(last, legs=legs)
+        self._withhold(groups, error, lambda runways: runways != last.runways)
 
     def _follows_visual_climb(self) -> bool:
         return self._index == self._visual_climb_end
