@@ -205,6 +205,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python -m odp_kml.issues --report "build-latest/report.json" --repo "${{ github.repository }}"
 
+      # Opens (or updates) one issue when coverage fell more than two points
+      # against the previous cycle's release. Never fails the build.
+      - name: Flag a coverage drop
+        if: ${{ !cancelled() && steps.publish.outputs.current_built == 'true' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m odp_kml.coverage --report "build-latest/report.json" --repo "${{ github.repository }}"
+
       - name: Prune old releases
         if: ${{ !cancelled() }}
         env:
