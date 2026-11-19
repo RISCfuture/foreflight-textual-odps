@@ -125,7 +125,9 @@ out of the coverage percentage and counted on its own in the report,
 since ForeFlight charts graphic ODPs itself. Text that gives no runway a
 route ("Diverse departure authorized all runways.", "Rwys 8, 26,
 NA-Environmental.", "Diverse departure NA. Use published departure
-procedures for obstacle avoidance.") has nothing to draw either: the
+procedures for obstacle avoidance.", or only takeoff minimums: "Rwy 14,
+std with a min. climb gradient of 280 ft/NM to 3800.") has nothing to
+draw either: the
 airport is left out of the coverage percentage, counted on its own in the
 report, and gets no "ODP NOT SHOWN" label. A speed limit printed in a
 runway's takeoff minimums ("do not exceed 210K until intercepting the ENI

@@ -1177,6 +1177,7 @@ class _Parser(LegParser):
         """unrouted := turn-not-available | diverse-na
                      | "diverse" departure-word ("authorized" | "auth") "."
                      | "diverse" departure-word "procedures NA at night."
+                     | minimums-only
 
         turn-not-available := ("left" | "right") ("turn" | "turns")
                               "on departure NA."
@@ -1192,7 +1193,78 @@ class _Parser(LegParser):
             or self._accept_diverse("authorized", ".")
             or self._accept_diverse("auth", ".")
             or self._accept_diverse("procedures", "na", "at", "night", ".")
+            or self._minimums_only()
         )
+
+    def _minimums_only(self) -> bool:
+        """minimums-only := (standard-climb ["or" minimums]
+                            | minimums "or" standard-climb) "." [later-takeoff]
+
+        standard-climb := "std with a min." "climb" ["gradient"] "of" nnn "ft"
+                          ("/" | "per") "NM" "to" nnnn
+
+        A runway whose procedure is only its takeoff minimums ("Rwy 14, std
+        with a min. climb gradient of 280 ft/NM to 3800.") departs on any
+        heading, with no route to draw.
+        """
+        start = self._index
+        try:
+            if self._peek_integer() and self._peek("-", offset=1):
+                self._minimums()
+                self._expect("or")
+                self._standard_climb()
+            elif self._peek("std", "with"):
+                self._standard_climb()
+                if self._accept("or"):
+                    self._minimums()
+            else:
+                return False
+            self._expect(".")
+            self._later_takeoff()
+        except ParseError:
+            self._index = start
+            return False
+        return True
+
+    def _standard_climb(self) -> None:
+        self._expect("std", "with", "a", "min", ".", "climb")
+        self._accept("gradient")
+        self._expect("of")
+        self._integer()
+        self._expect("ft")
+        self._expect_any("/", "per")
+        self._expect("nm", "to")
+        self._integer()
+
+    def _minimums(self) -> None:
+        """minimums := nnn "-" n [n "/" n], a ceiling and visibility such as
+        ``300-1 1/2``."""
+        self._integer()
+        self._expect("-")
+        self._integer()
+        if self._peek_integer() and self._peek("/", offset=1):
+            self._integer()
+            self._expect("/")
+            self._integer()
+
+    def _later_takeoff(self) -> None:
+        """later-takeoff := "Alternatively, with std takeoff mins and" ["a"] "std"
+        nnn "ft/NM climb gradient" [","] "takeoff must occur no later than"
+        nnnn "prior to DER."
+
+        Where the takeoff run must end for a standard climb, which changes
+        nothing drawn."""
+        if not self._accept("alternatively", ","):
+            return
+        self._expect("with", "std", "takeoff", "mins", "and")
+        self._accept("a")
+        self._expect("std")
+        self._integer()
+        self._expect("ft", "/", "nm", "climb", "gradient")
+        self._accept(",")
+        self._expect("takeoff", "must", "occur", "no", "later", "than")
+        self._integer()
+        self._expect("prior", "to", "der", ".")
 
     def _turn_not_available(self) -> bool:
         start = self._index

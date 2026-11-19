@@ -1726,6 +1726,37 @@ def test_runway_named_with_its_reciprocal_departs_without_a_route():
     assert procedure.runway_groups == (RunwayGroup(("5", "23"), ()),)
 
 
+@pytest.mark.parametrize(
+    ("text", "runways"),
+    [
+        pytest.param(
+            "Rwy 14, std with a min. climb gradient of 280 ft/NM to 3800.\n"
+            "Rwy 32, std with a min. climb gradient of 250 ft/NM to 3800.",
+            [("14",), ("32",)],
+            id="a climb gradient",
+        ),
+        pytest.param(
+            "Rwy 24, std with a min. climb of 214 ft/NM to 500 or 300-1 1/2. "
+            "Alternatively, with std takeoff mins and a std 200 ft/NM climb "
+            "gradient takeoff must occur no later than 1400 prior to DER.",
+            [("24",)],
+            id="or a ceiling and visibility, and where to take off instead",
+        ),
+        pytest.param(
+            "Rwy 25, 300-1 1/2 or std with a min. climb of 208 ft/NM to 600. "
+            "Alternatively, with std takeoff mins and std 200 ft/NM climb gradient, "
+            "takeoff must occur no later than 1300 prior to DER.",
+            [("25",)],
+            id="a ceiling and visibility first",
+        ),
+    ],
+)
+def test_runway_given_only_takeoff_minimums_departs_without_a_route(text, runways):
+    procedure = parse_departure_procedure(text, airport="XXX", amendment=None)
+
+    assert procedure.runway_groups == tuple(RunwayGroup(r, ()) for r in runways)
+
+
 def test_inline_visual_climbs_come_before_the_vcoa_section():
     sections = Sections(
         amendment=None,
