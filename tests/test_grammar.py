@@ -1955,6 +1955,20 @@ def test_vcoa_crossing_names_the_airport_in_its_own_words(name):
     assert parse_vcoa(text) == (VcoaGroup(("1",), None, 8400, (ProceedOnCourse(),)),)
 
 
+def test_vcoa_section_for_all_runways_may_be_written_into_the_departure_procedure():
+    procedure = parse_departure_procedure(
+        "Rwy 7: climb on a heading between 247° CW to 071° from DER.\n"
+        "VCOA all runways: obtain ATC approval for VCOA when requesting IFR "
+        "clearance. Climb in visual conditions to cross Kokhanok airport at or above "
+        "2700 before proceeding on course.",
+        airport="XXX",
+        amendment=None,
+    )
+
+    assert [group.runways for group in procedure.runway_groups] == [("7",)]
+    assert procedure.vcoa == (VcoaGroup((), None, 2700, (ProceedOnCourse(),)),)
+
+
 VISUAL_CLIMB_TO_DSD = (
     "obtain ATC approval for VCOA when requesting IFR clearance. Climb in visual "
     "conditions to cross Madras Muni airport at or above 3600, then proceed on DSD "

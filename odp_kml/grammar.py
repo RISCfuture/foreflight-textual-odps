@@ -748,6 +748,8 @@ class _Parser(LegParser):
             self._header_runways = ()
             self._expect(",")
             return self._all_runways_group()
+        if self._peek("vcoa", "all"):
+            return self._vcoa_for_all_runways()
         runways = self._runway_header()
         self._header_runways = runways
         self._equipment_note()
@@ -1025,6 +1027,19 @@ class _Parser(LegParser):
                     self._accept_any(":", ",")
                     return True
         return False
+
+    def _vcoa_for_all_runways(self) -> list[RunwayGroup]:
+        """vcoa-all := "VCOA" ("all runways" | "all rwys") ("," | ":") vcoa-group
+
+        "VCOA all runways: obtain ATC approval for VCOA ...", a VCOA section
+        written into the departure procedure."""
+        self._expect("vcoa")
+        self._expect("all")
+        self._expect_any("runways", "rwys")
+        self._expect_any(",", ":")
+        self._header_runways = ()
+        self._add_inline_vcoa(self._vcoa_group(()))
+        return []
 
     def _all_runways_group(self) -> list[RunwayGroup]:
         if self._peek_graphic_departure():
