@@ -1,7 +1,7 @@
 """One text block per airport from a d-TPP Takeoff-Minimums volume PDF.
 
 ``pdftotext -layout`` renders each born-digital page cleanly, but every page
-carries furniture (page number, ``T TAKEOFF MINS`` banners, a cycle code, and
+carries furniture (page number, ``TAKEOFF MINS`` banners, a cycle code, and
 the effective-date line printed down the page's middle), entries broken by a
 page end carry ``(CON’T)`` markers, and long sentences wrap at the column
 edge with no hanging indent. This module removes the furniture, finds each
@@ -21,8 +21,11 @@ from pathlib import Path
 from .dtpp import AirportMeta
 from .lines import canonical_title, is_amendment, join_lines
 
+# The banner is ``T TAKEOFF MINS  SW-4  T`` through cycle 2610 and
+# ``TAKEOFF MINS  SW-4`` from 2611; either may omit the volume code.
 _PAGE_FURNITURE = re.compile(
     r"T TAKEOFF MINS\b.*T"
+    r"|TAKEOFF MINS(?:\s+(?:AK|EC|NC|NE|NW|PAC|SC|SE|SW)(?:-\d)?)?"
     r"|L\d+"
     r"|\d{5}(?:\s+L\d+)?"
     r"|\d{2} [A-Z]{3} \d{4} to \d{2} [A-Z]{3} \d{4}.*"
