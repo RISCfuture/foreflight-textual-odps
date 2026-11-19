@@ -1872,6 +1872,69 @@ def test_parses_vcoa_for_all_runways(text):
     assert parse_vcoa(text) == (VcoaGroup((), None, 3600, (ProceedOnCourse(),)),)
 
 
+@pytest.mark.parametrize(
+    ("text", "runways", "feet"),
+    [
+        pytest.param(
+            "Rwy 12, for climb in visual conditions, cross Deering airport at or "
+            "above 1000 before proceeding on course.",
+            ("12",),
+            1000,
+            id="no approval, the departure procedure's wording",
+        ),
+        pytest.param(
+            "Rwys 15, 33, climb in visual conditions to cross Lawson AAF at or above "
+            "1600 before proceeding on course.",
+            ("15", "33"),
+            1600,
+            id="no approval",
+        ),
+        pytest.param(
+            "Rwy 1, obtain ATC approval for VCOA when requesting IFR clearance: climb "
+            "in visual conditions to cross Antelope County airport at or above 2700 "
+            "before proceeding on course.",
+            ("1",),
+            2700,
+            id="approval ending in a colon",
+        ),
+        pytest.param(
+            "All runways, obtain ATC approval for VCOA when requesting IFR clearance, "
+            "climb in visual conditions to cross Mercer County Rgnl airport at or "
+            "above 2600 before proceeding on course.",
+            (),
+            2600,
+            id="approval ending in a comma",
+        ),
+        pytest.param(
+            "Rwy 36, obtain ATC approval for VCOA when requesting IFR clearance. Climb "
+            "in visual conditions, to cross Gould Peterson Muni airport at or above "
+            "1800 before proceeding on course.",
+            ("36",),
+            1800,
+            id="comma before to cross",
+        ),
+        pytest.param(
+            "All Rwys, obtain ATC approval for VCOA when requesting IFR clearance. For "
+            "climb in visual conditions: cross Travis AFB airport at or above 2300 "
+            "before proceeding on course.",
+            (),
+            2300,
+            id="approval, then the departure procedure's wording",
+        ),
+        pytest.param(
+            "Obtain ATC approval for VCOA when requesting IFR clearance.\nRwys 2, 14, "
+            "climb in visual conditions to cross Test airport at or above 1400 before "
+            "proceeding on course.",
+            ("2", "14"),
+            1400,
+            id="approval before the runways",
+        ),
+    ],
+)
+def test_parses_vcoa_section_wordings(text, runways, feet):
+    assert parse_vcoa(text) == (VcoaGroup(runways, None, feet, (ProceedOnCourse(),)),)
+
+
 VISUAL_CLIMB_TO_DSD = (
     "obtain ATC approval for VCOA when requesting IFR clearance. Climb in visual "
     "conditions to cross Madras Muni airport at or above 3600, then proceed on DSD "

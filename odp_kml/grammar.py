@@ -1508,15 +1508,25 @@ class _Parser(LegParser):
         return dataclasses.replace(group, then=legs)
 
     def _vcoa_group(self, runways: tuple[str, ...] | None = None) -> VcoaGroup:
-        """vcoa-group := [vcoa-runways] atc-approval visual-climb [notify-atc]
+        """vcoa-group := [vcoa-runways] [atc-approval] [vcoa-runways]
+                         (visual-climb | inline-vcoa) [notify-atc]
 
-        ``runways`` is the runway header already read, if any.
+        ``runways`` is the runway header already read, if any. The approval
+        changes nothing drawn, so a group may leave it out ("Rwy 12, for climb
+        in visual conditions, cross ...") or print it before its runways
+        ("Obtain ATC approval for VCOA when requesting IFR clearance.⏎Rwys 2,
+        14, climb in visual conditions to cross ...").
         """
         if runways is None:
             runways = self._vcoa_runways()
-        self._atc_approval()
-        group = self._visual_climb(runways)
-        self._notify_atc()
+        approved = self._atc_approval()
+        if approved and not runways and self._peek_vcoa_runways():
+            runways = self._vcoa_runways()
+        if self._peek(*VISUAL_CLIMB):
+            group = self._inline_visual_climb(runways)
+        else:
+            group = self._visual_climb(runways)
+            self._notify_atc()
         return group
 
     def _with_speed_limit(self, group: VcoaGroup, *, first: bool) -> VcoaGroup:
@@ -1536,6 +1546,12 @@ class _Parser(LegParser):
         self._expect(".")
         return dataclasses.replace(group, speed=speed)
 
+    def _peek_vcoa_runways(self) -> bool:
+        return any(
+            self._peek(*words)
+            for words in (("rwy",), ("rwys",), ("all", "rwys"), ("all", "runways"))
+        )
+
     def _vcoa_runways(self) -> tuple[str, ...]:
         """vcoa-runways := runway-header | "All" ("Rwys" | "runways") ("," | ":")
 
@@ -1547,19 +1563,25 @@ class _Parser(LegParser):
             self._expect_any(",", ":")
         return ()
 
-    def _atc_approval(self) -> None:
+    def _atc_approval(self) -> bool:
         """atc-approval := "obtain ATC approval for" ("VCOA" | "climb in visual
-        conditions") "when requesting IFR clearance." """
-        self._expect("obtain", "atc", "approval", "for")
+        conditions") "when requesting IFR clearance" ("." | ":" | ","),
+        whether there is one."""
+        if not self._accept("obtain", "atc", "approval", "for"):
+            return False
         if not self._accept("vcoa"):
             self._expect(*VISUAL_CLIMB[1:])
-        self._expect("when", "requesting", "ifr", "clearance", ".")
+        self._expect("when", "requesting", "ifr", "clearance")
+        self._expect_any(".", ":", ",")
+        return True
 
     def _visual_climb(self, runways: tuple[str, ...]) -> VcoaGroup:
-        """visual-climb := [equipment] "climb in visual conditions to cross"
-        crossing"""
+        """visual-climb := [equipment] "climb in visual conditions" [","] "to
+        cross" crossing"""
         self._equipment_note()
-        self._expect("climb", "in", "visual", "conditions", "to", "cross")
+        self._expect("climb", "in", "visual", "conditions")
+        self._accept(",")
+        self._expect("to", "cross")
         return self._crossing(runways)
 
     def _crossing(self, runways: tuple[str, ...]) -> VcoaGroup:
