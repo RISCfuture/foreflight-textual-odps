@@ -7,6 +7,7 @@ from odp_kml.procedure import (
     Altitude,
     AltitudeKind,
     AtFix,
+    ClimbHeading,
     ClimbingTurn,
     HeadingAndRadial,
     NavaidRef,
@@ -115,6 +116,33 @@ def test_altitude_before_a_radial_to_intercept_is_climbed_to_on_the_way():
                         until=AtFix(NavaidRef("MOD", NavaidType.VOR_DME)),
                         altitude=to(3000),
                         intercept=True,
+                    ),
+                ),
+                ProceedOnCourse(),
+            ),
+        ),
+    )
+
+
+def test_altitude_and_on_a_radial_is_climbed_to_on_the_radial():
+    text = (
+        "Rwy 29, climb heading 290° to 1700 then climbing left turn to 5000 and on "
+        "the HGR VOR R-270 to HGR VOR before proceeding on course."
+    )
+
+    assert legs_of(text) == (
+        RunwayGroup(
+            ("29",),
+            (
+                ClimbHeading(290, to(1700)),
+                ClimbingTurn(
+                    Turn.LEFT,
+                    Radial(
+                        NavaidRef("HGR", NavaidType.VOR),
+                        270,
+                        outbound=False,
+                        until=AtFix(NavaidRef("HGR", NavaidType.VOR)),
+                        altitude=to(5000),
                     ),
                 ),
                 ProceedOnCourse(),

@@ -575,6 +575,10 @@ class LegParser(TokenStream):
         CMA R-265``, ``to 3000 to intercept MOD VOR/DME R-264``: the altitude a
         climb or turn climbs to precedes its route.
 
+        "And on" before a radial ("climbing left turn to 5000 and on the HGR
+        VOR R-270 to HGR VOR") joins the two as "on" does: a turn printing
+        no heading can only turn onto the radial.
+
         One before "direct" ("climbing right turn to 1900 direct AUG VOR/DME")
         or set off from its route by a comma ("climb to 3600, direct to BZA
         VORTAC") could end the leg short of the route's end or be only the
@@ -582,6 +586,10 @@ class LegParser(TokenStream):
         """
         if not (self._peek("to") and self._peek_integer(1)):
             return None
+        if self._peek_and_on_radial(2):
+            altitude = self._to_altitude()
+            self._expect("and")
+            return altitude
         if self._peek("direct", offset=2):
             raise self._error('unsupported "to <alt>" before "direct"')
         if self._peek_any_of(_LEG_SEPARATORS, 2):
@@ -592,6 +600,11 @@ class LegParser(TokenStream):
         ):
             return None
         return self._to_altitude()
+
+    def _peek_and_on_radial(self, offset: int) -> bool:
+        """``and on [the] <navaid>``."""
+        navaid = offset + (3 if self._peek("the", offset=offset + 2) else 2)
+        return self._peek("and", "on", offset=offset) and self._peek_navaid(navaid)
 
     def _with_leading_altitude(
         self,
