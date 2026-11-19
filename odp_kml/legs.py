@@ -1072,9 +1072,9 @@ class LegParser(TokenStream):
         return after if before is None else before
 
     def _radial_end(self, navaid: NavaidRef) -> tuple[Altitude | None, Until | None]:
-        """radial-end := [altitude-before-fix] [[","] ["then"] until
-        [altitude-after-fix]], the comma or "then" only before the radial's
-        own navaid
+        """radial-end := [altitude-before-fix] (fix-to-cross | [[","] ["then"]
+        until [altitude-after-fix]]), the comma or "then" only before the
+        radial's own navaid
 
         Returns the altitude climbed to on the way and the terminator. Past
         a fix or DME distance, a trailing altitude ("R-090 to VXV VORTAC to
@@ -1084,6 +1084,8 @@ class LegParser(TokenStream):
         nothing but the radial leads to it.
         """
         altitude = self._altitude_before_fix()
+        if (crossed := self._fix_to_cross()) is not None:
+            return altitude, AtFix(crossed)
         lead = int(self._peek(",")) + int(
             self._peek("then", offset=int(self._peek(",")))
         )
@@ -1093,6 +1095,24 @@ class LegParser(TokenStream):
         if altitude is None and isinstance(until, AtFix | Dme):
             altitude = self._altitude_after_fix()
         return altitude, until
+
+    def _fix_to_cross(self) -> NavaidRef | FixRef | None:
+        """fix-to-cross := the fix of a following "to cross" fix-crossing
+        ("on COE R-360 to cross COE VOR/DME at or above 9000"), where the
+        radial ends; the crossing itself is read after the leg. ``None`` when
+        no fix crossing follows, as before "to cross ABC R-123"."""
+        if not (self._peek("to", "cross") and self._peek_navaid(2)):
+            return None
+        start = self._index
+        self._index += 2
+        try:
+            crossed = self._target()
+            at = self._peek("at")
+        except ParseError:
+            return None
+        finally:
+            self._index = start
+        return crossed if at else None
 
     def _peek_same(self, navaid: NavaidRef, offset: int) -> bool:
         """Whether `navaid`'s ident comes next, after `offset` tokens."""

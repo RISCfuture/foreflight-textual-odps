@@ -10,6 +10,7 @@ from odp_kml.procedure import (
     AtFix,
     ClimbHeading,
     ClimbingTurn,
+    CrossAt,
     HeadingAndRadial,
     HeadingRange,
     HeadingSector,
@@ -425,3 +426,29 @@ def test_another_radial_named_without_its_navaid_is_refused():
     )
 
     assert signature_of(text) == 'unmatched phrase "via r-<n> to <id>"'
+
+
+def test_radial_ends_at_the_fix_it_crosses():
+    text = (
+        "Rwy 2, climbing right turn heading 204° and on COE R-360 to cross COE "
+        "VOR/DME at or above 9000."
+    )
+    coe = NavaidRef("COE", NavaidType.VOR_DME)
+
+    assert legs_of(text) == (
+        RunwayGroup(
+            ("2",),
+            (
+                ClimbingTurn(
+                    Turn.RIGHT,
+                    HeadingAndRadial(
+                        204, NavaidRef("COE"), 360, outbound=False, until=AtFix(coe)
+                    ),
+                ),
+                CrossAt(
+                    coe,
+                    Altitude(9000, AltitudeKind.AT_OR_ABOVE, "at or above 9000"),
+                ),
+            ),
+        ),
+    )
