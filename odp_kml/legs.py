@@ -250,8 +250,16 @@ class LegParser(TokenStream):
             raise self._error(f'unsupported routing "then {bound.lower} on"')
 
     def _leg(self) -> Leg:
-        """leg := climbing-turn | climb | continue-climb | proceed | direct
-        | bare-turn | cross-at | if-required | on-route | intercept"""
+        """leg := climbing-heading | climbing-turn | climb | continue-climb
+        | proceed | direct | bare-turn | cross-at | if-required | on-route
+        | intercept
+
+        climbing-heading := "climbing" ["on"] (heading-range | heading-leg), a
+        climb on a heading with no turn: "climbing on heading 175° to 4200".
+        """
+        if self._peek_climbing_heading():
+            self._expect("climbing")
+            return self._climb_route()
         if self._peek("climbing"):
             return self._climbing_turn()
         if self._peek("climb"):
@@ -275,6 +283,10 @@ class LegParser(TokenStream):
         if self._peek_any_of(_INTERCEPT_WORDS):
             return self._intercept()
         raise self._unmatched()
+
+    def _peek_climbing_heading(self) -> bool:
+        offset = 2 if self._peek("climbing", "on") else 1
+        return self._peek("climbing") and self._peek_heading(offset)
 
     def _cross_at(self) -> CrossAt:
         """cross-at := "cross" target altitude-constraint"""

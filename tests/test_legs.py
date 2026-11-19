@@ -307,3 +307,11 @@ def test_radial_does_not_end_at_another_navaid_set_off_by_a_comma():
     )
 
     assert signature_of(text) == 'unmatched phrase "to <id> vor/"'
+
+
+def test_climbing_on_a_heading_with_no_turn_is_a_climb():
+    text = "Rwy 18, climbing on heading 175° to 4200 before proceeding on course."
+
+    assert legs_of(text) == (
+        RunwayGroup(("18",), (ClimbHeading(175, to(4200)), ProceedOnCourse())),
+    )
