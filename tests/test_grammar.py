@@ -2052,14 +2052,13 @@ def test_speed_limit_sentence_after_the_last_of_several_vcoa_crossings_is_unread
 def test_vcoa_crossing_a_navaid_is_not_the_airport():
     text = (
         "All runways, obtain ATC approval for VCOA when requesting IFR clearance. "
-        "Climb in visual conditions to cross CVO VOR/ DME at or above 3500 before "
+        "Climb in visual conditions to cross CVO VOR/DME at or above 3500 before "
         "proceeding on course."
     )
 
-    with pytest.raises(ParseError) as error:
-        parse_vcoa(text)
+    (group,) = parse_vcoa(text)
 
-    assert error.value.signature == "unsupported VCOA crossing a navaid"
+    assert group.cross == NavaidRef("CVO", NavaidType.VOR_DME)
 
 
 @pytest.mark.parametrize(

@@ -358,7 +358,8 @@ class RunwayGroup:
 
 @dataclasses.dataclass(frozen=True)
 class VcoaGroup:
-    """A visual climb over airport: climb over the airport or a fix, then proceed.
+    """A visual climb over airport: climb over the airport, a fix or a navaid,
+    then proceed.
 
     An empty ``runways`` means every runway. ``bound`` is the direction to
     cross in ("cross … southeast bound at or above 8200"), if the text gives one.
@@ -367,7 +368,7 @@ class VcoaGroup:
     """
 
     runways: tuple[str, ...]
-    cross: FixRef | None
+    cross: NavaidRef | FixRef | None
     at_or_above: int
     then: tuple[Leg, ...]
     bound: Compass8 | None = None

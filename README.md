@@ -87,9 +87,11 @@ with certainty:
   for the other headings instead ("or min. climb of 415 ft per NM to 1600
   for headings 101° through 314°") names no route, so only the
   fan is drawn.
-- VCOA (visual climb over airport) circles, including airports whose only
-  procedure is a VCOA and visual climbs written into the departure
-  procedure itself ("..., or for climb in visual conditions: cross ...").
+- VCOA (visual climb over airport) circles, around the airport or the fix
+  or navaid the climb crosses ("cross CVO VOR/DME at or above 3500"),
+  including airports whose only procedure is a VCOA and visual climbs
+  written into the departure procedure itself ("..., or for climb in
+  visual conditions: cross ...").
   A visual climb on a line of its own ("...for climb in visual
   conditions: cross ...") is for the runways whose routes end "or..."
   above it, or, when none does, for every runway routed above it.

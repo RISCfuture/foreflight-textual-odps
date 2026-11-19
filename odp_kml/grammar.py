@@ -1731,8 +1731,10 @@ class _Parser(LegParser):
         self._expect_any("intercept", "join")
         return self._heading_and_radial(heading)
 
-    def _vcoa_crossing(self) -> FixRef | None:
-        """crossing := FIX | airport-name — ``None`` means the departure airport."""
+    def _vcoa_crossing(self) -> NavaidRef | FixRef | None:
+        """crossing := FIX | navaid | airport-name — ``None`` means the
+        departure airport. A navaid is named by its type ("cross BKE VOR/DME
+        at or above 6900"), which no airport name has."""
         token = self._token()
         if (
             token is not None
@@ -1743,7 +1745,7 @@ class _Parser(LegParser):
             self._index += 1
             return FixRef(token.text)
         if self._peek_navaid() and self._peek_navaid_type(offset=1):
-            raise self._error("unsupported VCOA crossing a navaid")
+            return self._navaid()
         self._airport_name()
         return None
 

@@ -894,3 +894,49 @@ def test_tail_opening_with_a_terminator_for_another_navaid_is_refused():
     text = BVS.replace("...to CVV VOR/DME,", "...to ABC VOR/DME,")
 
     assert signature_of(text) == "tail opens with a terminator for no radial"
+
+
+def test_visual_climb_crossing_a_navaid_circles_it():
+    vcoa = (
+        "All runways, obtain ATC approval for VCOA when requesting IFR clearance. "
+        "Climb in visual conditions to cross CVO VOR/DME at or above 3500 before "
+        "proceeding on course."
+    )
+    sections = Sections(
+        amendment=None,
+        takeoff_minimums=None,
+        departure_procedure=normalize(
+            "Rwy 10, climb heading 097° to 1200, then climbing left turn direct "
+            "CVO VOR/DME."
+        ),
+        vcoa=normalize(vcoa),
+        obstacle_notes=None,
+        dva=None,
+    )
+
+    (group,) = parse_procedure(sections, airport="XXX").vcoa
+
+    assert group.cross == NavaidRef("CVO", NavaidType.VOR_DME)
+    assert group.at_or_above == 3500
+
+
+def test_visual_climb_crossing_a_navaid_reads_on_past_the_crossing():
+    text = (
+        "All Rwys, obtain ATC approval for VCOA when requesting IFR clearance. Climb "
+        "in visual conditions to cross BQZ VOR/DME at or above 10400, continue "
+        "climb to 14000 on BQZ R-172 to SBURG INT/BQZ 11.35 DME and hold, continue "
+        "climb-in-hold to 14000 (hold south, right turns, 352° inbound)."
+    )
+    sections = Sections(
+        amendment=None,
+        takeoff_minimums=None,
+        departure_procedure=normalize("Rwy 14, climb heading 140° to 7500."),
+        vcoa=normalize(text),
+        obstacle_notes=None,
+        dva=None,
+    )
+
+    with pytest.raises(ParseError) as error:
+        parse_procedure(sections, airport="XXX")
+
+    assert error.value.signature == 'unmatched phrase "on <id> r-<n> to"'
