@@ -234,3 +234,29 @@ def test_speed_limit_until_established_on_a_heading_printed_number_first():
             ),
         ),
     )
+
+
+def test_turn_to_a_radial_turns_onto_it():
+    text = (
+        "Rwy 8, climb heading 081° to 6900, then climbing left turn to BKE VOR/DME "
+        "R-066 to BKE VOR/DME before proceeding on course."
+    )
+
+    assert legs_of(text) == (
+        RunwayGroup(
+            ("8",),
+            (
+                ClimbHeading(81, to(6900)),
+                ClimbingTurn(
+                    Turn.LEFT,
+                    Radial(
+                        NavaidRef("BKE", NavaidType.VOR_DME),
+                        66,
+                        outbound=False,
+                        until=AtFix(NavaidRef("BKE", NavaidType.VOR_DME)),
+                    ),
+                ),
+                ProceedOnCourse(),
+            ),
+        ),
+    )

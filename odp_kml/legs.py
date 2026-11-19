@@ -84,6 +84,8 @@ _NAVAID_TYPES = (
     (("dme",), NavaidType.DME),
 )
 NAVAID_TYPE_WORDS = frozenset(words[0] for words, _ in _NAVAID_TYPES)
+# Every word of a navaid type: "VOR", "/", "DME", ...
+_NAVAID_WORDS = frozenset(word for words, _ in _NAVAID_TYPES for word in words)
 VISUAL_CLIMB = ("for", "climb", "in", "visual", "conditions")
 # Leg words, printed in lowercase, that continue a sentence without a separator.
 _UNSEPARATED_LEG_WORDS = frozenset({"climb", "climbing"})
@@ -547,6 +549,7 @@ class LegParser(TokenStream):
 
         turn-leg := direct | ["on" | "via" | "to"] (heading-range | heading-leg
           | radial-leg), "to" only before a heading ("turn to heading 200°")
+          or a radial ("turn to BKE VOR/DME R-066 to BKE VOR/DME")
 
         A leading altitude comes before "via", "on" or a heading ("climbing
         right turn to 2400 heading 100°"). ↓: a turn with no route of its own
@@ -655,7 +658,7 @@ class LegParser(TokenStream):
             return self._direct()
         if self._peek_to_intercept():
             return self._intercept()
-        if not self._accept_to_heading():
+        if not (self._accept_to_heading() or self._accept_to_radial()):
             self._accept_any("on", "via")
         if self._peek_heading_range():
             return self._heading_range()
@@ -666,6 +669,19 @@ class LegParser(TokenStream):
     def _accept_to_heading(self) -> bool:
         """``climbing right turn to heading 200°``: the heading turned to."""
         if not (self._peek("to") and self._peek_heading(1)):
+            return False
+        self._expect("to")
+        return True
+
+    def _accept_to_radial(self) -> bool:
+        """``climbing left turn to BKE VOR/DME R-066``: the radial turned onto."""
+        if not (self._peek("to") and self._peek_navaid(1)):
+            return False
+        offset = 2
+        while self._peek_navaid(offset) or self._peek_any_of(_NAVAID_WORDS, offset):
+            offset += 1
+        token = self._token(offset)
+        if token is None or not re.fullmatch(r"R-\d+", token.text):
             return False
         self._expect("to")
         return True
