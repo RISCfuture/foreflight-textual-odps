@@ -390,3 +390,38 @@ def test_radial_intercepted_and_flown_on_with_a_contrary_sense_is_refused():
     )
 
     assert signature_of(text) == "radial sense printed both ways"
+
+
+def test_radial_named_again_without_its_navaid_ends_where_it_says():
+    text = (
+        "Rwys 5, 35, climbing left turn heading 280° to intercept TFD R-063, then "
+        "via R-063 to TFD VORTAC before proceeding on course."
+    )
+
+    assert legs_of(text) == (
+        RunwayGroup(
+            ("5", "35"),
+            (
+                ClimbingTurn(
+                    Turn.LEFT,
+                    HeadingAndRadial(
+                        280,
+                        NavaidRef("TFD"),
+                        63,
+                        outbound=False,
+                        until=AtFix(NavaidRef("TFD", NavaidType.VORTAC)),
+                    ),
+                ),
+                ProceedOnCourse(),
+            ),
+        ),
+    )
+
+
+def test_another_radial_named_without_its_navaid_is_refused():
+    text = (
+        "Rwys 5, 35, climbing left turn heading 280° to intercept TFD R-063, then "
+        "via R-090 to TFD VORTAC before proceeding on course."
+    )
+
+    assert signature_of(text) == 'unmatched phrase "via r-<n> to <id>"'

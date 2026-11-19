@@ -123,7 +123,8 @@ class LegParser(TokenStream):
 
     def _legs(self, legs: list[Leg]) -> tuple[Leg, ...]:
         """legs := leg ((separator leg) | before | speed | and-hold
-                   | fix-crossing | upon-reaching)* ("." | thence | ↓)
+                   | fix-crossing | upon-reaching | same-radial)*
+                   ("." | thence | ↓)
 
         ↓: the legs also end, unconsumed, where an inline VCOA alternative
         ("..., or for climb in visual conditions") begins, and where the text
@@ -154,6 +155,9 @@ class LegParser(TokenStream):
                 self._append(legs, self._fix_crossing())
             elif legs and self._peek_upon_reaching():
                 self._append(legs, self._upon_reaching(legs[-1]))
+            elif legs and self._peek_same_radial(legs[-1]):
+                legs[-1] = self._same_radial(legs[-1])
+                self._last_fix = end_fix(legs[-1])
             else:
                 self._reject_airway_routing()
                 self._leg_separator(required=bool(legs))
@@ -310,6 +314,42 @@ class LegParser(TokenStream):
         self._accept(",")
         self._expect("to")
         return self._cross_at()
+
+    def _peek_same_radial(self, last: Leg) -> bool:
+        """``, then via R-063`` naming the radial the last leg flies, with no
+        terminator of its own."""
+        turned = _turned(last)
+        if not isinstance(turned, Radial | HeadingAndRadial) or turned.until:
+            return False
+        offset = int(self._peek(","))
+        offset += int(self._peek("then", offset=offset))
+        radial = self._token(offset + 1)
+        return (
+            self._peek_any_of(_ROUTE_PREPOSITIONS, offset)
+            and radial is not None
+            and radial.text == f"R-{turned.radial:03d}"
+        )
+
+    def _same_radial(self, last: Leg) -> Leg:
+        """same-radial := [","] ["then"] ("via" | "on") "R-nnn" radial-end, the
+        radial the last leg intercepted, named without its navaid, and where
+        it ends: "heading 280° to intercept TFD R-063, then via R-063 to TFD
+        VORTAC". It is the last leg's terminator."""
+        self._accept(",")
+        self._accept("then")
+        self._expect_any(*_ROUTE_PREPOSITIONS)
+        self._radial()
+        turned = _turned(last)
+        altitude, until = self._radial_end(turned.navaid)
+        if until is None:
+            raise self._unmatched()
+        if altitude is not None:
+            turned = self._with_altitude(turned, altitude)
+        outbound = self._outbound(turned.outbound, turned.navaid, until)
+        turned = dataclasses.replace(turned, until=until, outbound=outbound)
+        if isinstance(last, ClimbingTurn):
+            return dataclasses.replace(last, then=turned)
+        return turned
 
     def _peek_upon_reaching(self) -> bool:
         return self._peek(",", "upon", "reaching") or self._peek("upon", "reaching")
