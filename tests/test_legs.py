@@ -260,3 +260,50 @@ def test_turn_to_a_radial_turns_onto_it():
             ),
         ),
     )
+
+
+@pytest.mark.parametrize(
+    ("text", "leg"),
+    [
+        pytest.param(
+            "Rwy 3, climbing left turn on DDY R-202, to DDY VOR/DME before "
+            "proceeding on course.",
+            ClimbingTurn(
+                Turn.LEFT,
+                Radial(
+                    NavaidRef("DDY"),
+                    202,
+                    outbound=False,
+                    until=AtFix(NavaidRef("DDY", NavaidType.VOR_DME)),
+                ),
+            ),
+            id="CPR comma",
+        ),
+        pytest.param(
+            "Rwy 28, climb on heading 282° to intercept VXV VORTAC R-090 then to "
+            "VXV VORTAC to 5000 before proceeding on course.",
+            HeadingAndRadial(
+                282,
+                NavaidRef("VXV", NavaidType.VORTAC),
+                90,
+                outbound=False,
+                until=AtFix(NavaidRef("VXV", NavaidType.VORTAC)),
+                altitude=to(5000),
+            ),
+            id="GKT then",
+        ),
+    ],
+)
+def test_radial_ends_at_its_own_navaid_set_off_by_a_comma_or_then(text, leg):
+    (group,) = legs_of(text)
+
+    assert group.legs == (leg, ProceedOnCourse())
+
+
+def test_radial_does_not_end_at_another_navaid_set_off_by_a_comma():
+    text = (
+        "Rwy 3, climbing left turn on DDY R-202, to CPR VOR/DME before proceeding "
+        "on course."
+    )
+
+    assert signature_of(text) == 'unmatched phrase "to <id> vor/"'

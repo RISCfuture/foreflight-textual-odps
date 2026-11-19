@@ -994,17 +994,32 @@ class LegParser(TokenStream):
         return Radial(navaid, radial, outbound, until, altitude=altitude)
 
     def _radial_end(self, navaid: NavaidRef) -> tuple[Altitude | None, Until | None]:
-        """radial-end := [altitude-before-fix] [until [altitude-after-fix]]
+        """radial-end := [altitude-before-fix] [[","] ["then"] until
+        [altitude-after-fix]], the comma or "then" only before the radial's
+        own navaid
 
         Returns the altitude climbed to on the way and the terminator. Past
         a fix or DME distance, a trailing altitude ("R-090 to VXV VORTAC to
-        5000") is climbed to on the way there, as a leading one is.
+        5000") is climbed to on the way there, as a leading one is. The
+        radial's own navaid, set off by a comma or "then" ("on DDY R-202, to
+        DDY VOR/DME", "R-090 then to VXV VORTAC"), is where the radial ends:
+        nothing but the radial leads to it.
         """
         altitude = self._altitude_before_fix()
+        lead = int(self._peek(",")) + int(
+            self._peek("then", offset=int(self._peek(",")))
+        )
+        if lead and self._peek("to", offset=lead) and self._peek_same(navaid, lead + 1):
+            self._index += lead
         until = self._until()
         if altitude is None and isinstance(until, AtFix | Dme):
             altitude = self._altitude_after_fix()
         return altitude, until
+
+    def _peek_same(self, navaid: NavaidRef, offset: int) -> bool:
+        """Whether `navaid`'s ident comes next, after `offset` tokens."""
+        token = self._token(offset)
+        return token is not None and token.text == navaid.ident
 
     def _altitude_after_fix(self) -> Altitude | None:
         """altitude-after-fix := to-altitude, after an until naming a fix or
