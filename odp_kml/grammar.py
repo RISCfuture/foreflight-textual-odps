@@ -894,9 +894,19 @@ class _Parser(LegParser):
         return len(alternatives) > 1
 
     def _sentence(self) -> str:
-        """The words from here to the end of the sentence, spaced as one line."""
+        """The words from here to the end of the sentence, or to the "..."
+        leading into the shared tail ("Cross FRA VORTAC at or above 6000,
+        thence..."), spaced as one line."""
         end = self._sentence_end(self._index)
-        return " ".join(token.text for token in self._tokens[self._index : end])
+        ellipsis = next(
+            (
+                later + 1
+                for later in range(self._index, end)
+                if self._tokens[later].text == "..."
+            ),
+            end,
+        )
+        return " ".join(token.text for token in self._tokens[self._index : ellipsis])
 
     def _sentence_end(self, index: int) -> int:
         """The token just past the "." ending the sentence that holds token

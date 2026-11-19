@@ -2405,6 +2405,24 @@ def test_sentence_repeated_for_each_runway_joins_the_last_one_too():
     assert [type(group.legs[-2]) for group in groups] == [ClimbInHold, ClimbInHold]
 
 
+def test_sentence_repeated_up_to_thence_joins_the_last_runway_too():
+    text = (
+        "Rwys 11L/R, climb heading 112° to 2500,then climbing left turn heading 040° "
+        "to intercept FRA VORTAC R-150 to FRA VORTAC. Cross FRA VORTAC at or above "
+        "6000, thence...\n"
+        "Rwys 29L/R, climb heading 292° to 2500, then climbing right turn direct FRA "
+        "VORTAC. Cross FRA VORTAC at or above 6000, thence...\n"
+        "...continue climb in FRA VORTAC holding pattern (hold south, left turn, 350° "
+        "inbound) to cross FRA VORTAC at or above MEA/ MCA for route of flight."
+    )
+
+    groups = parse_departure_procedure(
+        text, airport="FAT", amendment=None
+    ).runway_groups
+
+    assert [type(group.legs[-2]) for group in groups] == [CrossAt, CrossAt]
+
+
 MFR_VISUAL_CLIMB_INTO_TAIL = (
     "Rwy 14, climbing right turn direct OED VORTAC, or for climb in visual "
     "conditions, cross Rogue Valley Intl/Medford airport at or above 4100 before "
