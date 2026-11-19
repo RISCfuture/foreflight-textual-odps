@@ -4,8 +4,10 @@
 carries furniture (page number, ``TAKEOFF MINS`` banners, a cycle code, and
 the effective-date line printed down the page's middle), entries broken by a
 page end carry ``(CON’T)`` markers, and long sentences wrap at the column
-edge with no hanging indent. This module removes the furniture, finds each
-airport's heading, and hands each entry's lines to ``lines.join_lines``.
+edge with no hanging indent. From cycle 2611 the FAA's PDFs also print
+``ff``, ``ffi`` and ``ffl`` as ligature glyphs. This module removes the
+furniture, spells out the ligatures, finds each airport's heading, and hands
+each entry's lines to ``lines.join_lines``.
 """
 
 from __future__ import annotations
@@ -29,6 +31,18 @@ _PAGE_FURNITURE = re.compile(
     r"|L\d+"
     r"|\d{5}(?:\s+L\d+)?"
     r"|\d{2} [A-Z]{3} \d{4} to \d{2} [A-Z]{3} \d{4}.*"
+)
+# Only the Latin ligatures: full NFKC would also rewrite ``º`` and ``⁄``.
+_LIGATURES = str.maketrans(
+    {
+        "\ufb00": "ff",
+        "\ufb01": "fi",
+        "\ufb02": "fl",
+        "\ufb03": "ffi",
+        "\ufb04": "ffl",
+        "\ufb05": "st",
+        "\ufb06": "st",
+    }
 )
 _CONTINUATION_MARK = re.compile(r"\s*\(?CON['’]+T\b\)?")
 _CITY_LINE = re.compile(r"(?P<city>[^a-z]+, [A-Z]{2})")
@@ -174,10 +188,11 @@ def _run(*command: str) -> str:
 
 
 def _content_lines(pages: list[str]) -> Iterator[_Line]:
-    """Non-blank lines stripped of page furniture and continuation markers."""
+    """Non-blank lines stripped of page furniture and continuation markers,
+    with ligatures spelled out."""
     for number, page in enumerate(pages, start=1):
         for raw in page.split("\n"):
-            text = raw.strip()
+            text = raw.translate(_LIGATURES).strip()
             if not text or _PAGE_FURNITURE.fullmatch(text):
                 continue
             unmarked = _CONTINUATION_MARK.sub("", text)

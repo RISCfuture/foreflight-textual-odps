@@ -189,6 +189,23 @@ Rwy 15, climb heading 150° to 7000 before proceeding on course.
             "Rwy 15, climb heading 150° to 7000 before proceeding on course."
         )
 
+    def test_ligatures_are_spelled_out(self):
+        page = """\
+SYLVANIA, GA
+PLANTATION AIRPARK (JYL)
+TAKEOFF MINIMUMS AND (OBSTACLE) DEPARTURE PROCEDURES
+AMDT 1 01JAN20 (20001) (FAA)
+TAKEOFF MINIMUMS: Rwy 1, std. w/ min. climb of 210’/NM to 400, or alternatively,
+with std takeoﬀ minimums and a normal 200’/NM climb gradient.
+DEPARTURE PROCEDURE:
+Rwy 1, obtain ATC approval for VCOA when requesting IFR clearance. Climb in
+visual conditions to cross Eﬃngham County airport at or above 1800 before
+proceeding on course. Miﬄin 2.1º, 1⁄2 ﬁeld ﬂow."""
+        text = blocks_from_pages([page], {"JYL"}, "SE2")[0][0].text
+        assert "takeoff minimums" in text
+        assert "Effingham County airport" in text
+        assert "Mifflin 2.1º, 1⁄2 field flow." in text
+
     def test_unrecognized_heading_warns_instead_of_vanishing(self):
         page = """\
 McCALL, ID
