@@ -19,6 +19,7 @@ from odp_kml.procedure import (
     Radial,
     RunwayGroup,
     SpeedRestriction,
+    Thence,
     Turn,
 )
 
@@ -344,3 +345,48 @@ def test_heading_may_be_flown_from_der():
     assert legs_of(text) == (
         RunwayGroup(("20",), (ClimbHeading(185, to(11000)), ProceedOnCourse())),
     )
+
+
+@pytest.mark.parametrize(
+    ("text", "leg"),
+    [
+        pytest.param(
+            "Rwy 36, climb heading 357° to intercept and climb on SWR R-113 to SWR "
+            "VOR/DME thence...\n...proceed on course.",
+            HeadingAndRadial(
+                357,
+                NavaidRef("SWR"),
+                113,
+                outbound=False,
+                until=AtFix(NavaidRef("SWR", NavaidType.VOR_DME)),
+            ),
+            id="TVL climb on",
+        ),
+        pytest.param(
+            "Rwy 4, climbing right turn heading 240° to intercept and track "
+            "outbound on HOM VOR/DME R-210 thence...\n...proceed on course.",
+            ClimbingTurn(
+                Turn.RIGHT,
+                HeadingAndRadial(
+                    240, NavaidRef("HOM", NavaidType.VOR_DME), 210, outbound=True
+                ),
+            ),
+            id="HOM track outbound on",
+        ),
+    ],
+)
+def test_radial_intercepted_and_flown_on(text, leg):
+    procedure = parse_departure_procedure(
+        normalize(text), airport="XXX", amendment=None
+    )
+
+    assert procedure.runway_groups[0].legs == (leg, Thence())
+
+
+def test_radial_intercepted_and_flown_on_with_a_contrary_sense_is_refused():
+    text = (
+        "Rwy 4, climbing right turn heading 240° to intercept and track outbound "
+        "on HOM VOR/DME R-210 inbound thence...\n...proceed on course."
+    )
+
+    assert signature_of(text) == "radial sense printed both ways"

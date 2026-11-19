@@ -76,6 +76,8 @@ HEADER_LEG_WORDS = frozenset({"climb", "climbing"})
 # What leads a leg printed without "climb": "then on SLI VORTAC R-210".
 _ROUTE_PREPOSITIONS = frozenset({"on", "via"})
 _INTERCEPT_WORDS = frozenset({"intercept", "join"})
+# What a radial is flown by once intercepted: "intercept and track on ...".
+_FLY_ON_WORDS = frozenset({"climb", "track", "proceed"})
 # What follows a heading range's first heading: "316° CW 052°".
 _SENSES = frozenset({"cw", "ccw", "clockwise", "counter"})
 _NAVAID_TYPES = (
@@ -964,7 +966,7 @@ class LegParser(TokenStream):
         if self._peek_to_intercept():
             self._expect("to")
             self._expect_any(*_INTERCEPT_WORDS)
-            return self._heading_and_radial(heading)
+            return self._heading_and_radial(heading, self._and_fly_on())
         until = self._until()
         if (
             until is None
@@ -987,8 +989,11 @@ class LegParser(TokenStream):
             navaid += 1
         return self._peek("and") and self._peek_navaid(navaid)
 
-    def _heading_and_radial(self, heading: int) -> HeadingAndRadial:
+    def _heading_and_radial(
+        self, heading: int, sense: bool | None = None
+    ) -> HeadingAndRadial:
         navaid, radial, direction = self._radial_course()
+        direction = self._one_sense(sense, direction)
         altitude, until = self._radial_end(navaid)
         outbound = self._outbound(direction, navaid, until)
         return HeadingAndRadial(
@@ -1004,19 +1009,27 @@ class LegParser(TokenStream):
             raise self._error("leg with two altitudes")
         return dataclasses.replace(leg, altitude=altitude)
 
-    def _radial_leg(self) -> Radial:
+    def _radial_leg(self, sense: bool | None = None) -> Radial:
         """radial-leg := radial-course radial-end
 
         A radial printed without a sense, flown from its own navaid just
         reached ("direct VXV VORTAC then on VXV VORTAC R-053 to 4100"), is
-        outbound.
+        outbound. `sense` is one printed before the radial ("track outbound
+        on HOM VOR/DME R-210").
         """
         navaid, radial, direction = self._radial_course()
+        direction = self._one_sense(sense, direction)
         if direction is None and self._just_reached(navaid):
             direction = True
         altitude, until = self._radial_end(navaid)
         outbound = self._outbound(direction, navaid, until)
         return Radial(navaid, radial, outbound, until, altitude=altitude)
+
+    def _one_sense(self, before: bool | None, after: bool | None) -> bool | None:
+        """A radial's sense, printed before it or after it but not both ways."""
+        if None not in (before, after) and before != after:
+            raise self._error("radial sense printed both ways")
+        return after if before is None else before
 
     def _radial_end(self, navaid: NavaidRef) -> tuple[Altitude | None, Until | None]:
         """radial-end := [altitude-before-fix] [[","] ["then"] until
@@ -1070,12 +1083,30 @@ class LegParser(TokenStream):
         return self._last_fix is not None and _same_facility(self._last_fix, navaid)
 
     def _intercept(self) -> Radial:
-        """intercept := ["to"] ("intercept" | "join") radial-leg, a radial joined
-        on no printed heading: "climbing left turn to intercept PUB R-274 to
-        PUB VORTAC", "...all aircraft, intercept FHU VOR/DME R-021 ..."."""
+        """intercept := ["to"] ("intercept" | "join") and-fly-on radial-leg, a
+        radial joined on no printed heading: "climbing left turn to intercept
+        PUB R-274 to PUB VORTAC", "...all aircraft, intercept FHU VOR/DME R-021
+        ..."."""
         self._accept("to")
         self._expect_any(*_INTERCEPT_WORDS)
-        return dataclasses.replace(self._radial_leg(), intercept=True)
+        return dataclasses.replace(self._radial_leg(self._and_fly_on()), intercept=True)
+
+    def _and_fly_on(self) -> bool | None:
+        """and-fly-on := ["and" ("climb" | "track" | "proceed") ["outbound" |
+        "inbound"] "on"], between "intercept" and the radial it flies:
+        "to intercept and track outbound on HOM VOR/DME R-210". Returns the
+        sense it prints, if any."""
+        if not (self._peek("and") and self._peek_any_of(_FLY_ON_WORDS, 1)):
+            return None
+        self._expect("and")
+        self._next()
+        sense = None
+        if self._accept("outbound"):
+            sense = True
+        elif self._accept("inbound"):
+            sense = False
+        self._expect("on")
+        return sense
 
     def _radial_course(self) -> tuple[NavaidRef, int, bool | None]:
         """radial-course := ["the"] navaid "R-nnn" ["outbound" | "inbound"]"""
