@@ -94,3 +94,30 @@ def test_altitude_after_a_fix_and_before_it_is_refused():
     )
 
     assert signature_of(text) == 'unmatched phrase "to <n> before proceeding"'
+
+
+def test_altitude_before_a_radial_to_intercept_is_climbed_to_on_the_way():
+    text = (
+        "Rwy 12, climbing left turn to 3000 to intercept MOD VOR/DME R-264 to MOD "
+        "VOR/DME before proceeding on course."
+    )
+
+    assert legs_of(text) == (
+        RunwayGroup(
+            ("12",),
+            (
+                ClimbingTurn(
+                    Turn.LEFT,
+                    Radial(
+                        NavaidRef("MOD", NavaidType.VOR_DME),
+                        264,
+                        outbound=False,
+                        until=AtFix(NavaidRef("MOD", NavaidType.VOR_DME)),
+                        altitude=to(3000),
+                        intercept=True,
+                    ),
+                ),
+                ProceedOnCourse(),
+            ),
+        ),
+    )

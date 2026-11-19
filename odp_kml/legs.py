@@ -572,7 +572,8 @@ class LegParser(TokenStream):
 
     def _altitude_before_route(self) -> Altitude | None:
         """``to 10200 via heading …``, ``to 2000 heading 071°``, ``to 2500 on
-        CMA R-265``: the altitude a climb or turn climbs to precedes its route.
+        CMA R-265``, ``to 3000 to intercept MOD VOR/DME R-264``: the altitude a
+        climb or turn climbs to precedes its route.
 
         One before "direct" ("climbing right turn to 1900 direct AUG VOR/DME")
         or set off from its route by a comma ("climb to 3600, direct to BZA
@@ -585,7 +586,10 @@ class LegParser(TokenStream):
             raise self._error('unsupported "to <alt>" before "direct"')
         if self._peek_any_of(_LEG_SEPARATORS, 2):
             raise self._error('unsupported "to <alt>," before a route')
-        if not self._peek_any_of(_ROUTE_LEADS, 2):
+        if not (
+            self._peek_any_of(_ROUTE_LEADS, 2)
+            or (self._peek("to", offset=2) and self._peek_any_of(_INTERCEPT_WORDS, 3))
+        ):
             return None
         return self._to_altitude()
 
