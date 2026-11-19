@@ -469,8 +469,10 @@ class LegParser(TokenStream):
 
     def _speed_until(self) -> None:
         """speed-until := "established on" ("course" | heading | radial-course
-        [bound]) | "established" flight-direction | "reaching" nnnn ["MSL"]
-        | nn.n "DME" | ["crossing" | "passing"] target"""
+        [bound]) | "established" flight-direction | ("reaching" | "leaving")
+        nnnn ["MSL"] | nn.n "DME" | ["crossing" | "passing"] target
+
+        A climb leaves an altitude as it reaches it: "until leaving 4000"."""
         if self._accept("established", "on"):
             self._accept("the")
             if self._accept("course"):
@@ -484,7 +486,7 @@ class LegParser(TokenStream):
         if self._accept("established"):
             self._flight_direction()
             return
-        if self._accept("reaching"):
+        if self._accept_any("reaching", "leaving"):
             self._integer()
             self._accept("msl")
             return

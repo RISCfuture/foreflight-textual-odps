@@ -15,6 +15,7 @@ from odp_kml.procedure import (
     ProceedOnCourse,
     Radial,
     RunwayGroup,
+    SpeedRestriction,
     Turn,
 )
 
@@ -192,3 +193,16 @@ def test_upon_reaching_another_altitude_is_refused():
     text = ROW.replace("reaching 6000", "reaching 7000")
 
     assert signature_of(text) == "upon reaching an altitude the leg does not end at"
+
+
+def test_speed_limit_until_leaving_an_altitude():
+    text = (
+        "Rwy 6, climb heading 075° to 4700, do not exceed 210 KIAS until leaving 4000."
+    )
+
+    assert legs_of(text) == (
+        RunwayGroup(
+            ("6",),
+            (ClimbHeading(75, to(4700), SpeedRestriction(210, "leaving 4000")),),
+        ),
+    )
