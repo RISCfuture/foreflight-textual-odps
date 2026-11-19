@@ -89,6 +89,9 @@ with certainty:
 - VCOA (visual climb over airport) circles, including airports whose only
   procedure is a VCOA and visual climbs written into the departure
   procedure itself ("..., or for climb in visual conditions: cross ...").
+  A visual climb on a line of its own ("...for climb in visual
+  conditions: cross ...") is for the runways whose routes end "or..."
+  above it, or, when none does, for every runway routed above it.
   A published crossing direction joins the label where it still fits in
   ForeFlight's 22 characters (`VCOA (≥8200' SE bound)`), and a speed limit
   on the visual climb is labelled below the circle. The label stands at

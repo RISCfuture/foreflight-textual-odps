@@ -340,6 +340,7 @@ class _Parser(LegParser):
         self._continuations: set[str] = set()
         self._unrouted: set[str] = set()
         self._header_runways: tuple[str, ...] | None = None
+        self._awaiting_visual_climb: tuple[str, ...] = ()
 
     @property
     def inline_vcoa(self) -> tuple[VcoaGroup, ...]:
@@ -370,6 +371,9 @@ class _Parser(LegParser):
             start, kept, inline = self._index, len(groups), len(self._inline_vcoa)
             try:
                 if self._statement():
+                    continue
+                if self._peek_shared_visual_climb():
+                    self._shared_visual_climb(groups)
                     continue
                 if self._peek(*VISUAL_CLIMB):
                     raise self._error("visual climb without a runway")
@@ -414,6 +418,7 @@ class _Parser(LegParser):
                     if named:
                         self.unparsed.append(Unparsed(named, error))
                 self._skip_to_next_group(groups, stopped, resume)
+        self._refuse_routes_awaiting_visual_climb(groups)
         if self._in_part:
             if tail_error is None and not self._at_end():
                 tail_error, shared_tail = self._unmatched(), None
@@ -909,6 +914,52 @@ class _Parser(LegParser):
             Unparsed(vcoa.runways, error, vcoa=True) for vcoa in refused
         )
 
+    def _peek_vcoa_alternative(self, offset: int = 0) -> bool:
+        """The leg grammar's visual climb alternatives, and "or..." ending a
+        route's line: the visual climb it is the alternative to follows on a
+        later line ("... before proceeding on course or...⏎...for climb in
+        visual conditions: cross ...")."""
+        return super()._peek_vcoa_alternative(offset) or self._peek(
+            "or", "...", offset=offset
+        )
+
+    def _peek_shared_visual_climb(self) -> bool:
+        return self._peek("...", *VISUAL_CLIMB)
+
+    def _shared_visual_climb(self, groups: list[RunwayGroup]) -> None:
+        """shared-visual-climb := "..." inline-vcoa, on a line of its own
+
+        The visual climb the runways whose routes ended "or..." may fly
+        instead ("Rwy 13, ... before proceeding on course or...⏎Rwy 31, ...
+        or...⏎...for climb in visual conditions: cross ..."); after routes
+        that do not end so ("Rwy 25, climb heading 266° to 6700 before
+        proceeding on course.⏎...for climb in visual conditions, cross ..."),
+        the one every runway routed so far may fly.
+        """
+        runways = self._awaiting_visual_climb or _runways_of(
+            [group for group in groups if _flies_route(group)]
+        )
+        if not runways or (self._index > 0 and not self._starts_line()):
+            raise self._error("visual climb without a runway")
+        self._expect("...")
+        self._add_inline_vcoa(self._inline_visual_climb(runways))
+        self._awaiting_visual_climb = ()
+
+    def _refuse_routes_awaiting_visual_climb(self, groups: list[RunwayGroup]) -> None:
+        """A route ending "or..." whose visual climb never follows is left
+        unread: what it is the alternative to was not read."""
+        if not self._awaiting_visual_climb:
+            return
+        error = ParseError('"or..." without a visual climb', "", len(self._text))
+        if not self._in_part:
+            raise error
+        self._withhold(
+            groups,
+            error,
+            lambda runways: bool(set(runways) & set(self._awaiting_visual_climb)),
+        )
+        self._awaiting_visual_climb = ()
+
     def _flown_legs(self) -> tuple[Leg, ...]:
         self._last_fix = None
         return self._legs([self._leg()])
@@ -956,7 +1007,17 @@ class _Parser(LegParser):
         return False
 
     def _vcoa_alternative(self, runways: tuple[str, ...]) -> None:
-        """vcoa-alternative := ["," | ";"] ["or"] inline-vcoa, after the legs."""
+        """vcoa-alternative := ["," | ";"] ["or"] inline-vcoa | "or..." ↓,
+        after the legs.
+
+        ↓: "or..." ends the line; the visual climb it leads to is written
+        later, for every runway whose route ends so (`_shared_visual_climb`).
+        """
+        if self._accept("or", "..."):
+            if self._at_end() or not self._starts_line():
+                raise self._error('"or..." without a visual climb')
+            self._awaiting_visual_climb += runways
+            return
         for lead in ((), (",",), (";",)):
             for conjunction in ((), ("or",)):
                 if self._peek(*lead, *conjunction, *VISUAL_CLIMB):
@@ -978,10 +1039,10 @@ class _Parser(LegParser):
         self._visual_climb_end = self._index
 
     def _inline_visual_climb(self, runways: tuple[str, ...]) -> VcoaGroup:
-        """inline-vcoa := "for climb in visual conditions" [":" | ","] ["to"]
-        "cross" crossing [notify-atc]"""
+        """inline-vcoa := "for climb in visual conditions" [":" | "," | ";"
+        | "."] ["to"] "cross" crossing [notify-atc]"""
         self._expect(*VISUAL_CLIMB)
-        self._accept_any(":", ",")
+        self._accept_any(":", ",", ";", ".")
         self._accept("to")
         self._expect("cross")
         group = self._crossing(runways)

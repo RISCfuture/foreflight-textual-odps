@@ -1649,6 +1649,73 @@ def test_parses_visual_climbs_written_into_the_departure_procedure(text, groups,
     assert procedure.vcoa == tuple(vcoa)
 
 
+DDH_OR_VISUAL_CLIMB = (
+    "Rwy 13, climbing left turn direct CAM VOR/DME, continue climb-in-hold (North, "
+    "right turns, 160° inbound) to 4400 before proceeding on course or...\n"
+    "Rwy 31, climbing right turn direct CAM VOR/DME, continue climb-in-hold (North, "
+    "right turns, 160° inbound) to 4400 before proceeding on course or...\n"
+    "...for climb in visual conditions: cross William H Morse State airport at or "
+    "above 3300 before proceeding on course. When executing VCOA, notify ATC prior "
+    "to departure."
+)
+
+
+@pytest.mark.parametrize(
+    ("text", "runways", "vcoa"),
+    [
+        pytest.param(
+            DDH_OR_VISUAL_CLIMB,
+            [("13",), ("31",)],
+            [_vcoa(("13", "31"), 3300)],
+            id='after routes ending "or..."',
+        ),
+        pytest.param(
+            "Rwy 25, climb heading 266° to 6700 before proceeding on course.\n"
+            "...for climb in visual conditions, cross Eagle airport at or above 4800 "
+            "before proceeding on course. When executing VCOA, notify ATC prior to "
+            "departure.",
+            [("25",)],
+            [_vcoa(("25",), 4800)],
+            id="after routes ending on course",
+        ),
+        pytest.param(
+            "Rwy 13, climb heading 132° to 600 then turn left direct SGD VORTAC "
+            "before proceeding on course.\nRwy 31, climbing right turn direct SGD "
+            "VORTAC before proceeding on course.\n... for climb in visual "
+            "conditions, cross Gnoss Fld at or above 1900 MSL then proceed direct "
+            "SGD VORTAC before proceeding on course.",
+            [("13",), ("31",)],
+            [
+                VcoaGroup(
+                    ("13", "31"),
+                    None,
+                    1900,
+                    (Direct(NavaidRef("SGD", NavaidType.VORTAC)), ProceedOnCourse()),
+                )
+            ],
+            id="for every runway routed above",
+        ),
+    ],
+)
+def test_visual_climb_on_a_line_of_its_own_is_for_the_routes_above(text, runways, vcoa):
+    procedure = parse_departure_procedure(text, airport="XXX", amendment=None)
+
+    assert [group.runways for group in procedure.runway_groups] == runways
+    assert procedure.vcoa == tuple(vcoa)
+
+
+def test_route_ending_or_without_its_visual_climb_is_unread():
+    text = DDH_OR_VISUAL_CLIMB[: DDH_OR_VISUAL_CLIMB.index("\n...")]
+
+    procedure, unparsed = read_in_part(text)
+
+    assert procedure.runway_groups == ()
+    assert sorted(unparsed) == [
+        (("13",), '"or..." without a visual climb', False),
+        (("31",), '"or..." without a visual climb', False),
+    ]
+
+
 def test_inline_visual_climbs_come_before_the_vcoa_section():
     sections = Sections(
         amendment=None,
