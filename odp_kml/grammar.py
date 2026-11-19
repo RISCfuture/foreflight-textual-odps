@@ -311,6 +311,8 @@ def _navaid_refs(node) -> Iterator[NavaidRef]:
 
 _RUNWAY = re.compile(r"\d{1,2}[LRC]?")
 _RUNWAY_SIDES = ("L", "R", "C")
+# Runway numbers of a runway's two ends differ by 18 (180°).
+_RECIPROCAL_OFFSET = 18
 _DP_NAME_WORD = re.compile(r"[A-Z][A-Z0-9]*")
 _DP_NAME_PUNCTUATION = frozenset("()'")
 _DP_NAME_MAX_TOKENS = 8
@@ -1072,20 +1074,38 @@ class _Parser(LegParser):
         return token is not None and bool(_RUNWAY.fullmatch(token.text))
 
     def _runway(self) -> list[str]:
-        """runway := nn[LRC] ("/" [LRC])*  e.g. ``2L/R`` → ``2L``, ``2R``
+        """runway := nn[LRC] ("/" [LRC])* | nn "/" nn
+        e.g. ``2L/R`` → ``2L``, ``2R``; ``5/23`` → ``5``, ``23``
 
         The sides of a pair may be printed apart from the number: ``2 L/R``.
+        Two numbers name both ends of one runway, so they must be 18 apart.
         """
         if not self._peek_runway():
             raise self._unmatched()
         number = self._next().text
         if number.isdigit() and self._peek_spaced_side():
             number += self._next().text
+        if (reciprocal := self._reciprocal_end(number)) is not None:
+            return [number, reciprocal]
         runways = [number]
         while self._peek_sibling_runway():
             self._index += 1
             runways.append(number.rstrip("LRC") + self._next().text)
         return runways
+
+    def _reciprocal_end(self, number: str) -> str | None:
+        """The other end after ``/`` in ``5/23``, consumed; else ``None``."""
+        other = self._token(1)
+        if not (
+            number.isdigit()
+            and self._peek("/")
+            and other is not None
+            and other.text.isdigit()
+            and abs(int(other.text) - int(number)) == _RECIPROCAL_OFFSET
+        ):
+            return None
+        self._index += 2
+        return other.text
 
     def _peek_sibling_runway(self, offset: int = 0) -> bool:
         side = self._token(offset + 1)
@@ -1121,6 +1141,7 @@ class _Parser(LegParser):
     def _departs_without_route(self) -> bool:
         """unrouted := turn-not-available | diverse-na
                      | "diverse" departure-word ("authorized" | "auth") "."
+                     | "diverse" departure-word "procedures NA at night."
 
         turn-not-available := ("left" | "right") ("turn" | "turns")
                               "on departure NA."
@@ -1135,6 +1156,7 @@ class _Parser(LegParser):
             or self._diverse_departures_na()
             or self._accept_diverse("authorized", ".")
             or self._accept_diverse("auth", ".")
+            or self._accept_diverse("procedures", "na", "at", "night", ".")
         )
 
     def _turn_not_available(self) -> bool:

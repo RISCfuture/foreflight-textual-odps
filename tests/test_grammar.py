@@ -1716,6 +1716,16 @@ def test_route_ending_or_without_its_visual_climb_is_unread():
     ]
 
 
+def test_runway_named_with_its_reciprocal_departs_without_a_route():
+    procedure = parse_departure_procedure(
+        "Rwy 5/23, diverse departure procedures NA at night.",
+        airport="XXX",
+        amendment=None,
+    )
+
+    assert procedure.runway_groups == (RunwayGroup(("5", "23"), ()),)
+
+
 def test_inline_visual_climbs_come_before_the_vcoa_section():
     sections = Sections(
         amendment=None,
