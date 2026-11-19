@@ -317,8 +317,8 @@ _DP_NAME_WORD = re.compile(r"[A-Z][A-Z0-9]*")
 _DP_NAME_PUNCTUATION = frozenset("()'")
 _DP_NAME_MAX_TOKENS = 8
 # Lowercase words inside an airport name: "Augusta Rgnl at Bush Fld",
-# "Prairie du Chien Muni".
-_AIRPORT_NAME_CONNECTORS = frozenset({"at", "du"})
+# "Prairie du Chien Muni", "Truth or Consequences Muni", "Harriman-and-West".
+_AIRPORT_NAME_CONNECTORS = frozenset({"and", "at", "du", "or"})
 _DEPARTURE_WORDS = ("departure", "departures")
 _NA_REASONS = ("obstacles", "atc", "terrain", "environmental")
 
@@ -1622,16 +1622,21 @@ class _Parser(LegParser):
         return None
 
     def _airport_name(self) -> None:
-        """airport-name := (Capitalized-word | "/" | "(" | ")" | "-")+ ["airport"]
+        """airport-name := (Capitalized-word ["'s"] | "/" | "(" | ")" | "-")+
+                           ["airport"]
 
         The name has at least one mixed-case word and no navaid type, so a
-        navaid or fix is never mistaken for the airport. A lowercase "at" or
-        "du" joins two capitalized words ("Augusta Rgnl at Bush Fld"); the
-        name ends before "at or" and before a direction such as
-        "southeast bound".
+        navaid or fix is never mistaken for the airport. A lowercase "at",
+        "du", "or" or "and" joins two capitalized words ("Augusta Rgnl at Bush
+        Fld", "Truth or Consequences Muni") or hyphens ("Harriman-and-West");
+        a word may be possessive ("Eagle's Nest"). The name ends before "at
+        or" and before a direction such as "southeast bound".
         """
         start = self._index
         while not self._peek("at", "or") and not self._peek_bound():
+            if self._peek("'", "s") and self._index > start:
+                self._index += 2
+                continue
             if not (
                 self._is_airport_name_token(self._token())
                 or self._peek_name_connector()
@@ -1649,7 +1654,7 @@ class _Parser(LegParser):
             token is not None
             and token.text in _AIRPORT_NAME_CONNECTORS
             and following is not None
-            and following.text[0].isupper()
+            and (following.text[0].isupper() or following.text == "-")
         )
 
     @staticmethod

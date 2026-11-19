@@ -1935,6 +1935,26 @@ def test_parses_vcoa_section_wordings(text, runways, feet):
     assert parse_vcoa(text) == (VcoaGroup(runways, None, feet, (ProceedOnCourse(),)),)
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Truth or Consequences Muni airport",
+        "Eagle's Nest airport",
+        "Rice Lake Rgnl/Carl's Fld",
+        "Harriman-and-West airport",
+        "Sparta/Fort Mc Coy airport",
+    ],
+)
+def test_vcoa_crossing_names_the_airport_in_its_own_words(name):
+    text = (
+        "Rwy 1, obtain ATC approval for VCOA when requesting IFR clearance. Climb in "
+        f"visual conditions to cross {name} at or above 8400 before proceeding on "
+        "course."
+    )
+
+    assert parse_vcoa(text) == (VcoaGroup(("1",), None, 8400, (ProceedOnCourse(),)),)
+
+
 VISUAL_CLIMB_TO_DSD = (
     "obtain ATC approval for VCOA when requesting IFR clearance. Climb in visual "
     "conditions to cross Madras Muni airport at or above 3600, then proceed on DSD "
