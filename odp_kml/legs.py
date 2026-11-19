@@ -542,7 +542,8 @@ class LegParser(TokenStream):
 
     def _speed_until(self) -> None:
         """speed-until := "established on" ("course" | heading | nnn ["°"]
-        "heading" | radial-course [bound]) | "established" flight-direction
+        "heading" | radial-course [bound]) | "established direct" target
+        | "established" flight-direction
         | ("reaching" | "leaving") nnnn ["MSL"] | nn.n "DME"
         | ["crossing" | "passing"] target
 
@@ -560,6 +561,9 @@ class LegParser(TokenStream):
                 return
             self._radial_course()
             self._bound()
+            return
+        if self._accept("established", "direct"):
+            self._target()
             return
         if self._accept("established"):
             self._flight_direction()

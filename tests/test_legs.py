@@ -697,3 +697,16 @@ def test_speed_limit_after_a_route_that_only_goes_on_course_is_refused():
             "Rwy 6, before proceeding on course, do not exceed 210 KIAS until "
             "leaving 4000."
         )
+
+
+def test_speed_limit_until_established_direct_a_navaid():
+    text = (
+        "Rwy 22, climbing right turn to intercept RIW VOR R-220 to 8500 before "
+        "proceeding on course. Do not exceed 240K until established direct RIW VOR."
+    )
+
+    (group,) = legs_of(text)
+
+    assert group.legs[0].then.speed == SpeedRestriction(
+        240, "established direct RIW VOR"
+    )
