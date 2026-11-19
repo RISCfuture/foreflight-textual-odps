@@ -117,7 +117,7 @@ class LegParser(TokenStream):
 
     def _legs(self, legs: list[Leg]) -> tuple[Leg, ...]:
         """legs := leg ((separator leg) | before | speed | and-hold
-                   | fix-crossing)* ("." | thence | ↓)
+                   | fix-crossing | upon-reaching)* ("." | thence | ↓)
 
         ↓: the legs also end, unconsumed, where an inline VCOA alternative
         ("..., or for climb in visual conditions") begins, and where the text
@@ -146,6 +146,8 @@ class LegParser(TokenStream):
                 self._append(legs, self._and_hold())
             elif legs and self._peek_fix_crossing():
                 self._append(legs, self._fix_crossing())
+            elif legs and self._peek_upon_reaching():
+                self._append(legs, self._upon_reaching(legs[-1]))
             else:
                 self._reject_airway_routing()
                 self._leg_separator(required=bool(legs))
@@ -290,6 +292,24 @@ class LegParser(TokenStream):
         self._accept(",")
         self._expect("to")
         return self._cross_at()
+
+    def _peek_upon_reaching(self) -> bool:
+        return self._peek(",", "upon", "reaching") or self._peek("upon", "reaching")
+
+    def _upon_reaching(self, last: Leg) -> ProceedOnCourse:
+        """upon-reaching := [","] "upon reaching" nnnn "proceed on course",
+        after a leg climbing to that altitude: "... to intercept CME R-323,
+        upon reaching 6000 proceed on course." Any other altitude would end
+        the route somewhere the legs do not."""
+        self._accept(",")
+        self._expect("upon", "reaching")
+        start = self._index
+        until = getattr(_turned(last), "until", None)
+        if not (isinstance(until, Altitude) and until.feet == self._integer()):
+            self._index = start
+            raise self._error("upon reaching an altitude the leg does not end at")
+        self._expect("proceed", "on", "course")
+        return ProceedOnCourse()
 
     def _peek_continuation(self) -> bool:
         """A new sentence that goes on flying the route: "... direct RSK VORTAC.

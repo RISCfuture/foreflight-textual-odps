@@ -163,3 +163,32 @@ def test_heading_climbing_to_an_altitude_ends_there():
             (ClimbingTurn(Turn.RIGHT, ClimbHeading(110, to(5000))), ProceedOnCourse()),
         ),
     )
+
+
+ROW = (
+    "Rwy 35, climbing left turn to 6000 on heading 277° to intercept CME R-323, "
+    "upon reaching 6000 proceed on course."
+)
+
+
+def test_upon_reaching_the_altitude_climbed_to_proceeds_on_course():
+    assert legs_of(ROW) == (
+        RunwayGroup(
+            ("35",),
+            (
+                ClimbingTurn(
+                    Turn.LEFT,
+                    HeadingAndRadial(
+                        277, NavaidRef("CME"), 323, outbound=None, until=to(6000)
+                    ),
+                ),
+                ProceedOnCourse(),
+            ),
+        ),
+    )
+
+
+def test_upon_reaching_another_altitude_is_refused():
+    text = ROW.replace("reaching 6000", "reaching 7000")
+
+    assert signature_of(text) == "upon reaching an altitude the leg does not end at"
