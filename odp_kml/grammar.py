@@ -1601,7 +1601,7 @@ class _Parser(LegParser):
         return group
 
     def _with_speed_limit(self, group: VcoaGroup, *, first: bool) -> VcoaGroup:
-        """speed-sentence := speed "."
+        """speed-sentence := speed "." | "(" speed ")" "."
 
         The VCOA section's visual climb with the speed limit the sentence
         after it puts on it ("Do not exceed 180 KIAS until reaching 1800
@@ -1615,8 +1615,7 @@ class _Parser(LegParser):
             raise self._error("speed limit after several visual climbs")
         if group.speed is not None:
             raise self._error("two speed limits on a visual climb")
-        speed = self._speed_restriction()
-        self._expect(".")
+        speed, _ = self._speed_sentence()
         return dataclasses.replace(group, speed=speed)
 
     def _peek_vcoa_runways(self) -> bool:

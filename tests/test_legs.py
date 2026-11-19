@@ -768,3 +768,26 @@ def test_navaid_named_in_mixed_case_before_its_ident():
             until=AtFix(NavaidRef("LIN", NavaidType.VOR_DME)),
         ),
     )
+
+
+ABQ = (
+    "Rwy 8, climbing right turn direct ABQ VORTAC. If required, continue climb in "
+    "ABQ VORTAC holding pattern (hold W, left turns, 077° inbound) to cross ABQ "
+    "VORTAC at or above MEA/MCA for route of flight. (Do not exceed 250 KTS until "
+    "ABQ VORTAC)."
+)
+
+
+def test_speed_limit_until_a_fix_binds_the_leg_before_a_hold_there():
+    (group,) = legs_of(ABQ)
+
+    abq = NavaidRef("ABQ", NavaidType.VORTAC)
+    assert group.legs[0] == ClimbingTurn(
+        Turn.RIGHT, Direct(abq, SpeedRestriction(250, "ABQ VORTAC"))
+    )
+
+
+def test_speed_limit_until_another_fix_does_not_skip_the_hold():
+    text = ABQ.replace("until ABQ VORTAC", "until XYZ VORTAC")
+
+    assert signature_of(text) == "speed restriction after ClimbInHold"

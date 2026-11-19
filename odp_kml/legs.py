@@ -539,22 +539,30 @@ class LegParser(TokenStream):
 
     def _speed_restriction(self) -> SpeedRestriction:
         """speed := [","] "do not exceed" n "KIAS until" speed-until"""
+        return self._speed_restriction_and_fix()[0]
+
+    def _speed_restriction_and_fix(
+        self,
+    ) -> tuple[SpeedRestriction, NavaidRef | FixRef | None]:
+        """The speed limit, and the fix it ends at when it ends at one."""
         self._accept(",")
         self._expect("do", "not", "exceed")
         kias = self._integer()
         self._expect("kias", "until")
         start = self._position()
-        self._speed_until()
-        return SpeedRestriction(kias, self._slice_from(start))
+        fix = self._speed_until()
+        return SpeedRestriction(kias, self._slice_from(start)), fix
 
-    def _speed_until(self) -> None:
+    def _speed_until(self) -> NavaidRef | FixRef | None:
         """speed-until := "established on" ("course" | heading | nnn ["°"]
         "heading" | radial-course [bound]) | "established direct" target
         | "established" flight-direction
         | ("reaching" | "leaving") nnnn ["MSL"] | nn.n "DME"
         | ["crossing" | "passing"] target
 
-        A climb leaves an altitude as it reaches it: "until leaving 4000"."""
+        A climb leaves an altitude as it reaches it: "until leaving 4000".
+        Returns the fix a limit ends at ("until passing LAS VORTAC"), if any.
+        """
         if self._accept("established", "on"):
             self._accept("the")
             if self._accept("course"):
@@ -571,7 +579,7 @@ class LegParser(TokenStream):
             return
         if self._accept("established", "direct"):
             self._target()
-            return
+            return None
         if self._accept("established"):
             self._flight_direction()
             return
@@ -585,7 +593,7 @@ class LegParser(TokenStream):
             self._expect("dme")
             return
         self._accept_any("crossing", "passing")
-        self._target()
+        return self._target()
 
     def _flight_direction(self) -> None:
         """flight-direction := bound | compass ("-" | "/") compass "bound",
@@ -602,23 +610,50 @@ class LegParser(TokenStream):
         self._expect("bound")
 
     def _peek_speed_sentence(self) -> bool:
-        """ "... on course. Do not exceed 150 KIAS until reaching 1700 MSL." """
-        return self._follows_period() and self._peek("do", "not", "exceed")
+        """ "... on course. Do not exceed 150 KIAS until reaching 1700 MSL." or
+        "... (Do not exceed 250 KTS until ABQ VORTAC)." """
+        return self._follows_period() and (
+            self._peek("do", "not", "exceed") or self._peek("(", "do", "not", "exceed")
+        )
+
+    def _speed_sentence(self) -> tuple[SpeedRestriction, NavaidRef | FixRef | None]:
+        """speed-sentence := speed "." | "(" speed ")" "."; the limit and the
+        fix it ends at, if any."""
+        opened = self._accept("(")
+        speed, fix = self._speed_restriction_and_fix()
+        if opened:
+            self._expect(")")
+        self._expect(".")
+        return speed, fix
 
     def _with_speed_sentence(self, legs: tuple[Leg, ...]) -> tuple[Leg, ...]:
         """`legs` with a speed-limit sentence applied to the last leg flown."""
-        speed = self._speed_restriction()
-        self._expect(".")
-        return self._with_last_flown_speed(legs, speed)
+        return self._with_last_flown_speed(legs, *self._speed_sentence())
 
     def _with_last_flown_speed(
-        self, legs: tuple[Leg, ...], speed: SpeedRestriction
+        self,
+        legs: tuple[Leg, ...],
+        speed: SpeedRestriction,
+        until_fix: NavaidRef | FixRef | None = None,
     ) -> tuple[Leg, ...]:
         """`legs` with `speed` on the last leg flown, as a limit printed after
         "before proceeding on course" ("... to LAS VORTAC before proceeding on
         course, do not exceed 200K until passing LAS VORTAC") limits the leg
-        before it."""
+        before it.
+
+        A limit that ends at a fix cannot bind a climb in hold at that fix,
+        flown only once the fix is reached; it binds the leg before the hold
+        ("climbing right turn direct ABQ VORTAC. If required, continue climb in
+        ABQ VORTAC holding pattern ... (Do not exceed 250 KTS until ABQ
+        VORTAC).").
+        """
         for index in reversed(range(len(legs))):
+            if (
+                until_fix is not None
+                and isinstance(legs[index], ClimbInHold)
+                and _same_facility(legs[index].fix, until_fix)
+            ):
+                continue
             if _flown(legs[index]):
                 leg = legs[index]
                 if _speed_restriction_of(leg) is not None:
