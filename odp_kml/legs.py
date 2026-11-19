@@ -76,6 +76,8 @@ HEADER_LEG_WORDS = frozenset({"climb", "climbing"})
 # What leads a leg printed without "climb": "then on SLI VORTAC R-210".
 _ROUTE_PREPOSITIONS = frozenset({"on", "via"})
 _INTERCEPT_WORDS = frozenset({"intercept", "join"})
+# What follows a heading range's first heading: "316° CW 052°".
+_SENSES = frozenset({"cw", "ccw", "clockwise", "counter"})
 _NAVAID_TYPES = (
     (("vor", "/", "dme"), NavaidType.VOR_DME),
     (("vortac",), NavaidType.VORTAC),
@@ -839,16 +841,24 @@ class LegParser(TokenStream):
 
     def _peek_heading_range(self) -> bool:
         offset = 1 if self._peek("a") else 0
-        return (
-            self._peek("heading", offset=offset) or self._peek("hdg", offset=offset)
-        ) and self._peek("between", offset=offset + 1)
+        if not self._peek_heading(offset):
+            return False
+        if self._peek("between", offset=offset + 1):
+            return True
+        number = offset + 1
+        sense = number + (2 if self._peek("°", offset=number + 1) else 1)
+        return self._peek_integer(number) and self._peek_any_of(_SENSES, sense)
 
     def _heading_range(self) -> HeadingRange:
-        """heading-range := ["a"] ("heading" | "hdg") "between" sector
-        ("or" ["between"] sector)* ["from" "DER"] [until]"""
+        """heading-range := ["a"] ("heading" | "hdg") ["between"] sector
+        ("or" ["between"] sector)* ["from" "DER"] [until]
+
+        "Between" may be left out ("climb on a heading 316° CW 052° from DER"):
+        the sector's CW or CCW still makes it a range.
+        """
         self._accept("a")
         self._expect_any("heading", "hdg")
-        self._expect("between")
+        self._accept("between")
         sectors = [self._sector()]
         while self._peek("or") and (
             self._peek_integer(1) or self._peek("between", offset=1)

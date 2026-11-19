@@ -11,6 +11,8 @@ from odp_kml.procedure import (
     ClimbHeading,
     ClimbingTurn,
     HeadingAndRadial,
+    HeadingRange,
+    HeadingSector,
     NavaidRef,
     NavaidType,
     ProceedOnCourse,
@@ -314,4 +316,21 @@ def test_climbing_on_a_heading_with_no_turn_is_a_climb():
 
     assert legs_of(text) == (
         RunwayGroup(("18",), (ClimbHeading(175, to(4200)), ProceedOnCourse())),
+    )
+
+
+def test_heading_range_may_leave_out_between():
+    text = (
+        "Rwy 2, climb on a heading 316° CW 052° from DER to 10600 before "
+        "proceeding on course."
+    )
+
+    assert legs_of(text) == (
+        RunwayGroup(
+            ("2",),
+            (
+                HeadingRange((HeadingSector(316, 52, clockwise=True),), to(10600)),
+                ProceedOnCourse(),
+            ),
+        ),
     )
