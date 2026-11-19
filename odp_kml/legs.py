@@ -853,10 +853,18 @@ class LegParser(TokenStream):
         return self._radial_leg()
 
     def _proceed(self) -> Radial | Direct:
-        """proceed := "proceed" (("on" | "via") radial-leg | direct)"""
+        """proceed := "proceed" (("on" | "via") radial-leg | direct
+        | "to" target)
+
+        "Proceed to BQU VOR/DME" goes direct to it, as "proceed direct BQU
+        VOR/DME" does.
+        """
         self._expect("proceed")
         if self._peek("direct"):
             return self._direct()
+        if self._peek("to") and self._peek_navaid(1):
+            self._expect("to")
+            return Direct(self._target())
         if not self._accept_any("on", "via"):
             raise self._unmatched()
         return self._radial_leg()

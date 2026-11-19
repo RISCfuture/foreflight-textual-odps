@@ -2,7 +2,7 @@
 
 import pytest
 
-from odp_kml.grammar import ParseError, parse_departure_procedure
+from odp_kml.grammar import ParseError, parse_departure_procedure, parse_procedure
 from odp_kml.normalize import normalize
 from odp_kml.procedure import (
     Altitude,
@@ -26,6 +26,7 @@ from odp_kml.procedure import (
     Thence,
     Turn,
 )
+from odp_kml.sections import Sections
 
 
 def to(feet: int) -> Altitude:
@@ -500,3 +501,28 @@ def test_intersection_spelled_out_marks_a_fix():
             ),
         ),
     )
+
+
+def test_proceed_to_a_fix_goes_direct():
+    sections = Sections(
+        amendment=None,
+        takeoff_minimums=None,
+        departure_procedure=normalize(
+            "Rwy 6, climb heading 057° to 6500, then climbing right turn direct "
+            "BQU VOR/DME."
+        ),
+        vcoa=normalize(
+            "Rwys 6, 24, obtain ATC approval for climb in visual conditions when "
+            "requesting IFR clearance. Climb in visual conditions to cross Elko "
+            "Rgnl airport at or above 7000, then proceed to BQU VOR/DME and "
+            "continue climb in BQU VOR/DME holding pattern (hold south, left "
+            "turns, 340° inbound) to cross BQU VOR/DME at or above MEA/MCA for "
+            "route of flight."
+        ),
+        obstacle_notes=None,
+        dva=None,
+    )
+
+    (vcoa,) = parse_procedure(sections, airport="XXX").vcoa
+
+    assert vcoa.then[0] == Direct(NavaidRef("BQU", NavaidType.VOR_DME))
