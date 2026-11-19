@@ -120,6 +120,9 @@ class LegParser(TokenStream):
         super().__init__(text)
         self._known_navaids = known_navaids or {}
         self._last_fix: NavaidRef | FixRef | None = None
+        # Holds announced before "thence" ("and hold, thence..."), each a fix
+        # and any pattern printed with it, for the shared tail to fly.
+        self._announced_holds: list[tuple[NavaidRef | FixRef, HoldSpec | None]] = []
 
     # --- Leg sequences -----------------------------------------------------
 
@@ -161,7 +164,8 @@ class LegParser(TokenStream):
                 else:
                     legs[-1] = self._with_speed(legs[-1], speed)
             elif legs and self._peek("and", "hold"):
-                self._append(legs, self._and_hold())
+                if (held := self._and_hold()) is not None:
+                    self._append(legs, held)
             elif legs and self._peek_fix_crossing():
                 self._append(legs, self._fix_crossing())
             elif legs and self._peek_upon_reaching():
@@ -204,6 +208,24 @@ class LegParser(TokenStream):
     def _append(self, legs: list[Leg], leg: Leg) -> None:
         legs.append(leg)
         self._last_fix = end_fix(leg)
+
+    def _peek_thence(self) -> bool:
+        lead = 1 if self._peek(",") or self._peek(";") else 0
+        return self._peek("thence", offset=lead) or self._peek("...", offset=lead)
+
+    def _require_announced_holds(self, tail: tuple[Leg, ...]) -> None:
+        """Refuse a shared tail that does not open with the climb in hold the
+        routes announced before their "thence" ("and hold, thence..."): at
+        the same fix, in the same pattern where both print one."""
+        if not self._announced_holds:
+            return
+        first = tail[0] if tail else None
+        if not isinstance(first, ClimbInHold) or any(
+            not _same_facility(fix, first.fix)
+            or (None not in (hold, first.hold) and hold != first.hold)
+            for fix, hold in self._announced_holds
+        ):
+            raise self._error("announced hold not flown in the shared tail")
 
     def _thence(self) -> bool:
         """thence := ["," | ";"] "thence" "..." | ["," | ";"] "..."
@@ -1511,18 +1533,26 @@ class LegParser(TokenStream):
         self._expect("holding", "pattern")
         return fix
 
-    def _and_hold(self) -> ClimbInHold:
-        """and-hold := "and hold" [hold-spec] [","] continue-climb
+    def _and_hold(self) -> ClimbInHold | None:
+        """and-hold := "and hold" [hold-spec] ([","] continue-climb | ↓)
 
         "... to MQO VORTAC and hold, continue climb in MQO holding pattern
         (...) to ...": one climb in hold at the fix the route has just
         reached, its pattern given by either phrase, or by both alike.
+
+        ↓: before "thence" ("direct INW VORTAC and hold, thence...") the hold
+        is announced for the shared tail to fly, and ``None`` returned; the
+        tail must open with a climb in hold at that fix
+        (`_require_announced_holds`).
         """
         reached = self._last_fix
         self._expect("and", "hold")
         spec_fix, hold = self._hold_spec() if self._peek("(") else (None, None)
         if reached is None:
             raise self._error("hold without a preceding fix")
+        if self._peek_thence():
+            self._announced_holds.append((self._one_hold_fix(reached, spec_fix), hold))
+            return None
         self._accept(",")
         if not self._peek("continue"):
             raise self._unmatched()

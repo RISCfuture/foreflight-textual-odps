@@ -1506,6 +1506,7 @@ class _Parser(LegParser):
         entering = [group for group in continuing if _ends_with_thence(group.legs)]
         self._last_fix = self._tail_entry = _common_end_fix(entering)
         legs = self._legs([self._leg()])
+        self._require_announced_holds(legs)
         ends_on_speed = False
         while self._peek_continuation() or self._peek_speed_sentence():
             if ends_on_speed := self._peek_speed_sentence():

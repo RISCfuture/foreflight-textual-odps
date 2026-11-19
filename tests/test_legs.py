@@ -10,6 +10,8 @@ from odp_kml.procedure import (
     AtFix,
     ClimbHeading,
     ClimbingTurn,
+    ClimbInHold,
+    Compass8,
     CrossAt,
     Direct,
     Dme,
@@ -17,12 +19,14 @@ from odp_kml.procedure import (
     HeadingAndRadial,
     HeadingRange,
     HeadingSector,
+    HoldSpec,
     NavaidRef,
     NavaidType,
     ProceedOnCourse,
     Radial,
     RunwayGroup,
     SpeedRestriction,
+    StraightAhead,
     Thence,
     Turn,
 )
@@ -791,3 +795,35 @@ def test_speed_limit_until_another_fix_does_not_skip_the_hold():
     text = ABQ.replace("until ABQ VORTAC", "until XYZ VORTAC")
 
     assert signature_of(text) == "speed restriction after ClimbInHold"
+
+
+INW = (
+    "Rwy 22, climb to 6000, then right turn direct INW VORTAC and hold, thence...\n"
+    "Rwys 11, 29, climb to 6000, then direct INW VORTAC and hold, thence...\n"
+    "...continue climb-in-hold (hold West, right turns, 068° inbound) to 8900 "
+    "before proceeding on course."
+)
+
+
+def test_hold_announced_before_thence_is_flown_in_the_shared_tail():
+    procedure = parse_departure_procedure(normalize(INW), airport="XXX", amendment=None)
+
+    inw = NavaidRef("INW", NavaidType.VORTAC)
+    assert procedure.runway_groups[1].legs == (
+        StraightAhead(to(6000)),
+        Direct(inw),
+        Thence(),
+    )
+    assert procedure.shared_tail == (
+        ClimbInHold(inw, HoldSpec(Compass8.W, Turn.RIGHT, 68), to(8900)),
+        ProceedOnCourse(),
+    )
+
+
+def test_hold_announced_before_thence_needs_the_tail_to_fly_it():
+    text = INW.replace(
+        "...continue climb-in-hold (hold West, right turns, 068° inbound) to 8900",
+        "...climb on heading 068° to 8900",
+    )
+
+    assert signature_of(text) == "announced hold not flown in the shared tail"
