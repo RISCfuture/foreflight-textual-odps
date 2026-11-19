@@ -130,9 +130,11 @@ std with a min. climb gradient of 280 ft/NM to 3800.") has nothing to
 draw either: the
 airport is left out of the coverage percentage, counted on its own in the
 report, and gets no "ODP NOT SHOWN" label. A speed limit printed in a
-runway's takeoff minimums ("do not exceed 210K until intercepting the ENI
-R-073") is not read either, so it withholds that runway's route and
-visual climb.
+runway's takeoff minimums is read only when it ends on the radial the
+route's first leg flies ("do not exceed 210K until established on MSO
+R-163" before "climbing right turn via heading 335 and MSO R-163 ...");
+any other withholds that runway's route, and a visual climb it may bind
+is withheld either way.
 
 ## How it decides what to draw
 

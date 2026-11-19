@@ -271,6 +271,26 @@ class TestFindings:
         assert any(name.startswith("RWY 33") for name in lines)
         assert not any(name.startswith("RWY 15") for name in lines)
 
+    def test_takeoff_minimums_speed_limit_ending_on_the_first_radial_is_drawn(self):
+        options = BuildOptions(cycle=CYCLE, cache_dir=Path("unused"))
+        block = tph_block()
+        text = block.text.replace(
+            "climbing left turn direct TONOPAH (TPH) VORTAC thence...",
+            "climbing left turn heading 120° and TPH R-150 to TPH VORTAC thence...",
+        ).replace(
+            "320' per NM to 9100",
+            "320' per NM to 9100, do not exceed 210K until established on TPH R-150",
+        )
+
+        outcome = process_block(
+            dataclasses.replace(block, text=text), fixture_nasr(), options
+        )
+
+        assert [finding.detail.split(":")[0] for finding in outcome.findings] == [
+            "VCOA"
+        ]
+        assert "≤210 KIAS" in label_texts(outcome.drawing)
+
 
 class TestReport:
     def test_counts_are_consistent(self, result):

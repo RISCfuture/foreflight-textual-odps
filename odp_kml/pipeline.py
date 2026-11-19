@@ -31,7 +31,15 @@ from .labels import NOT_SHOWN, not_shown_lines
 from .minimums import parse_takeoff_minimums, speed_limit_for
 from .normalize import normalize
 from .palette import assign_palettes
-from .procedure import Procedure, RunwayGroup, Thence
+from .procedure import (
+    ClimbingTurn,
+    HeadingAndRadial,
+    Procedure,
+    Radial,
+    RunwayGroup,
+    SpeedRestriction,
+    Thence,
+)
 from .resolve import ResolveError, resolve
 from .sections import Sections, split_sections
 from .shapes import AirportDrawing, Label, Polyline
@@ -50,6 +58,15 @@ _NO_METAFILE_AIRPORT = re.compile(
     r"\S+: block (?P<airport>\S+) has no metafile airport"
 )
 _ICAO_LENGTH = 4
+_SPEED_LIMIT = re.compile(r"\bdo not exceed\b", re.IGNORECASE)
+# A takeoff-minimums speed limit ending where the route joins a radial:
+# "do not exceed 210 KIAS until intercepting the ENI R-073".
+_RADIAL_SPEED_LIMIT = re.compile(
+    r"\bdo not exceed (?P<kias>\d{2,3}) KIAS until (?P<until>"
+    r"(?:established on|intercepting) (?:the )?(?P<navaid>[A-Z]{2,4}) "
+    r"R-(?P<radial>\d{1,3}))(?![\w-])",
+    re.IGNORECASE,
+)
 VCOA_PART = "VCOA"
 UNNAMED_PART = "other runways"
 
@@ -324,11 +341,14 @@ def _without_speed_limited(
     procedure: Procedure, sections: Sections
 ) -> tuple[Procedure, list[Failure]]:
     """`procedure` without the runway routes and VCOAs that a speed limit in
-    the takeoff minimums may bind, each a failure: the pipeline does not
-    read those limits, and a route is never drawn without one it has."""
+    the takeoff minimums may bind, each a failure, unless the route's first
+    leg carries it (`_with_takeoff_speed_limit`): a route is never drawn
+    without a limit it has."""
     minimums = sections.takeoff_minimums or ""
     routes = [
-        (group, speed_limit_for(minimums, group.runways) if _flies(group) else None)
+        _with_takeoff_speed_limit(group, speed_limit_for(minimums, group.runways))
+        if _flies(group)
+        else (group, None)
         for group in procedure.runway_groups
     ]
     vcoas = [(vcoa, speed_limit_for(minimums, vcoa.runways)) for vcoa in procedure.vcoa]
@@ -342,6 +362,33 @@ def _without_speed_limited(
         *((VCOA_PART, line) for _, line in vcoas if line),
     ]
     return kept, [(part, _unread_speed_limit(line)) for part, line in withheld]
+
+
+def _with_takeoff_speed_limit(
+    group: RunwayGroup, line: str | None
+) -> tuple[RunwayGroup, str | None]:
+    """`group` limited by the one speed limit in its takeoff minimums `line`
+    when that limit ends on the radial its first leg flies ("Rwy 12, do not
+    exceed 210 KIAS until established on MSO R-163." before "climbing right
+    turn via heading 335 and MSO R-163 ..."); else `group` and the line, unread."""
+    if line is None or len(_SPEED_LIMIT.findall(line)) != 1:
+        return group, line
+    limit = _RADIAL_SPEED_LIMIT.search(line)
+    first = group.legs[0]
+    leg = first.then if isinstance(first, ClimbingTurn) else first
+    if (
+        limit is None
+        or not isinstance(leg, Radial | HeadingAndRadial)
+        or leg.speed is not None
+        or (leg.navaid.ident, leg.radial) != (limit["navaid"], int(limit["radial"]))
+    ):
+        return group, line
+    leg = dataclasses.replace(
+        leg, speed=SpeedRestriction(int(limit["kias"]), limit["until"])
+    )
+    if isinstance(first, ClimbingTurn):
+        leg = dataclasses.replace(first, then=leg)
+    return dataclasses.replace(group, legs=(leg, *group.legs[1:])), None
 
 
 def _unread_speed_limit(line: str) -> ParseError:
