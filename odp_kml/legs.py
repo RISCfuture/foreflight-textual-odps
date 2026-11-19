@@ -1073,8 +1073,8 @@ class LegParser(TokenStream):
 
     def _radial_end(self, navaid: NavaidRef) -> tuple[Altitude | None, Until | None]:
         """radial-end := [altitude-before-fix] (fix-to-cross | [[","] ["then"]
-        until [altitude-after-fix]]), the comma or "then" only before the
-        radial's own navaid
+        (fix-distance | until) [altitude-after-fix]]), the comma or "then"
+        only before the radial's own navaid
 
         Returns the altitude climbed to on the way and the terminator. Past
         a fix or DME distance, a trailing altitude ("R-090 to VXV VORTAC to
@@ -1091,10 +1091,39 @@ class LegParser(TokenStream):
         )
         if lead and self._peek("to", offset=lead) and self._peek_same(navaid, lead + 1):
             self._index += lead
-        until = self._until()
+        until = (
+            self._fix_distance(navaid) if self._peek_fix_distance() else self._until()
+        )
         if altitude is None and isinstance(until, AtFix | Dme):
             altitude = self._altitude_after_fix()
         return altitude, until
+
+    def _peek_fix_distance(self) -> bool:
+        fix = self._token(1)
+        return (
+            self._peek("to")
+            and fix is not None
+            and is_ident_word(fix.text)
+            and len(fix.text) == FIX_LENGTH
+            and self._peek("/", offset=2)
+            and self._peek_number(3)
+            and self._peek("dme", offset=4)
+        )
+
+    def _peek_number(self, offset: int) -> bool:
+        token = self._token(offset)
+        return token is not None and bool(NUMBER.fullmatch(token.text))
+
+    def _fix_distance(self, navaid: NavaidRef) -> Dme:
+        """fix-distance := "to" FIX "/" nn.n "DME", a fix named by its distance
+        alone, from the radial's own navaid: "RIL VOR/DME R-083 to ZOBAK/7.41
+        DME"."""
+        self._expect("to")
+        fix = FixRef(self._next().text)
+        self._expect("/")
+        nm = self._number()
+        self._expect("dme")
+        return Dme(NavaidRef(navaid.ident), nm, fix)
 
     def _fix_to_cross(self) -> NavaidRef | FixRef | None:
         """fix-to-cross := the fix of a following "to cross" fix-crossing

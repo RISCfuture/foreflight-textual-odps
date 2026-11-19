@@ -11,6 +11,9 @@ from odp_kml.procedure import (
     ClimbHeading,
     ClimbingTurn,
     CrossAt,
+    Direct,
+    Dme,
+    FixRef,
     HeadingAndRadial,
     HeadingRange,
     HeadingSector,
@@ -449,6 +452,29 @@ def test_radial_ends_at_the_fix_it_crosses():
                     coe,
                     Altitude(9000, AltitudeKind.AT_OR_ABOVE, "at or above 9000"),
                 ),
+            ),
+        ),
+    )
+
+
+def test_fix_named_by_distance_alone_is_from_the_radials_navaid():
+    text = (
+        "Rwy 8, DME required. Climb on RIL VOR/DME R-083 to ZOBAK/7.41 DME, then "
+        "climbing left turn direct RIL VOR/DME."
+    )
+    ril = NavaidRef("RIL", NavaidType.VOR_DME)
+
+    assert legs_of(text) == (
+        RunwayGroup(
+            ("8",),
+            (
+                Radial(
+                    ril,
+                    83,
+                    outbound=None,
+                    until=Dme(NavaidRef("RIL"), 7.41, FixRef("ZOBAK")),
+                ),
+                ClimbingTurn(Turn.LEFT, Direct(ril)),
             ),
         ),
     )
