@@ -172,6 +172,24 @@ class TestReportCounts:
             "charted DPs; 480 findings in 1 signatures"
         )
 
+    def test_summary_line_leaves_airports_giving_no_route_out_of_the_percentage(
+        self,
+    ):
+        report = Report(
+            cycle="2026-11-26",
+            airports_with_text=1678,
+            drawn=1186,
+            findings=[make_finding() for _ in range(480)],
+            label_count=0,
+            graphic_only=199,
+            no_route=8,
+        )
+        assert report.summary_line() == (
+            "Drew 1,186 of 1,471 ODPs (81%); 199 airports use only charted DPs; "
+            "8 airports give no route; 480 findings in 1 signatures"
+        )
+        assert Report.from_json(report.to_json()) == report
+
     def test_summary_line_handles_zero_airports_without_dividing_by_zero(self):
         report = Report(
             cycle="2026-09-03",

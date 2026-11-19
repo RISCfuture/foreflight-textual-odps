@@ -82,14 +82,16 @@ class BuildResult:
 class BlockOutcome:
     """One airport block's sections entry, its drawing (of all or part of the
     procedure) and its findings, or `graphic_only` when every runway flies a
-    charted DP instead. `marker` labels an airport whose procedure could not
-    be drawn at all."""
+    charted DP instead, or `no_route` when the text gives no runway a route
+    ("Diverse departure authorized all runways."). `marker` labels an
+    airport whose procedure could not be drawn at all."""
 
     sections: SectionsEntry
     drawing: AirportDrawing | None = None
     findings: tuple[Finding, ...] = ()
     graphic_only: bool = False
     marker: AirportDrawing | None = None
+    no_route: bool = False
 
 
 def build(options: BuildOptions) -> BuildResult:
@@ -128,6 +130,7 @@ def build_from_sources(
         findings=findings,
         label_count=_label_count([*drawings, *markers]),
         graphic_only=sum(outcome.graphic_only for outcome in outcomes),
+        no_route=sum(outcome.no_route for outcome in outcomes),
         partial=sum(bool(outcome.drawing and outcome.findings) for outcome in outcomes),
     )
     return BuildResult(
@@ -145,8 +148,8 @@ def process_block(
     that part while the rest are drawn, beside a label naming what was
     not. When nothing can be drawn the airport has a single finding, as
     does a failure that no part escapes (the airport missing from NASR). A
-    procedure whose every runway flies a charted DP is neither drawn nor a
-    finding.
+    procedure whose every runway flies a charted DP, or that gives no runway
+    a route, is neither drawn nor a finding.
     """
     raw = split_sections(block.text)
     if raw.departure_procedure is None and raw.vcoa is None:
@@ -159,6 +162,8 @@ def process_block(
         return _not_drawn(entry, _finding(error, block.lid, raw, options), nasr_data)
     if procedure.graphic_only and not unparsed:
         return BlockOutcome(entry, graphic_only=True)
+    if _gives_no_route(procedure) and not unparsed:
+        return BlockOutcome(entry, no_route=True)
     unread = [(_unparsed_part(part), part.error) for part in unparsed]
     procedure, withheld = _without_speed_limited(procedure, sections)
     try:
@@ -179,6 +184,18 @@ def process_block(
     if failed:
         drawing = _with_not_shown_label(drawing, [part for part, _ in failed])
     return BlockOutcome(entry, drawing=drawing, findings=findings)
+
+
+def _gives_no_route(procedure: Procedure) -> bool:
+    """Whether the text read gives no runway a route, a charted DP or a
+    visual climb: every runway is NA or departs diverse ("Rwys 8, 26,
+    NA-Environmental.", "Diverse departure NA. Use published departure
+    procedures for obstacle avoidance.")."""
+    return (
+        not procedure.vcoa
+        and procedure.shared_tail is None
+        and not any(group.legs for group in procedure.runway_groups)
+    )
 
 
 def _not_drawn(

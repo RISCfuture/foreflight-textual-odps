@@ -119,7 +119,12 @@ reference a graphic ODP instead of text ("use LUNDI DEPARTURE"), and
 airway routing after the ODP ends. A runway that flies a graphic ODP is
 drawn from none of its text; an airport whose every runway does is left
 out of the coverage percentage and counted on its own in the report,
-since ForeFlight charts graphic ODPs itself. A speed limit printed in a
+since ForeFlight charts graphic ODPs itself. Text that gives no runway a
+route ("Diverse departure authorized all runways.", "Rwys 8, 26,
+NA-Environmental.", "Diverse departure NA. Use published departure
+procedures for obstacle avoidance.") has nothing to draw either: the
+airport is left out of the coverage percentage, counted on its own in the
+report, and gets no "ODP NOT SHOWN" label. A speed limit printed in a
 runway's takeoff minimums ("do not exceed 210K until intercepting the ENI
 R-073") is not read either, so it withholds that runway's route and
 visual climb.
@@ -246,7 +251,8 @@ activity — push a commit (or run it manually) if releases stop appearing.
 
 `tools/compare_builds.py` checks a grammar or geometry change against every
 airport in a cycle, not just the fixtures. It snapshots each airport's
-outcome (drawn whole, drawn in part, charted DPs only, or not drawn), its
+outcome (drawn whole, drawn in part, charted DPs only, no route, or not
+drawn), its
 findings and a digest of its shapes, then names every airport gained, lost
 or redrawn between two snapshots:
 

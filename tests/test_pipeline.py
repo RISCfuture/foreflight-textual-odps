@@ -117,6 +117,12 @@ def vcoas_beside_an_undrawable_route(block):
     )
 
 
+def with_procedure(block, text):
+    """`block` with `text` as its whole DEPARTURE PROCEDURE and no VCOA."""
+    head = block.text[: block.text.index("DEPARTURE PROCEDURE:")]
+    return dataclasses.replace(block, text=f"{head}DEPARTURE PROCEDURE:\n{text}")
+
+
 def tph_block():
     blocks, _ = extract_blocks(FIXTURES / "pdf" / "SW4TO-excerpt.pdf", "SW4")
     return next(block for block in blocks if block.lid == "TPH")
@@ -215,6 +221,27 @@ class TestFindings:
             assert lid not in drawn
             assert findings_for(result, lid, Kind.PARSE_FAILED) == []
         assert result.report.graphic_only == 2
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Diverse departure authorized all runways.",
+            "Rwys 8, 26, NA-Environmental.",
+            (
+                "Diverse departure NA. Use published departure procedures for "
+                "obstacle avoidance."
+            ),
+        ],
+    )
+    def test_text_giving_no_route_is_neither_drawn_nor_marked_nor_a_finding(self, text):
+        options = BuildOptions(cycle=CYCLE, cache_dir=Path("unused"))
+
+        outcome = process_block(
+            with_procedure(tph_block(), text), fixture_nasr(), options
+        )
+
+        assert outcome.no_route
+        assert (outcome.drawing, outcome.findings, outcome.marker) == (None, (), None)
 
     def test_airport_missing_from_nasr(self, result):
         kinds = {(f.kind, f.signature) for f in findings_for(result, "JTC")}
