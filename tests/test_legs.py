@@ -478,3 +478,25 @@ def test_fix_named_by_distance_alone_is_from_the_radials_navaid():
             ),
         ),
     )
+
+
+def test_intersection_spelled_out_marks_a_fix():
+    text = "Rwy 5, climbing right turn to intercept SEA R-230 to CARRO intersection."
+
+    assert legs_of(text) == (
+        RunwayGroup(
+            ("5",),
+            (
+                ClimbingTurn(
+                    Turn.RIGHT,
+                    Radial(
+                        NavaidRef("SEA"),
+                        230,
+                        outbound=None,
+                        until=AtFix(FixRef("CARRO")),
+                        intercept=True,
+                    ),
+                ),
+            ),
+        ),
+    )

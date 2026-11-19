@@ -1566,10 +1566,10 @@ class LegParser(TokenStream):
         return target
 
     def _target(self) -> NavaidRef | FixRef:
-        """target := NAME+ "(" IDENT ")" [type] | IDENT [type] | FIX ["INT"]
-        | NAME+ type
+        """target := NAME+ "(" IDENT ")" [type] | IDENT [type]
+        | FIX ["INT" | "intersection"] | NAME+ type
 
-        "INT" (intersection) after a five-letter name marks it as a fix.
+        "INT" or "intersection" after a five-letter name marks it as a fix.
         """
         start = self._position()
         words = self._uppercase_words()
@@ -1579,6 +1579,12 @@ class LegParser(TokenStream):
             ident = self._ident()
             self._expect(")")
             return NavaidRef(ident, self._navaid_type(), " ".join(words))
+        if (
+            len(words) == 1
+            and len(words[0]) == FIX_LENGTH
+            and self._accept("intersection")
+        ):
+            return FixRef(words[0])
         if words[-1] == INTERSECTION and len(words) == 2:
             words.pop()
             if len(words[0]) != FIX_LENGTH:
