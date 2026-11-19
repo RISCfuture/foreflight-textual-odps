@@ -882,7 +882,12 @@ class LegParser(TokenStream):
 
     def _heading_leg(self) -> ClimbHeading | HeadingAndRadial:
         """heading-leg := heading [("and" ["on"] | "to" ("intercept" | "join"))
-        radial-course [altitude-before-fix]] [until]"""
+        radial-course [altitude-before-fix]] [until | "," "climbing" to-altitude]
+
+        "Climbing right turn heading 110°, climbing to 5000 before proceeding
+        on course" ends the heading at the altitude, as "heading 110° to 5000"
+        does.
+        """
         heading = self._heading()
         if self._peek_and_radial():
             self._expect("and")
@@ -892,7 +897,15 @@ class LegParser(TokenStream):
             self._expect("to")
             self._expect_any(*_INTERCEPT_WORDS)
             return self._heading_and_radial(heading)
-        return ClimbHeading(heading, self._until())
+        until = self._until()
+        if (
+            until is None
+            and self._peek(",", "climbing", "to")
+            and self._peek_integer(3)
+        ):
+            self._expect(",", "climbing")
+            until = self._to_altitude()
+        return ClimbHeading(heading, until)
 
     def _peek_to_intercept(self) -> bool:
         """``to intercept`` or ``to join``."""

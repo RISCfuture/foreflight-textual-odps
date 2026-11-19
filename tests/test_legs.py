@@ -149,3 +149,17 @@ def test_altitude_and_on_a_radial_is_climbed_to_on_the_radial():
             ),
         ),
     )
+
+
+def test_heading_climbing_to_an_altitude_ends_there():
+    text = (
+        "Rwy 9, climbing right turn heading 110°, climbing to 5000 before "
+        "proceeding on course."
+    )
+
+    assert legs_of(text) == (
+        RunwayGroup(
+            ("9",),
+            (ClimbingTurn(Turn.RIGHT, ClimbHeading(110, to(5000))), ProceedOnCourse()),
+        ),
+    )
