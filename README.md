@@ -39,9 +39,10 @@ with certainty:
   with its altitude alone.
 - Radial intercepts and tracking to an altitude, fix, DME distance, or the
   navaid; an altitude climbed to on the way to a fix ("to 3000 via FSM
-  R-064 to FSM VORTAC") is labelled where the leg ends. A heading printed
-  with no terminator is held until the radial that follows it is
-  intercepted ("heading 170°, thence ... on RZS R-185"). A turn to
+  R-064 to FSM VORTAC", "R-242 to SAC VORTAC to 2000") is labelled where
+  the leg ends. A heading printed with no terminator is held until the
+  radial that follows it is intercepted ("heading 170°, thence ... on RZS
+  R-185"). A turn to
   intercept a radial with no heading printed ("climbing left turn to
   intercept PUB R-274") turns the published way onto a schematic,
   unlabelled 45° intercept heading, on the side of the radial the turn
