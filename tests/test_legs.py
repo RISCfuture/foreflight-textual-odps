@@ -526,3 +526,18 @@ def test_proceed_to_a_fix_goes_direct():
     (vcoa,) = parse_procedure(sections, airport="XXX").vcoa
 
     assert vcoa.then[0] == Direct(NavaidRef("BQU", NavaidType.VOR_DME))
+
+
+def test_turn_to_a_fix_turns_direct_to_it():
+    text = (
+        "Rwy 7, climbing left turn to BGQ VORTAC, thence...\n"
+        "...climb in BGQ VORTAC holding pattern (hold S, left turn, 356° inbound) "
+        "to MCA/MEA for route of flight."
+    )
+
+    (group,) = legs_of(text)
+
+    assert group.legs == (
+        ClimbingTurn(Turn.LEFT, Direct(NavaidRef("BGQ", NavaidType.VORTAC))),
+        Thence(),
+    )

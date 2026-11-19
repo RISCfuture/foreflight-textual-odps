@@ -606,6 +606,8 @@ class LegParser(TokenStream):
         turn-leg := direct | ["on" | "via" | "to"] (heading-range | heading-leg
           | radial-leg), "to" only before a heading ("turn to heading 200°")
           or a radial ("turn to BKE VOR/DME R-066 to BKE VOR/DME")
+          | "to" target, a turn direct to it ("climbing left turn to BGQ
+          VORTAC")
 
         A leading altitude comes before "via", "on" or a heading ("climbing
         right turn to 2400 heading 100°"). ↓: a turn with no route of its own
@@ -715,6 +717,9 @@ class LegParser(TokenStream):
         if self._peek_to_intercept():
             return self._intercept()
         if not (self._accept_to_heading() or self._accept_to_radial()):
+            if self._peek("to") and self._peek_navaid(1):
+                self._expect("to")
+                return Direct(self._target())
             self._accept_any("on", "via")
         if self._peek_heading_range():
             return self._heading_range()
