@@ -749,3 +749,22 @@ def test_before_proceeding_across_a_radial_is_refused():
     )
 
     assert signature_of(text) == "direction of flight across the radial"
+
+
+def test_navaid_named_in_mixed_case_before_its_ident():
+    text = (
+        "Rwy 31, climb via heading 311° to 3000, then climbing left turn via "
+        "Linden (LIN) VOR/DME R-029 to LIN VOR/DME."
+    )
+
+    (group,) = legs_of(text)
+
+    assert group.legs[1] == ClimbingTurn(
+        Turn.LEFT,
+        Radial(
+            NavaidRef("LIN", NavaidType.VOR_DME, "Linden"),
+            29,
+            outbound=False,
+            until=AtFix(NavaidRef("LIN", NavaidType.VOR_DME)),
+        ),
+    )

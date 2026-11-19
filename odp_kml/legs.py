@@ -80,6 +80,8 @@ _INTERCEPT_WORDS = frozenset({"intercept", "join"})
 _FLY_ON_WORDS = frozenset({"climb", "track", "proceed"})
 # What follows a heading range's first heading: "316° CW 052°".
 _SENSES = frozenset({"cw", "ccw", "clockwise", "counter"})
+# A word of a navaid's name printed in mixed case: "Linden".
+_NAME_WORD = re.compile(r"[A-Z][a-z]+")
 _NAVAID_TYPES = (
     (("vor", "/", "dme"), NavaidType.VOR_DME),
     (("vortac",), NavaidType.VORTAC),
@@ -1653,13 +1655,13 @@ class LegParser(TokenStream):
         return target
 
     def _target(self) -> NavaidRef | FixRef:
-        """target := NAME+ "(" IDENT ")" [type] | IDENT [type]
+        """target := (NAME+ | Name+) "(" IDENT ")" [type] | IDENT [type]
         | FIX ["INT" | "intersection"] | NAME+ type
 
         "INT" or "intersection" after a five-letter name marks it as a fix.
         """
         start = self._position()
-        words = self._uppercase_words()
+        words = self._uppercase_words() or self._name_before_ident()
         if not words:
             raise self._unmatched()
         if self._accept("("):
@@ -1690,6 +1692,25 @@ class LegParser(TokenStream):
             " ".join(words),
             start,
         )
+
+    def _name_before_ident(self) -> list[str]:
+        """A navaid name printed in mixed case, only before its ident in
+        parentheses: "Linden (LIN) VOR/DME"."""
+        offset = 0
+        while (token := self._token(offset)) is not None and _NAME_WORD.fullmatch(
+            token.text
+        ):
+            offset += 1
+        if not (offset and self._peek("(", offset=offset)):
+            return []
+        ident = self._token(offset + 1)
+        if not (
+            ident is not None
+            and is_ident_word(ident.text)
+            and self._peek(")", offset=offset + 2)
+        ):
+            return []
+        return [self._next().text for _ in range(offset)]
 
     def _uppercase_words(self) -> list[str]:
         words = []
