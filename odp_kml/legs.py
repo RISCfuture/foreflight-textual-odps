@@ -891,8 +891,7 @@ class LegParser(TokenStream):
 
     def _heading_and_radial(self, heading: int) -> HeadingAndRadial:
         navaid, radial, direction = self._radial_course()
-        altitude = self._altitude_before_fix()
-        until = self._until()
+        altitude, until = self._radial_end(navaid)
         outbound = self._outbound(direction, navaid, until)
         return HeadingAndRadial(
             heading, navaid, radial, outbound, until, altitude=altitude
@@ -908,19 +907,38 @@ class LegParser(TokenStream):
         return dataclasses.replace(leg, altitude=altitude)
 
     def _radial_leg(self) -> Radial:
-        """radial-leg := radial-course [altitude-before-fix] [until]
+        """radial-leg := radial-course radial-end
 
         A radial printed without a sense, flown from its own navaid just
         reached ("direct VXV VORTAC then on VXV VORTAC R-053 to 4100"), is
         outbound.
         """
         navaid, radial, direction = self._radial_course()
-        altitude = self._altitude_before_fix()
         if direction is None and self._just_reached(navaid):
             direction = True
-        until = self._until()
+        altitude, until = self._radial_end(navaid)
         outbound = self._outbound(direction, navaid, until)
         return Radial(navaid, radial, outbound, until, altitude=altitude)
+
+    def _radial_end(self, navaid: NavaidRef) -> tuple[Altitude | None, Until | None]:
+        """radial-end := [altitude-before-fix] [until [altitude-after-fix]]
+
+        Returns the altitude climbed to on the way and the terminator. Past
+        a fix or DME distance, a trailing altitude ("R-090 to VXV VORTAC to
+        5000") is climbed to on the way there, as a leading one is.
+        """
+        altitude = self._altitude_before_fix()
+        until = self._until()
+        if altitude is None and isinstance(until, AtFix | Dme):
+            altitude = self._altitude_after_fix()
+        return altitude, until
+
+    def _altitude_after_fix(self) -> Altitude | None:
+        """altitude-after-fix := to-altitude, after an until naming a fix or
+        DME distance."""
+        if self._peek("to") and self._peek_integer(1):
+            return self._to_altitude()
+        return None
 
     def _altitude_before_fix(self) -> Altitude | None:
         """altitude-before-fix := to-altitude, before an until naming a fix or
