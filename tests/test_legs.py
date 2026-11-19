@@ -665,3 +665,35 @@ def test_speed_limit_after_proceeding_on_course_limits_the_leg_before():
         ),
         ProceedOnCourse(),
     )
+
+
+M57 = (
+    "Rwy 6, climb heading 075° to 4700 before proceeding on course. For climb in "
+    "visual conditions, cross Rangeley Lake airport at or above 4000 before "
+    "proceeding on course, do not exceed 210 KIAS until leaving 4000. When "
+    "executing VCOA, notify ATC prior to departure."
+)
+
+
+def test_speed_limit_after_a_visual_climb_that_only_goes_on_course_limits_it():
+    sections = Sections(
+        amendment=None,
+        takeoff_minimums=None,
+        departure_procedure=normalize(M57),
+        vcoa=None,
+        obstacle_notes=None,
+        dva=None,
+    )
+
+    (vcoa,) = parse_procedure(sections, airport="XXX").vcoa
+
+    assert vcoa.then == (ProceedOnCourse(),)
+    assert vcoa.speed == SpeedRestriction(210, "leaving 4000")
+
+
+def test_speed_limit_after_a_route_that_only_goes_on_course_is_refused():
+    with pytest.raises(ParseError):
+        legs_of(
+            "Rwy 6, before proceeding on course, do not exceed 210 KIAS until "
+            "leaving 4000."
+        )

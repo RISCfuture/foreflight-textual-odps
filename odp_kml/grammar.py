@@ -1613,6 +1613,8 @@ class _Parser(LegParser):
             return group
         if not first and not self._later_runway_header():
             raise self._error("speed limit after several visual climbs")
+        if group.speed is not None:
+            raise self._error("two speed limits on a visual climb")
         speed = self._speed_restriction()
         self._expect(".")
         return dataclasses.replace(group, speed=speed)
@@ -1657,10 +1659,13 @@ class _Parser(LegParser):
 
     def _crossing(self, runways: tuple[str, ...]) -> VcoaGroup:
         """crossing := (FIX | airport-name) [bound | heading] ["at"] "or above"
-        nnnn ["MSL"] (crossing-heading legs | legs)
+        nnnn ["MSL"] (crossing-heading legs | legs) [speed "."]
 
         "at" is sometimes left out ("cross Telluride RGNL airport westbound or
         above 14300"). Legs may end in "thence ..." and continue into a tail.
+        A speed limit after legs that fly nothing ("cross Rangeley Lake
+        airport at or above 4000 before proceeding on course, do not exceed
+        210 KIAS until leaving 4000.") limits the visual climb itself.
         """
         cross = self._vcoa_crossing()
         bound = self._bound()
@@ -1672,7 +1677,11 @@ class _Parser(LegParser):
         self._last_fix = None
         first = [] if heading is None else [self._crossing_heading(heading)]
         legs = self._with_written_tail(self._legs(first))
-        return VcoaGroup(runways, cross, feet, legs, bound)
+        speed = None
+        if not self._follows_period() and self._peek_speed_restriction():
+            speed = self._speed_restriction()
+            self._expect(".")
+        return VcoaGroup(runways, cross, feet, legs, bound, speed)
 
     def _crossing_heading(self, heading: int) -> HeadingAndRadial:
         """crossing-heading := heading, before "at or above", then "to"

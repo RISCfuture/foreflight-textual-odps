@@ -130,7 +130,9 @@ class LegParser(TokenStream):
         ("..., or for climb in visual conditions") begins, and where the text
         ends right after a "before ..." clause that lacks its period. Tracks
         the fix each leg ends at, for a hold that names none. A speed limit
-        after "before proceeding on course" limits the last leg flown.
+        after "before proceeding on course" limits the last leg flown; with no
+        leg flown before it, the legs end before the limit, which a visual
+        climb puts on the climb itself.
         """
         self._last_fix = end_fix(legs[-1]) if legs else None
         while True:
@@ -149,6 +151,8 @@ class LegParser(TokenStream):
             elif self._thence():
                 return (*legs, Thence())
             elif legs and self._peek_speed_restriction():
+                if not any(map(_flown, legs)):
+                    return tuple(legs)
                 speed = self._speed_restriction()
                 if isinstance(legs[-1], ProceedOnCourse):
                     legs[:] = self._with_last_flown_speed(tuple(legs), speed)
@@ -604,7 +608,7 @@ class LegParser(TokenStream):
         course, do not exceed 200K until passing LAS VORTAC") limits the leg
         before it."""
         for index in reversed(range(len(legs))):
-            if not isinstance(legs[index], ProceedOnCourse | Thence | CrossAt):
+            if _flown(legs[index]):
                 leg = legs[index]
                 if _speed_restriction_of(leg) is not None:
                     raise self._error("two speed restrictions on one leg")
@@ -1732,6 +1736,12 @@ def _compass_bearing(point: Compass8) -> int:
 def _speed_restriction_of(leg: Leg) -> SpeedRestriction | None:
     turned = leg.then if isinstance(leg, ClimbingTurn) else leg
     return getattr(turned, "speed", None)
+
+
+def _flown(leg: Leg) -> bool:
+    """Whether `leg` is flown, rather than leaving the procedure or crossing
+    the fix already reached."""
+    return not isinstance(leg, ProceedOnCourse | Thence | CrossAt)
 
 
 def _turned(leg: Leg) -> Leg | None:
