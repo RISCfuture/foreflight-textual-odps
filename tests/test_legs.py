@@ -573,3 +573,23 @@ def test_fly_heading_is_a_heading_leg():
         outbound=None,
         until=Dme(NavaidRef("MTJ"), 23.44, FixRef("BRICK")),
     )
+
+
+def test_until_reaching_an_altitude_ends_the_leg_there():
+    text = (
+        "Rwy 14, climb heading 136° and ECS VOR R-143, until reaching 5500, "
+        "thence…\n...proceed on course."
+    )
+
+    (group,) = legs_of(text)
+
+    assert group.legs == (
+        HeadingAndRadial(
+            136,
+            NavaidRef("ECS", NavaidType.VOR),
+            143,
+            outbound=None,
+            until=Altitude(5500, AltitudeKind.TO, "until reaching 5500"),
+        ),
+        Thence(),
+    )

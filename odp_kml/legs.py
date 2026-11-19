@@ -1267,7 +1267,7 @@ class LegParser(TokenStream):
 
     def _until(self) -> Until | None:
         """until := "to" (altitude | cross-radial | dme | target) | until-altitude"""
-        if self._peek("until") and self._peek_integer(1):
+        if self._peek_until_altitude():
             return self._until_altitude()
         if not self._peek("to"):
             return None
@@ -1292,11 +1292,20 @@ class LegParser(TokenStream):
         feet = self._integer()
         return Altitude(feet, AltitudeKind.TO, self._slice_from(start))
 
+    def _peek_until_altitude(self) -> bool:
+        offset = int(self._peek(","))
+        if self._peek("until", "reaching", offset=offset):
+            return self._peek_integer(offset + 2)
+        return offset == 0 and self._peek("until") and self._peek_integer(1)
+
     def _until_altitude(self) -> Altitude:
-        """until-altitude := "until" nnnn, a climb-to altitude: "climb on
-        heading 208° until 5500"."""
+        """until-altitude := "until" nnnn | [","] "until reaching" nnnn, a
+        climb-to altitude: "climb on heading 208° until 5500", "climb heading
+        136° and ECS VOR R-143, until reaching 5500, thence…"."""
+        self._accept(",")
         start = self._position()
         self._expect("until")
+        self._accept("reaching")
         feet = self._integer()
         return Altitude(feet, AltitudeKind.TO, self._slice_from(start))
 
