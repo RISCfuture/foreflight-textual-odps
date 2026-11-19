@@ -129,7 +129,8 @@ class LegParser(TokenStream):
         ↓: the legs also end, unconsumed, where an inline VCOA alternative
         ("..., or for climb in visual conditions") begins, and where the text
         ends right after a "before ..." clause that lacks its period. Tracks
-        the fix each leg ends at, for a hold that names none.
+        the fix each leg ends at, for a hold that names none. A speed limit
+        after "before proceeding on course" limits the last leg flown.
         """
         self._last_fix = end_fix(legs[-1]) if legs else None
         while True:
@@ -148,7 +149,11 @@ class LegParser(TokenStream):
             elif self._thence():
                 return (*legs, Thence())
             elif legs and self._peek_speed_restriction():
-                legs[-1] = self._with_speed(legs[-1], self._speed_restriction())
+                speed = self._speed_restriction()
+                if isinstance(legs[-1], ProceedOnCourse):
+                    legs[:] = self._with_last_flown_speed(tuple(legs), speed)
+                else:
+                    legs[-1] = self._with_speed(legs[-1], speed)
             elif legs and self._peek("and", "hold"):
                 self._append(legs, self._and_hold())
             elif legs and self._peek_fix_crossing():
@@ -589,6 +594,15 @@ class LegParser(TokenStream):
         """`legs` with a speed-limit sentence applied to the last leg flown."""
         speed = self._speed_restriction()
         self._expect(".")
+        return self._with_last_flown_speed(legs, speed)
+
+    def _with_last_flown_speed(
+        self, legs: tuple[Leg, ...], speed: SpeedRestriction
+    ) -> tuple[Leg, ...]:
+        """`legs` with `speed` on the last leg flown, as a limit printed after
+        "before proceeding on course" ("... to LAS VORTAC before proceeding on
+        course, do not exceed 200K until passing LAS VORTAC") limits the leg
+        before it."""
         for index in reversed(range(len(legs))):
             if not isinstance(legs[index], ProceedOnCourse | Thence | CrossAt):
                 leg = legs[index]

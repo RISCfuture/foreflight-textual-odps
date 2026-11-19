@@ -642,3 +642,26 @@ def test_altitude_before_and_after_a_direct_fix_is_refused():
     text = "Rwy 1, climb to 7000 direct IDA VOR/DME to 8000."
 
     assert signature_of(text) == "leg with two altitudes"
+
+
+def test_speed_limit_after_proceeding_on_course_limits_the_leg_before():
+    text = (
+        "Rwys 17L/R, climbing right turn on LAS R-157 to LAS VORTAC before "
+        "proceeding on course, do not exceed 200K until passing LAS VORTAC."
+    )
+
+    (group,) = legs_of(text)
+
+    assert group.legs == (
+        ClimbingTurn(
+            Turn.RIGHT,
+            Radial(
+                NavaidRef("LAS"),
+                157,
+                outbound=False,
+                until=AtFix(NavaidRef("LAS", NavaidType.VORTAC)),
+                speed=SpeedRestriction(200, "passing LAS VORTAC"),
+            ),
+        ),
+        ProceedOnCourse(),
+    )
