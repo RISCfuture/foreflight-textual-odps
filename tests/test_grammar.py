@@ -1969,6 +1969,22 @@ def test_vcoa_section_for_all_runways_may_be_written_into_the_departure_procedur
     assert procedure.vcoa == (VcoaGroup((), None, 2700, (ProceedOnCourse(),)),)
 
 
+def test_vcoa_crossing_on_a_heading_flies_it_to_the_radial():
+    (vcoa,) = parse_vcoa(
+        "Rwy 1, obtain ATC approval for VCOA when requesting IFR clearance. Climb in "
+        "visual conditions to cross Dean Meml airport heading 353° at or above 1500 "
+        "to intercept MPV VOR/DME R-088 westbound to 4700 before proceeding on "
+        "course."
+    )
+
+    mpv = NavaidRef("MPV", NavaidType.VOR_DME)
+    assert (vcoa.at_or_above, vcoa.bound) == (1500, None)
+    assert vcoa.then == (
+        HeadingAndRadial(353, mpv, 88, False, to(4700)),
+        ProceedOnCourse(),
+    )
+
+
 VISUAL_CLIMB_TO_DSD = (
     "obtain ATC approval for VCOA when requesting IFR clearance. Climb in visual "
     "conditions to cross Madras Muni airport at or above 3600, then proceed on DSD "

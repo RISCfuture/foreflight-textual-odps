@@ -1656,21 +1656,32 @@ class _Parser(LegParser):
         return self._crossing(runways)
 
     def _crossing(self, runways: tuple[str, ...]) -> VcoaGroup:
-        """crossing := (FIX | airport-name) [bound] ["at"] "or above" nnnn ["MSL"]
-        legs
+        """crossing := (FIX | airport-name) [bound | heading] ["at"] "or above"
+        nnnn ["MSL"] (crossing-heading legs | legs)
 
         "at" is sometimes left out ("cross Telluride RGNL airport westbound or
         above 14300"). Legs may end in "thence ..." and continue into a tail.
         """
         cross = self._vcoa_crossing()
         bound = self._bound()
+        heading = self._heading() if bound is None and self._peek_heading() else None
         self._accept("at")
         self._expect("or", "above")
         feet = self._integer()
         self._accept("msl")
         self._last_fix = None
-        legs = self._with_written_tail(self._legs([]))
+        first = [] if heading is None else [self._crossing_heading(heading)]
+        legs = self._with_written_tail(self._legs(first))
         return VcoaGroup(runways, cross, feet, legs, bound)
+
+    def _crossing_heading(self, heading: int) -> HeadingAndRadial:
+        """crossing-heading := heading, before "at or above", then "to"
+        ("intercept" | "join") radial-course [until]: the heading flown over
+        the crossing to the radial ("cross Dean Meml airport heading 353° at
+        or above 1500 to intercept MPV VOR/DME R-088 westbound to 4700")."""
+        self._expect("to")
+        self._expect_any("intercept", "join")
+        return self._heading_and_radial(heading)
 
     def _vcoa_crossing(self) -> FixRef | None:
         """crossing := FIX | airport-name — ``None`` means the departure airport."""
