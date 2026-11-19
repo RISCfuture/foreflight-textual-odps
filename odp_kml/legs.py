@@ -946,14 +946,17 @@ class LegParser(TokenStream):
         return heading
 
     def _heading_leg(self) -> ClimbHeading | HeadingAndRadial:
-        """heading-leg := heading [("and" ["on"] | "to" ("intercept" | "join"))
-        radial-course [altitude-before-fix]] [until | "," "climbing" to-altitude]
+        """heading-leg := heading ["from" "DER"] [("and" ["on"] | "to"
+        ("intercept" | "join")) radial-course [altitude-before-fix]]
+        [until | "," "climbing" to-altitude]
 
-        "Climbing right turn heading 110°, climbing to 5000 before proceeding
-        on course" ends the heading at the altitude, as "heading 110° to 5000"
-        does.
+        "From DER" says where the heading is flown from, as after a heading
+        range ("climb on heading 185° from DER to 11000"). "Climbing right
+        turn heading 110°, climbing to 5000 before proceeding on course" ends
+        the heading at the altitude, as "heading 110° to 5000" does.
         """
         heading = self._heading()
+        self._accept("from", "der")
         if self._peek_and_radial():
             self._expect("and")
             self._accept("on")

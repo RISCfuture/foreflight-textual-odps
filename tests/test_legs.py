@@ -334,3 +334,13 @@ def test_heading_range_may_leave_out_between():
             ),
         ),
     )
+
+
+def test_heading_may_be_flown_from_der():
+    text = (
+        "Rwy 20, climb on heading 185° from DER to 11000 before proceeding on course."
+    )
+
+    assert legs_of(text) == (
+        RunwayGroup(("20",), (ClimbHeading(185, to(11000)), ProceedOnCourse())),
+    )
