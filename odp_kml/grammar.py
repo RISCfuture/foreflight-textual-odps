@@ -153,10 +153,12 @@ def _both_sections(
         if not in_part:
             raise
         return procedure, [*unparsed, Unparsed((), error, vcoa=True)]
+    vcoa, unjoined = _join_vcoa_section_to_tail(vcoa, procedure)
     repeated = set(procedure.vcoa)
     added, refused = _open_runway_vcoa(
         [g for g in vcoa if g not in repeated], procedure.runway_groups
     )
+    refused = [*unjoined, *refused]
     if refused and not in_part:
         raise refused[0].error
     procedure = dataclasses.replace(procedure, vcoa=procedure.vcoa + added)
@@ -343,6 +345,8 @@ class _Parser(LegParser):
         self._unrouted: set[str] = set()
         self._header_runways: tuple[str, ...] | None = None
         self._awaiting_visual_climb: tuple[str, ...] = ()
+        self._tail_entry: NavaidRef | FixRef | None = None
+        self._vcoa_section = False
 
     @property
     def inline_vcoa(self) -> tuple[VcoaGroup, ...]:
@@ -433,6 +437,7 @@ class _Parser(LegParser):
         for group in groups:
             _require_no_dp_for_every_runway(group, groups)
             self._require_sole_reading(group, groups, tail=shared_tail is not None)
+        self._join_visual_climbs_to_tail(shared_tail, None)
         for vcoa in self._inline_vcoa:
             _require_vcoa_runways_open(vcoa, groups)
         return tuple(groups), shared_tail
@@ -448,10 +453,12 @@ class _Parser(LegParser):
         own and no tail to take one from, beside a charted DP for every
         runway, or read two ways (see `_require_sole_reading`), joins
         `unparsed`; so does a visual climb from a runway with no route, and
-        the visual climb written after a tail that failed."""
+        the visual climb written after a tail that failed, and one that
+        continues into it (`_join_visual_climbs_to_tail`)."""
         if shared_tail is not None and _ends_with_thence(shared_tail):
             tail_error = ParseError('"thence" inside the shared tail')
             shared_tail = None
+        self._join_visual_climbs_to_tail(shared_tail, tail_error)
         if tail_error is not None and not any(
             _ends_with_thence(group.legs) for group in groups
         ):
@@ -930,28 +937,53 @@ class _Parser(LegParser):
 
         A visual climb read beside that route ("..., or for climb in visual
         conditions, cross ... direct OED VORTAC. When executing VCOA, notify
-        ATC prior to departure. Thence...") would continue into the tail too,
-        so it is refused: the tail is drawn from the runways.
+        ATC prior to departure. Thence...") continues into the tail too.
         """
         last = read[-1] if read else None
         if last is None or not _flies_route(last) or _ends_with_thence(last.legs):
             raise self._error('"thence" without a route')
-        self._refuse_visual_climbs_into_tail(inline)
+        self._continue_visual_climbs_into_tail(inline)
         self._expect("thence", "...")
         return _continued_to_tail(last)
 
-    def _refuse_visual_climbs_into_tail(self, inline: int) -> None:
-        """Leave out every visual climb read since the `inline`-th, as unread."""
-        refused = self._inline_vcoa[inline:]
-        if not refused:
-            return
-        error = self._error("visual climb into the shared tail")
-        if not self._in_part:
-            raise error
-        del self._inline_vcoa[inline:]
-        self.unparsed.extend(
-            Unparsed(vcoa.runways, error, vcoa=True) for vcoa in refused
-        )
+    def _continue_visual_climbs_into_tail(self, inline: int) -> None:
+        """Continue every visual climb read since the `inline`-th into the
+        shared tail; one that has gone on course is left out, as unread."""
+        error = self._error("visual climb on course into the shared tail")
+        for vcoa in self._inline_vcoa[inline:]:
+            if _ends_with_thence(vcoa.then):
+                continue
+            index = self._inline_vcoa.index(vcoa)
+            if not ends_on_course(vcoa.then):
+                then = (*vcoa.then, Thence())
+                self._inline_vcoa[index] = dataclasses.replace(vcoa, then=then)
+            elif not self._in_part:
+                raise error
+            else:
+                del self._inline_vcoa[index]
+                self.unparsed.append(Unparsed(vcoa.runways, error, vcoa=True))
+
+    def _join_visual_climbs_to_tail(
+        self, shared_tail: tuple[Leg, ...] | None, tail_error: ParseError | None
+    ) -> None:
+        """Fly each visual climb written into the section that continues into
+        the shared tail ("..., or for climb in visual conditions: cross Marina
+        Muni airport at or above 2100, then proceed on SNS VORTAC R-261 to SNS
+        VORTAC, thence...") on through the tail's legs. One that cannot join
+        it (`_joined_to_tail`) is left out, as unread."""
+        for vcoa in list(self._inline_vcoa):
+            if not _ends_with_thence(vcoa.then):
+                continue
+            index = self._inline_vcoa.index(vcoa)
+            try:
+                self._inline_vcoa[index] = _joined_to_tail(
+                    vcoa, shared_tail, self._tail_entry, tail_error
+                )
+            except ParseError as error:
+                if not self._in_part:
+                    raise
+                del self._inline_vcoa[index]
+                self.unparsed.append(Unparsed(vcoa.runways, error, vcoa=True))
 
     def _peek_vcoa_alternative(self, offset: int = 0) -> bool:
         """The leg grammar's visual climb alternatives, and "or..." ending a
@@ -1462,7 +1494,7 @@ class _Parser(LegParser):
             raise self._unmatched()
         continuing = list(map(_continued_to_tail, groups)) if for_all else groups
         entering = [group for group in continuing if _ends_with_thence(group.legs)]
-        self._last_fix = _common_end_fix(entering)
+        self._last_fix = self._tail_entry = _common_end_fix(entering)
         legs = self._legs([self._leg()])
         ends_on_speed = False
         while self._peek_continuation() or self._peek_speed_sentence():
@@ -1506,6 +1538,7 @@ class _Parser(LegParser):
         """
         if self._at_end():
             raise ParseError("empty VCOA")
+        self._vcoa_section = True
         groups = []
         while not self._at_end():
             group = self._vcoa_group()
@@ -1517,10 +1550,23 @@ class _Parser(LegParser):
         return tuple(groups)
 
     def _continued_vcoa(self, group: VcoaGroup) -> VcoaGroup:
-        legs = self._continuation(group.then)
-        if isinstance(legs[-1], Thence):
-            raise self._error("visual climb into the shared tail")
-        return dataclasses.replace(group, then=legs)
+        return dataclasses.replace(
+            group, then=self._with_written_tail(self._continuation(group.then))
+        )
+
+    def _with_written_tail(self, legs: tuple[Leg, ...]) -> tuple[Leg, ...]:
+        """written-tail := "..." ["thence"] legs
+
+        The VCOA section's visual climb continued through the tail it writes
+        out after its "thence..." ("..., thence...⏎...on RZS R-185 to GOLET
+        INT."). Without one, the legs end in "thence" for the departure
+        procedure's shared tail (`_join_vcoa_section_to_tail`)."""
+        if not (self._vcoa_section and _ends_with_thence(legs) and self._peek("...")):
+            return legs
+        self._expect("...")
+        self._accept("thence")
+        self._last_fix = end_fix(legs[-2]) if len(legs) > 1 else None
+        return (*legs[:-1], *self._legs([self._leg()]))
 
     def _vcoa_group(self, runways: tuple[str, ...] | None = None) -> VcoaGroup:
         """vcoa-group := [vcoa-runways] [atc-approval] [vcoa-runways]
@@ -1604,9 +1650,7 @@ class _Parser(LegParser):
         legs
 
         "at" is sometimes left out ("cross Telluride RGNL airport westbound or
-        above 14300"). Legs that continue into the DEPARTURE PROCEDURE's
-        shared tail ("..., thence ...") are refused: the tail is drawn from
-        the runways.
+        above 14300"). Legs may end in "thence ..." and continue into a tail.
         """
         cross = self._vcoa_crossing()
         bound = self._bound()
@@ -1615,9 +1659,7 @@ class _Parser(LegParser):
         feet = self._integer()
         self._accept("msl")
         self._last_fix = None
-        legs = self._legs([])
-        if legs and isinstance(legs[-1], Thence):
-            raise ParseError("visual climb into the shared tail", "", self._position())
+        legs = self._with_written_tail(self._legs([]))
         return VcoaGroup(runways, cross, feet, legs, bound)
 
     def _vcoa_crossing(self) -> FixRef | None:
@@ -1688,6 +1730,48 @@ class _Parser(LegParser):
             self._expect("vcoa")
             self._accept(",")
             self._expect("notify", "atc", "prior", "to", "departure", ".")
+
+
+def _joined_to_tail(
+    vcoa: VcoaGroup,
+    tail: tuple[Leg, ...] | None,
+    entry: NavaidRef | FixRef | None,
+    tail_error: ParseError | None = None,
+) -> VcoaGroup:
+    """`vcoa`, whose legs end in "thence", flown on through `tail`.
+
+    The runways' routes enter the tail at `entry`, the fix they all reach
+    before it, if they share one, and the tail may be written from there
+    ("climb in holding pattern", with no fix of its own); so a visual climb
+    must enter it there too. Raises `ParseError` without a tail (`tail_error`
+    when it failed) or for a visual climb entering it elsewhere."""
+    if tail is None:
+        raise tail_error or ParseError('"thence" without a shared tail')
+    if entry is not None:
+        reached = end_fix(vcoa.then[-2]) if len(vcoa.then) > 1 else None
+        if reached is None or reached.ident != entry.ident:
+            raise ParseError("visual climb into the shared tail from another fix")
+    return dataclasses.replace(vcoa, then=(*vcoa.then[:-1], *tail))
+
+
+def _join_vcoa_section_to_tail(
+    vcoa: tuple[VcoaGroup, ...], procedure: Procedure
+) -> tuple[tuple[VcoaGroup, ...], list[Unparsed]]:
+    """The VCOA section's visual climbs, each that ends in "thence" flown on
+    through the departure procedure's shared tail, and those that cannot
+    join it (`_joined_to_tail`)."""
+    entering = [g for g in procedure.runway_groups if _ends_with_thence(g.legs)]
+    entry = _common_end_fix(entering)
+    joined, refused = [], []
+    for group in vcoa:
+        if not _ends_with_thence(group.then):
+            joined.append(group)
+            continue
+        try:
+            joined.append(_joined_to_tail(group, procedure.shared_tail, entry))
+        except ParseError as error:
+            refused.append(Unparsed(group.runways, error, vcoa=True))
+    return tuple(joined), refused
 
 
 def _all_flown_end_with_thence(groups: list[RunwayGroup]) -> bool:

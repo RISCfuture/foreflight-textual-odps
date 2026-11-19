@@ -92,6 +92,9 @@ with certainty:
   A visual climb on a line of its own ("...for climb in visual
   conditions: cross ...") is for the runways whose routes end "or..."
   above it, or, when none does, for every runway routed above it.
+  A visual climb that goes on "thence..." flies the shared tail after
+  it, entering where the runways' routes do; the VCOA section may write
+  that tail out itself ("thence...⏎...on RZS R-185 to GOLET INT").
   A published crossing direction joins the label where it still fits in
   ForeFlight's 22 characters (`VCOA (≥8200' SE bound)`), and a speed limit
   on the visual climb is labelled below the circle. The label stands at

@@ -588,7 +588,7 @@ def test_parses_leg_shapes(text, groups, shared_tail):
                 "conditions, cross Craig-Moffat Airport at or above 8500 then proceed "
                 "on CHE R-247 to CHE VOR/DME, thence ... ...climb on course."
             ),
-            "visual climb into the shared tail",
+            '"..." without a preceding "thence"',
         ),
         (
             "For climb in visual conditions: cross Central Airport at or above 3700.",
@@ -2405,27 +2405,69 @@ def test_sentence_repeated_for_each_runway_joins_the_last_one_too():
     assert [type(group.legs[-2]) for group in groups] == [ClimbInHold, ClimbInHold]
 
 
-def test_visual_climb_continuing_with_its_route_into_the_tail_withholds_the_runway():
+MFR_VISUAL_CLIMB_INTO_TAIL = (
+    "Rwy 14, climbing right turn direct OED VORTAC, or for climb in visual "
+    "conditions, cross Rogue Valley Intl/Medford airport at or above 4100 before "
+    "proceeding direct OED VORTAC. When executing VCOA, notify ATC prior to "
+    "departure. Thence...\n"
+    "...all aircraft climb in OED VORTAC holding pattern (hold NW, right turns, "
+    "153° inbound) to cross OED VORTAC at or above MEA or MCA for direction of "
+    "flight."
+)
+
+
+def test_visual_climb_continues_into_the_shared_tail():
+    procedure = parse_departure_procedure(
+        MFR_VISUAL_CLIMB_INTO_TAIL, airport="XXX", amendment=None
+    )
+
+    (vcoa,) = procedure.vcoa
+    oed = NavaidRef("OED", NavaidType.VORTAC)
+    assert vcoa.then == (Direct(oed), *procedure.shared_tail)
+    assert [group.runways for group in procedure.runway_groups] == [("14",)]
+
+
+def test_visual_climb_into_the_shared_tail_in_its_own_words_continues_into_it():
+    (vcoa,) = parse_vcoa(
+        "Rwy 7, obtain ATC approval for VCOA when requesting IFR clearance. Climb in "
+        "visual conditions to cross Santa Barbara Muni airport southbound at or "
+        "above 2700, thence...\n...on RZS R-185 to GOLET INT. Climb in GOLET INT "
+        "holding pattern (SE, right turns, 307° inbound), to cross GOLET INT at or "
+        "above 9000, before proceeding on course."
+    )
+
+    assert [type(leg).__name__ for leg in vcoa.then] == [
+        "Radial",
+        "ClimbInHold",
+        "ProceedOnCourse",
+    ]
+
+
+def test_visual_climb_entering_the_shared_tail_from_another_fix_is_unread():
     """The refused visual climb names runway 14, so its route is withheld too."""
-    text = (
-        "Rwy 14, climbing right turn direct OED VORTAC, or for climb in visual "
-        "conditions, cross Test airport at or above 4100 before proceeding direct "
-        "OED VORTAC. When executing VCOA, notify ATC prior to departure. Thence...\n"
-        "...all aircraft climb in OED VORTAC holding pattern (hold NW, right turns, "
-        "153° inbound) to 9000."
+    text = MFR_VISUAL_CLIMB_INTO_TAIL.replace(
+        "proceeding direct OED VORTAC.", "proceeding direct ABC VORTAC."
     )
 
     procedure, unparsed = read_in_part(text)
 
-    refusal = "visual climb into the shared tail"
-    assert (procedure.runway_groups, procedure.shared_tail, procedure.vcoa) == (
-        (),
-        None,
-        (),
-    )
+    refusal = "visual climb into the shared tail from another fix"
+    assert (procedure.runway_groups, procedure.vcoa) == ((), ())
     assert unparsed == [(("14",), refusal, True), (("14",), refusal, False)]
     with pytest.raises(ParseError):
         parse_procedure(sections_of(text), airport="XXX")
+
+
+def test_visual_climb_into_a_tail_that_does_not_read_is_unread():
+    text = MFR_VISUAL_CLIMB_INTO_TAIL.replace("hold NW", "hold banana")
+
+    procedure, unparsed = read_in_part(text)
+
+    assert (procedure.runway_groups, procedure.vcoa) == ((), ())
+    assert {(runways, vcoa) for runways, _, vcoa in unparsed} == {
+        (("14",), True),
+        (("14",), False),
+    }
 
 
 def test_notify_atc_sentence_reads_without_its_comma():
