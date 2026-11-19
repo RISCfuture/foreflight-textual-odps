@@ -237,7 +237,9 @@ effective NASR cycle is published as the `latest` GitHub release; the
 upcoming cycle, once its data is available, is published as a prerelease
 and promoted to `latest` on its effective date. The workflow keeps the six
 most recent cycle releases and prunes older ones, and syncs findings from
-the current cycle's build into GitHub issues.
+the current cycle's build into GitHub issues. When that build's coverage
+falls more than two points below the previous cycle's release, it also
+opens (or updates) one `odp-coverage` issue; the release still goes out.
 
 GitHub disables a scheduled workflow after 60 days with no repository
 activity — push a commit (or run it manually) if releases stop appearing.
