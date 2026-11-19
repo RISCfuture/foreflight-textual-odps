@@ -29,6 +29,7 @@ from .legs import (
 from .normalize import normalize
 from .procedure import (
     Altitude,
+    AtFix,
     ClimbHeading,
     ClimbingTurn,
     FixRef,
@@ -1502,6 +1503,8 @@ class _Parser(LegParser):
             self._accept_any(",", ":")
         elif not dotted:
             raise self._unmatched()
+        if dotted and not for_all and self._peek("to") and self._peek_navaid(1):
+            self._end_entering_radials(groups)
         continuing = list(map(_continued_to_tail, groups)) if for_all else groups
         entering = [group for group in continuing if _ends_with_thence(group.legs)]
         self._last_fix = self._tail_entry = _common_end_fix(entering)
@@ -1517,6 +1520,42 @@ class _Parser(LegParser):
             self._expect("or")
             self._tail_vcoa = self._inline_visual_climb(_runways_of(entering))
         return legs, for_all
+
+    def _end_entering_radials(self, groups: list[RunwayGroup]) -> None:
+        """radial-end-in-tail := "to" target ("," | ";")
+
+        A tail opening with a radial's terminator ("...intercept CVV VOR/DME
+        R-022 thence...⏎...to CVV VOR/DME, climb in holding pattern ...")
+        ends the radial every route entering it flies, read only when each
+        ends on a radial of that navaid with no terminator of its own.
+        """
+        start = self._index
+        self._expect("to")
+        target = self._target()
+        for index, group in enumerate(groups):
+            if not _ends_with_thence(group.legs):
+                continue
+            last = group.legs[-2] if len(group.legs) > 1 else None
+            turned = last.then if isinstance(last, ClimbingTurn) else last
+            if not (
+                isinstance(turned, Radial | HeadingAndRadial)
+                and turned.until is None
+                and turned.navaid.ident == target.ident
+            ):
+                self._index = start
+                raise self._error("tail opens with a terminator for no radial")
+            until = AtFix(target)
+            ended = dataclasses.replace(
+                turned,
+                until=until,
+                outbound=self._outbound(turned.outbound, turned.navaid, until),
+            )
+            if isinstance(last, ClimbingTurn):
+                ended = dataclasses.replace(last, then=ended)
+            groups[index] = dataclasses.replace(
+                group, legs=(*group.legs[:-2], ended, group.legs[-1])
+            )
+        self._expect_any(",", ";")
 
     def _peek_tail_vcoa(
         self, tail: tuple[Leg, ...], continuing: list[RunwayGroup]

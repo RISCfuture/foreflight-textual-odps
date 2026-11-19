@@ -860,3 +860,37 @@ def test_thence_ending_its_line_still_needs_an_ellipsis():
 
     with pytest.raises(ParseError):
         legs_of(text)
+
+
+BVS = (
+    "Rwy 11, climbing right turn heading 245° to intercept CVV VOR/DME R-022 "
+    "thence…\n"
+    "Rwy 29, climb heading 290° to 1000, then climbing left turn on heading 165° "
+    "to intercept CVV R-015, thence…\n"
+    "...to CVV VOR/DME, climb in holding pattern (hold south, left turns, 346° "
+    "inbound) to cross CVV VOR/DME at or above MEA for route of flight."
+)
+
+
+def test_tail_opening_with_a_terminator_ends_the_radials_entering_it():
+    procedure = parse_departure_procedure(normalize(BVS), airport="XXX", amendment=None)
+
+    cvv = NavaidRef("CVV", NavaidType.VOR_DME)
+    assert procedure.runway_groups[0].legs == (
+        ClimbingTurn(
+            Turn.RIGHT,
+            HeadingAndRadial(245, cvv, 22, outbound=False, until=AtFix(cvv)),
+        ),
+        Thence(),
+    )
+    assert procedure.runway_groups[1].legs[-2] == ClimbingTurn(
+        Turn.LEFT,
+        HeadingAndRadial(165, NavaidRef("CVV"), 15, outbound=False, until=AtFix(cvv)),
+    )
+    assert isinstance(procedure.shared_tail[0], ClimbInHold)
+
+
+def test_tail_opening_with_a_terminator_for_another_navaid_is_refused():
+    text = BVS.replace("...to CVV VOR/DME,", "...to ABC VOR/DME,")
+
+    assert signature_of(text) == "tail opens with a terminator for no radial"
